@@ -11,8 +11,58 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    name: Test (${{ matrix.os }} - Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+        node: [ 24 ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint TypeScript code
+        run: npm run lint
+
+      - name: Typecheck TypeScript code
+        run: npm run typecheck
+
+      - name: Run Vitest tests (Unit & LuaLS Integration)
+        run: npm test
+
+      - name: Build distribution package
+        run: npm run build
+
+      - name: Test CLI directly on passing fixtures
+        run: node bin/nanos-lint.js check tests/pass
+
+      - name: Test CLI directly on failing fixtures
+        shell: bash
+        run: |
+          if node bin/nanos-lint.js check tests/fail/type_mismatch.lua; then
+            echo "Expected tests/fail/type_mismatch.lua to fail, but it succeeded!"
+            exit 1
+          else
+            echo "tests/fail/type_mismatch.lua failed as expected."
+          fi
+
   build-and-release:
     name: Build & Publish Release
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -29,12 +79,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run verification
-        run: |
-          npm run lint
-          npm run typecheck
-          npm test
-          npm run build
+      - name: Build distribution package
+        run: npm run build
 
       - name: Package standalone distributions with LuaLS binaries
         run: |
