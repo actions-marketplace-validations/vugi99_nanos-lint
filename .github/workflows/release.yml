@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run verification
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Package standalone distributions with LuaLS binaries
+        run: |
+          LUALS_VERSION=$(node -e "
+            fetch('https://api.github.com/repos/LuaLS/lua-language-server/releases/latest', {
+              headers: { 'User-Agent': 'nanos-lint', 'Authorization': 'token ${{ secrets.GITHUB_TOKEN }}' }
+            })
+            .then(r => r.json())
+            .then(d => {
+              const tag = (d.tag_name || '3.19.1').replace(/^v/, '');
+              console.log(tag);
+            })
+            .catch(() => console.log('3.19.1'));
+          ")
+          echo "Using latest LuaLS release: ${LUALS_VERSION}"
+          TAG_NAME="${{ github.ref_name }}"
+          mkdir -p release-builds
+
+          # 1. Windows x64 Package
+          mkdir -p pkg-windows/bin pkg-windows/definitions pkg-windows/templates pkg-windows/dist
+          curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-win32-x64.zip" -o luals-win.zip
+          unzip -q luals-win.zip -d pkg-windows-luals
+          cp -r pkg-windows-luals/bin/* pkg-windows/bin/
+          cp -r pkg-windows-luals/locale pkg-windows-luals/meta pkg-windows-luals/script pkg-windows-luals/main.lua pkg-windows/ 2>/dev/null || true
+          cp -r dist/* pkg-windows/dist/
+          cp -r definitions/* pkg-windows/definitions/
+          cp -r templates/* pkg-windows/templates/
+          cp package.json README.md LICENSE pkg-windows/
+          
+          # Create Windows batch launcher
+          cat << 'EOF' > pkg-windows/nanos-lint.cmd
+          @echo off
+          node "%~dp0dist\cli.js" %*
+          EOF
+
+          (cd pkg-windows && zip -rq "../release-builds/nanos-lint-${TAG_NAME}-windows-x64.zip" .)
+
+          # 2. Linux x64 Package
+          mkdir -p pkg-linux/bin pkg-linux/definitions pkg-linux/templates pkg-linux/dist
+          curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-linux-x64.tar.gz" -o luals-linux.tar.gz
+          tar -xzf luals-linux.tar.gz -C pkg-linux-luals 2>/dev/null || (mkdir -p pkg-linux-luals && tar -xzf luals-linux.tar.gz -C pkg-linux-luals)
+          cp -r pkg-linux-luals/bin/* pkg-linux/bin/
+          cp -r pkg-linux-luals/locale pkg-linux-luals/meta pkg-linux-luals/script pkg-linux-luals/main.lua pkg-linux/ 2>/dev/null || true
+          cp -r dist/* pkg-linux/dist/
+          cp -r definitions/* pkg-linux/definitions/
+          cp -r templates/* pkg-linux/templates/
+          cp package.json README.md LICENSE pkg-linux/
+
+          # Create Linux shell launcher
+          cat << 'EOF' > pkg-linux/nanos-lint
+          #!/usr/bin/env bash
+          DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          exec node "$DIR/dist/cli.js" "$@"
+          EOF
+          chmod +x pkg-linux/nanos-lint
+
+          tar -czf "release-builds/nanos-lint-${TAG_NAME}-linux-x64.tar.gz" -C pkg-linux .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            release-builds/nanos-lint-*-windows-x64.zip
+            release-builds/nanos-lint-*-linux-x64.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to npm
+        if: env.NPM_TOKEN != ''
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+

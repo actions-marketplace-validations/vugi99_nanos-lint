@@ -1,0 +1,4 @@
+[submodule "vendor/nanos-world-vscode-extension"]
+	path = vendor/nanos-world-vscode-extension
+	url = https://github.com/nanos-world/vscode-extension
+	branch = docgen-output

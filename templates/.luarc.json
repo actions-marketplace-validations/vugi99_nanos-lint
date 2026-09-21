@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/lua-language-server/master/setting/schema.json",
+  "runtime": {
+    "version": "Lua 5.4",
+    "path": [
+      "?.lua",
+      "?/init.lua"
+    ]
+  },
+  "workspace": {
+    "checkThirdParty": false,
+    "library": []
+  },
+  "diagnostics": {
+    "enable": true,
+    "globals": [
+      "Package",
+      "Server",
+      "Client",
+      "Events",
+      "Assets",
+      "Trace",
+      "Timer",
+      "HTTP",
+      "File",
+      "Database"
+    ],
+    "severity": {
+      "param-type-mismatch": "Warning",
+      "cast-type-mismatch": "Warning",
+      "undefined-field": "Warning",
+      "undefined-global": "Warning",
+      "syntax-error": "Error"
+    }
+  }
+}
+

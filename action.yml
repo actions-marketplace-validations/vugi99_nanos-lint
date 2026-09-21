@@ -1,0 +1,60 @@
+name: 'nanos-world Lua Linter'
+description: 'Fast, accurate linter and type-checker for nanos world Lua scripts powered by LuaLS'
+author: 'nanos-world'
+branding:
+  icon: 'check-circle'
+  color: 'yellow'
+
+inputs:
+  path:
+    description: 'Path to workspace directory or Lua file to check'
+    required: false
+    default: '.'
+  checklevel:
+    description: 'Minimum diagnostic severity level to report (Error, Warning, Information, Hint)'
+    required: false
+    default: 'Warning'
+  config:
+    description: 'Path to a custom .luarc.json configuration file'
+    required: false
+    default: ''
+  luals-version:
+    description: 'Version of LuaLS to use (or "latest")'
+    required: false
+    default: 'latest'
+  fail-on-error:
+    description: 'Whether to fail the action step if diagnostic errors/warnings are found'
+    required: false
+    default: 'true'
+  quiet:
+    description: 'Suppress progress output'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Run nanos-lint
+      shell: bash
+      run: |
+        ARGS=("check" "${{ inputs.path }}" "--checklevel=${{ inputs.checklevel }}" "--luals-version=${{ inputs.luals-version }}" "--format=github")
+
+        if [ -n "${{ inputs.config }}" ]; then
+          ARGS+=("--config=${{ inputs.config }}")
+        fi
+
+        if [ "${{ inputs.fail-on-error }}" = "false" ]; then
+          ARGS+=("--no-fail")
+        fi
+
+        if [ "${{ inputs.quiet }}" = "true" ]; then
+          ARGS+=("--quiet")
+        fi
+
+        node "${{ github.action_path }}/dist/cli.js" "${ARGS[@]}"
+
