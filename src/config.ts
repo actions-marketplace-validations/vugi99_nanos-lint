@@ -31,12 +31,119 @@ export function getDefaultTemplatePath(): string {
   return path.join(root, "templates", ".luarc.json");
 }
 
+/**
+ * Strips single-line comments (//), multi-line comments (/* ... *\/),
+ * and trailing commas before '}' or ']' from JSONC text while preserving string literals.
+ */
+export function stripJsonComments(text: string): string {
+  let result = "";
+  let i = 0;
+  const len = text.length;
+
+  while (i < len) {
+    const ch = text[i];
+
+    // String literal: preserve entirely, including escaped characters
+    if (ch === '"') {
+      result += ch;
+      i++;
+      while (i < len) {
+        const c = text[i];
+        result += c;
+        if (c === "\\") {
+          i++;
+          if (i < len) {
+            result += text[i];
+          }
+        } else if (c === '"') {
+          break;
+        }
+        i++;
+      }
+      i++;
+      continue;
+    }
+
+    // Single-line comment: // ...
+    if (ch === "/" && i + 1 < len && text[i + 1] === "/") {
+      i += 2;
+      while (i < len && text[i] !== "\n" && text[i] !== "\r") {
+        i++;
+      }
+      continue;
+    }
+
+    // Multi-line comment: /* ... */
+    if (ch === "/" && i + 1 < len && text[i + 1] === "*") {
+      i += 2;
+      while (i + 1 < len && !(text[i] === "*" && text[i + 1] === "/")) {
+        if (text[i] === "\n" || text[i] === "\r") {
+          result += text[i];
+        } else {
+          result += " ";
+        }
+        i++;
+      }
+      i += 2; // skip */
+      continue;
+    }
+
+    // Comma: check if it is a trailing comma before '}' or ']'
+    if (ch === ",") {
+      let j = i + 1;
+      let isTrailing = false;
+      while (j < len) {
+        const nextChar = text[j];
+        if (nextChar === " " || nextChar === "\t" || nextChar === "\n" || nextChar === "\r") {
+          j++;
+          continue;
+        }
+        if (nextChar === "/" && j + 1 < len && text[j + 1] === "/") {
+          j += 2;
+          while (j < len && text[j] !== "\n" && text[j] !== "\r") {
+            j++;
+          }
+          continue;
+        }
+        if (nextChar === "/" && j + 1 < len && text[j + 1] === "*") {
+          j += 2;
+          while (j + 1 < len && !(text[j] === "*" && text[j + 1] === "/")) {
+            j++;
+          }
+          j += 2;
+          continue;
+        }
+        if (nextChar === "}" || nextChar === "]") {
+          isTrailing = true;
+        }
+        break;
+      }
+
+      if (isTrailing) {
+        result += " ";
+        i++;
+        continue;
+      }
+    }
+
+    result += ch;
+    i++;
+  }
+
+  return result;
+}
+
+export function parseJsonc<T = unknown>(text: string): T {
+  const stripped = stripJsonComments(text);
+  return JSON.parse(stripped) as T;
+}
+
 export function loadConfigFile(filePath: string): LuaRCConfig {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Configuration file not found: ${filePath}`);
   }
   const content = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(content) as LuaRCConfig;
+  return parseJsonc<LuaRCConfig>(content);
 }
 
 /**

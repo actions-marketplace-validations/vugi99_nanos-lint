@@ -4,6 +4,7 @@ import {
   formatGitHubAnnotations,
   formatSeverityBadge,
   formatReport,
+  shouldEnableColor,
 } from "../../src/reporter.js";
 import { fileUriToPath } from "../../src/types.js";
 import type { CheckResult } from "../../src/types.js";
@@ -90,6 +91,49 @@ describe("reporter module", () => {
     expect(fileUriToPath("file:///C:/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
     expect(fileUriToPath("file:///c%3A/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
     expect(fileUriToPath("file://C:/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
+  });
+
+  it("respects NO_COLOR convention and color toggles", () => {
+    const origNoColor = process.env.NO_COLOR;
+    const origForceColor = process.env.FORCE_COLOR;
+
+    try {
+      process.env.NO_COLOR = "1";
+      delete process.env.FORCE_COLOR;
+      expect(shouldEnableColor()).toBe(false);
+
+      delete process.env.NO_COLOR;
+      process.env.FORCE_COLOR = "1";
+      expect(shouldEnableColor()).toBe(true);
+    } finally {
+      if (origNoColor !== undefined) {
+        process.env.NO_COLOR = origNoColor;
+      } else {
+        delete process.env.NO_COLOR;
+      }
+      if (origForceColor !== undefined) {
+        process.env.FORCE_COLOR = origForceColor;
+      } else {
+        delete process.env.FORCE_COLOR;
+      }
+    }
+
+    // Badge without color
+    expect(formatSeverityBadge(1, false)).toBe("[Error]");
+    expect(formatSeverityBadge(2, false)).toBe("[Warning]");
+    // Badge with color
+    expect(formatSeverityBadge(1, true)).toContain("\x1b[31m[Error]\x1b[0m");
+
+    // formatPretty without color should contain no ANSI escapes
+    const plainPretty = formatPretty(mockFailingResult, mockCwd, false);
+    // eslint-disable-next-line no-control-regex
+    expect(plainPretty).not.toMatch(/\x1b\[[0-9;]*m/);
+    expect(plainPretty).toContain("2 problem(s) found across 1 file(s)");
+
+    // formatPretty with color should contain ANSI escapes
+    const colorPretty = formatPretty(mockFailingResult, mockCwd, true);
+    // eslint-disable-next-line no-control-regex
+    expect(colorPretty).toMatch(/\x1b\[[0-9;]*m/);
   });
 });
 

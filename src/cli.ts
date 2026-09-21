@@ -84,8 +84,12 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
       continue;
     }
 
-    if (arg === "--checklevel" && args[i + 1]) {
-      options.checklevel = args[++i] as DiagnosticSeverity;
+    if (arg === "--checklevel") {
+      if (args[i + 1] && !args[i + 1].startsWith("-")) {
+        options.checklevel = args[++i] as DiagnosticSeverity;
+      } else {
+        console.warn("[nanos-lint] Warning: Option '--checklevel' requires a value");
+      }
       continue;
     }
 
@@ -94,8 +98,12 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
       continue;
     }
 
-    if (arg === "--config" && args[i + 1]) {
-      options.configpath = args[++i];
+    if (arg === "--config") {
+      if (args[i + 1] && !args[i + 1].startsWith("-")) {
+        options.configpath = args[++i];
+      } else {
+        console.warn("[nanos-lint] Warning: Option '--config' requires a value");
+      }
       continue;
     }
 
@@ -104,8 +112,12 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
       continue;
     }
 
-    if (arg === "--format" && args[i + 1]) {
-      options.format = args[++i] as "pretty" | "json" | "github";
+    if (arg === "--format") {
+      if (args[i + 1] && !args[i + 1].startsWith("-")) {
+        options.format = args[++i] as "pretty" | "json" | "github";
+      } else {
+        console.warn("[nanos-lint] Warning: Option '--format' requires a value");
+      }
       continue;
     }
 
@@ -114,8 +126,12 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
       continue;
     }
 
-    if (arg === "--luals-version" && args[i + 1]) {
-      options.lualsVersion = args[++i];
+    if (arg === "--luals-version") {
+      if (args[i + 1] && !args[i + 1].startsWith("-")) {
+        options.lualsVersion = args[++i];
+      } else {
+        console.warn("[nanos-lint] Warning: Option '--luals-version' requires a value");
+      }
       continue;
     }
 
@@ -124,9 +140,12 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
       continue;
     }
 
-    if (!arg.startsWith("-")) {
-      positional.push(arg);
+    if (arg.startsWith("-")) {
+      console.warn(`[nanos-lint] Warning: Unrecognized option '${arg}'`);
+      continue;
     }
+
+    positional.push(arg);
   }
 
   if (positional.length > 0) {

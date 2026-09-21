@@ -6,6 +6,8 @@ import {
   getDefaultTemplatePath,
   loadConfigFile,
   mergeConfigs,
+  parseJsonc,
+  stripJsonComments,
 } from "../../src/config.js";
 import type { LuaRCConfig } from "../../src/types.js";
 
@@ -58,5 +60,51 @@ describe("config module", () => {
     expect(merged.diagnostics?.globals).toContain("MyCustomGlobal");
     expect(merged.diagnostics?.severity?.["undefined-field"]).toBe("Information");
     expect(merged.diagnostics?.disable).toContain("lowercase-global");
+  });
+
+  it("strips JSON comments and trailing commas correctly", () => {
+    const jsonc = `{
+      // Single line comment
+      "string": "https://example.com/api", // comment after value
+      /* Multi-line
+         comment */
+      "nested": {
+        "quotedComment": "/* not a comment */ // still string",
+        "trailing": 42,
+      },
+      "list": [
+        "item1",
+        "item2",
+      ],
+    }`;
+
+    const stripped = stripJsonComments(jsonc);
+    expect(stripped).not.toContain("// Single line comment");
+    expect(stripped).not.toContain("/* Multi-line");
+    expect(stripped).toContain("https://example.com/api");
+
+    const parsed = parseJsonc<{
+      string: string;
+      nested: { quotedComment: string; trailing: number };
+      list: string[];
+    }>(jsonc);
+
+    expect(parsed.string).toBe("https://example.com/api");
+    expect(parsed.nested.quotedComment).toBe("/* not a comment */ // still string");
+    expect(parsed.nested.trailing).toBe(42);
+    expect(parsed.list).toEqual(["item1", "item2"]);
+  });
+
+  it("handles empty comments and escaped strings in JSONC", () => {
+    const jsonc = `{
+      "escaped": "value with \\"quotes\\" and \\\\ backslash",
+      /**/
+      //
+      "valid": true,
+    }`;
+
+    const parsed = parseJsonc<{ escaped: string; valid: boolean }>(jsonc);
+    expect(parsed.escaped).toBe('value with "quotes" and \\ backslash');
+    expect(parsed.valid).toBe(true);
   });
 });

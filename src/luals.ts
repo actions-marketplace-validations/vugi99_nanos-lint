@@ -13,6 +13,13 @@ export const FALLBACK_LUALS_VERSION = "3.19.1";
 export const DEFAULT_LUALS_VERSION = "latest";
 
 /**
+ * Escapes single quotes for safe PowerShell single-quoted string interpolation.
+ */
+export function escapePowerShellSingleQuote(str: string): string {
+  return str.replace(/'/g, "''");
+}
+
+/**
  * Resolves the latest available LuaLS release tag from the GitHub API.
  */
 export async function resolveLatestLuaLSVersion(): Promise<string> {
@@ -23,7 +30,10 @@ export async function resolveLatestLuaLSVersion(): Promise<string> {
     }
     const res = await fetch(
       "https://api.github.com/repos/LuaLS/lua-language-server/releases/latest",
-      { headers }
+      {
+        headers,
+        signal: AbortSignal.timeout(5000),
+      }
     );
     if (res.ok) {
       const data = (await res.json()) as { tag_name?: string };
@@ -149,7 +159,7 @@ export async function downloadAndExtractLuaLS(
       await execFileAsync("powershell.exe", [
         "-NoProfile",
         "-Command",
-        `Expand-Archive -Path '${archivePath}' -DestinationPath '${destDir}' -Force`,
+        `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(destDir)}' -Force`,
       ]);
     } else {
       throw tarErr;
@@ -264,9 +274,14 @@ export async function runLuaLSCheck(
     try {
       const content = fs.readFileSync(checkOutPath, "utf-8");
       diagnostics = JSON.parse(content) as DiagnosticReport;
-      fs.unlinkSync(checkOutPath);
     } catch {
       // Failed to parse json
+    } finally {
+      try {
+        fs.unlinkSync(checkOutPath);
+      } catch {
+        // Ignore unlink error
+      }
     }
   }
 

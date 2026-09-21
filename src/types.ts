@@ -1,4 +1,5 @@
 export type DiagnosticSeverity = "Error" | "Warning" | "Information" | "Hint";
+export type DiagnosticSeverityLevel = 1 | 2 | 3 | 4;
 
 export interface DiagnosticRange {
   start: {
@@ -13,7 +14,7 @@ export interface DiagnosticRange {
 
 export interface Diagnostic {
   range: DiagnosticRange;
-  severity: number; // 1 = Error, 2 = Warning, 3 = Information, 4 = Hint
+  severity: DiagnosticSeverityLevel; // 1 = Error, 2 = Warning, 3 = Information, 4 = Hint
   code?: string;
   message: string;
   source?: string;

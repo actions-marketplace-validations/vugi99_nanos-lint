@@ -10,37 +10,75 @@ const SEVERITY_NAMES: Record<number, DiagnosticSeverity> = {
   4: "Hint",
 };
 
-// ANSI color codes
-const colors = {
-  reset: "\x1b[0m",
-  bold: "\x1b[1m",
-  dim: "\x1b[2m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-  blue: "\x1b[34m",
-  magenta: "\x1b[35m",
-  cyan: "\x1b[36m",
-  gray: "\x1b[90m",
-};
+/**
+ * Determines whether ANSI color codes should be enabled according to the NO_COLOR convention
+ * and TTY detection.
+ */
+export function shouldEnableColor(): boolean {
+  if (process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== "") {
+    return false;
+  }
+  if (process.env.FORCE_COLOR !== undefined && process.env.FORCE_COLOR !== "0") {
+    return true;
+  }
+  return process.stdout ? Boolean(process.stdout.isTTY) : true;
+}
 
-export function formatSeverityBadge(severity: number): string {
+export function getColors(useColor: boolean = shouldEnableColor()) {
+  if (!useColor) {
+    return {
+      reset: "",
+      bold: "",
+      dim: "",
+      red: "",
+      green: "",
+      yellow: "",
+      blue: "",
+      magenta: "",
+      cyan: "",
+      gray: "",
+    };
+  }
+  return {
+    reset: "\x1b[0m",
+    bold: "\x1b[1m",
+    dim: "\x1b[2m",
+    red: "\x1b[31m",
+    green: "\x1b[32m",
+    yellow: "\x1b[33m",
+    blue: "\x1b[34m",
+    magenta: "\x1b[35m",
+    cyan: "\x1b[36m",
+    gray: "\x1b[90m",
+  };
+}
+
+export function formatSeverityBadge(
+  severity: number,
+  useColor: boolean = shouldEnableColor()
+): string {
+  const c = getColors(useColor);
   const name = SEVERITY_NAMES[severity] || "Warning";
   switch (severity) {
     case 1:
-      return `${colors.red}[${name}]${colors.reset}`;
+      return `${c.red}[${name}]${c.reset}`;
     case 2:
-      return `${colors.yellow}[${name}]${colors.reset}`;
+      return `${c.yellow}[${name}]${c.reset}`;
     case 3:
-      return `${colors.cyan}[${name}]${colors.reset}`;
+      return `${c.cyan}[${name}]${c.reset}`;
     default:
-      return `${colors.gray}[${name}]${colors.reset}`;
+      return `${c.gray}[${name}]${c.reset}`;
   }
 }
 
-export function formatPretty(result: CheckResult, cwd: string = process.cwd()): string {
+export function formatPretty(
+  result: CheckResult,
+  cwd: string = process.cwd(),
+  useColor: boolean = shouldEnableColor()
+): string {
+  const c = getColors(useColor);
   if (result.passed) {
-    return `${colors.green}${colors.bold}✔ Diagnosis completed, no problems found.${colors.reset}`;
+    return `${c.green}${c.bold}✔ Diagnosis completed, no problems found.${c.reset}`;
   }
 
   const lines: string[] = [];
@@ -67,11 +105,11 @@ export function formatPretty(result: CheckResult, cwd: string = process.cwd()): 
     for (const d of diags) {
       const line = d.range.start.line + 1;
       const col = d.range.start.character + 1;
-      const badge = formatSeverityBadge(d.severity);
-      const code = d.code ? `${colors.magenta}(${d.code})${colors.reset}` : "";
+      const badge = formatSeverityBadge(d.severity, useColor);
+      const code = d.code ? `${c.magenta}(${d.code})${c.reset}` : "";
 
       lines.push(
-        `${colors.blue}${relPath}:${line}:${col}${colors.reset} ${badge} ${d.message} ${code}`
+        `${c.blue}${relPath}:${line}:${col}${c.reset} ${badge} ${d.message} ${code}`
       );
 
       // Line snippet preview
@@ -87,14 +125,14 @@ export function formatPretty(result: CheckResult, cwd: string = process.cwd()): 
             : 1;
 
         const pointer = " ".repeat(caretOffset) + "^".repeat(caretLength);
-        lines.push(`${indent}${colors.gray}${pointer}${colors.reset}`);
+        lines.push(`${indent}${c.gray}${pointer}${c.reset}`);
       }
     }
   }
 
   lines.push("");
   lines.push(
-    `${colors.red}${colors.bold}✖ Diagnosis complete: ${result.totalProblems} problem(s) found across ${result.totalFiles} file(s).${colors.reset}`
+    `${c.red}${c.bold}✖ Diagnosis complete: ${result.totalProblems} problem(s) found across ${result.totalFiles} file(s).${c.reset}`
   );
 
   return lines.join("\n");
@@ -137,18 +175,19 @@ export function formatGitHubAnnotations(result: CheckResult, cwd: string = proce
 export function formatReport(
   result: CheckResult,
   format: "pretty" | "json" | "github" = "pretty",
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
+  useColor: boolean = shouldEnableColor()
 ): string {
   switch (format) {
     case "json":
       return JSON.stringify(result, null, 2);
     case "github": {
-      const pretty = formatPretty(result, cwd);
+      const pretty = formatPretty(result, cwd, useColor);
       const annotations = formatGitHubAnnotations(result, cwd);
       return annotations ? `${annotations}\n\n${pretty}` : pretty;
     }
     case "pretty":
     default:
-      return formatPretty(result, cwd);
+      return formatPretty(result, cwd, useColor);
   }
 }
