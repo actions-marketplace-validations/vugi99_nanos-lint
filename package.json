@@ -15,12 +15,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nanos-world/nanos-lint.git"
+    "url": "https://github.com/vugi99/nanos-lint.git"
   },
   "bugs": {
-    "url": "https://github.com/nanos-world/nanos-lint/issues"
+    "url": "https://github.com/vugi99/nanos-lint/issues"
   },
-  "homepage": "https://github.com/nanos-world/nanos-lint#readme",
+  "homepage": "https://github.com/vugi99/nanos-lint#readme",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

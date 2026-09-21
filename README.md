@@ -1,6 +1,6 @@
 # nanos-lint
 
-[![CI](https://github.com/nanos-world/nanos-lint/actions/workflows/ci.yml/badge.svg)](https://github.com/nanos-world/nanos-lint/actions/workflows/ci.yml)
+[![CI](https://github.com/vugi99/nanos-lint/actions/workflows/ci.yml/badge.svg)](https://github.com/vugi99/nanos-lint/actions/workflows/ci.yml)
 [![Lua Version](https://img.shields.io/badge/Lua-5.4.9-blue.svg)](https://www.lua.org/manual/5.4/)
 [![LuaLS Version](https://img.shields.io/badge/LuaLS-3.19.1-brightgreen.svg)](https://github.com/LuaLS/lua-language-server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -12,9 +12,9 @@ A dedicated, fast linter and type-checker for **[nanos world](https://nanos.worl
 ## Features
 
 - **Accurate nanos world Type Checking**: Bundles verified, sanitized API annotations for nanos world (Lua 5.4.9).
-- **Issue #20 Fixed**: Includes patches for multiline parameter default tables in `VehicleWheeled:SetEngineSetup`, `SetSteeringSetup`, and `SetTransmissionSetup` so function types are completely validated.
+- **[Issue #20 Fixed](https://github.com/nanos-world/vscode-extension/issues/20)**: Includes patches for multiline parameter default tables in `VehicleWheeled:SetEngineSetup`, `SetSteeringSetup`, and `SetTransmissionSetup` so function types are completely validated.
 - **Zero-Install Local CLI**: Run directly via `npx nanos-lint [path]` without installing anything.
-- **Native GitHub Action**: Use `nanos-world/nanos-lint` directly in CI workflows with inline GitHub PR annotations.
+- **Native GitHub Action**: Use `vugi99/nanos-lint` directly in CI workflows with inline GitHub PR annotations.
 - **Workspace Config Merging**: Fully respects local `.luarc.json` files, merging your project globals and disabled diagnostics on top of the nanos API.
 - **Cross-Platform**: Works on **Windows x64** and **Linux amd64** (plus macOS). Automatically downloads and caches platform LuaLS binaries.
 
@@ -72,10 +72,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Lint nanos world Lua scripts
-        uses: nanos-world/nanos-lint@v1
+        uses: vugi99/nanos-lint@v1
         with:
           path: '.'
           checklevel: 'Warning'
@@ -141,7 +141,7 @@ If your project already has a `.luarc.json`, `nanos-lint` automatically merges i
 
 ## Standalone Binary Distributions (Offline / CD)
 
-For environments without Node.js, pre-packaged release bundles containing the compiled `lua-language-server` binary and nanos-lint wrapper are available on the [Releases](https://github.com/nanos-world/nanos-lint/releases) page:
+For environments without Node.js, pre-packaged release bundles containing the compiled `lua-language-server` binary and nanos-lint wrapper are available on the [Releases](https://github.com/vugi99/nanos-lint/releases) page:
 
 - `nanos-lint-<version>-windows-x64.zip`
 - `nanos-lint-<version>-linux-x64.tar.gz`
@@ -154,7 +154,7 @@ Simply extract the archive and run `./nanos-lint` (Linux) or `nanos-lint.cmd` (W
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/nanos-world/nanos-lint.git
+git clone --recursive https://github.com/vugi99/nanos-lint.git
 cd nanos-lint
 
 # Install dependencies
