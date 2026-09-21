@@ -72,6 +72,26 @@ describe("LuaLS live integration tests", () => {
     }
   });
 
+  it("detects undefined global in undefined_global.lua", async () => {
+    const file = path.join(failDir, "undefined_global.lua");
+    const resolved = resolveWorkspaceConfig(file);
+    try {
+      const result = await runLuaLSCheck(file, resolved.configPath, {
+        path: file,
+        checklevel: "Warning",
+      });
+      expect(result.passed).toBe(false);
+
+      const allDiags = Object.values(result.diagnostics).flat();
+      const hasUndefinedGlobal = allDiags.some((d) => d.code === "undefined-global");
+      expect(hasUndefinedGlobal).toBe(true);
+    } finally {
+      if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+        fs.unlinkSync(resolved.configPath);
+      }
+    }
+  });
+
   it("detects syntax errors in syntax_error.lua", async () => {
     const file = path.join(failDir, "syntax_error.lua");
     const resolved = resolveWorkspaceConfig(file);
