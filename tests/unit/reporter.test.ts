@@ -5,6 +5,7 @@ import {
   formatSeverityBadge,
   formatReport,
 } from "../../src/reporter.js";
+import { fileUriToPath } from "../../src/types.js";
 import type { CheckResult } from "../../src/types.js";
 
 describe("reporter module", () => {
@@ -81,4 +82,14 @@ describe("reporter module", () => {
     expect(formatSeverityBadge(2)).toContain("[Warning]");
     expect(formatSeverityBadge(3)).toContain("[Information]");
   });
+
+  it("converts both Unix and Windows file URIs correctly", () => {
+    expect(fileUriToPath("file:///home/runner/work/nanos-lint/test.lua")).toBe(
+      "/home/runner/work/nanos-lint/test.lua"
+    );
+    expect(fileUriToPath("file:///C:/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
+    expect(fileUriToPath("file:///c%3A/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
+    expect(fileUriToPath("file://C:/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
+  });
 });
+

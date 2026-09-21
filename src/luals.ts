@@ -4,6 +4,7 @@ import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getPackageRoot } from "./config.js";
+import { fileUriToPath } from "./types.js";
 import type { CheckOptions, CheckResult, DiagnosticReport } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -274,12 +275,7 @@ export async function runLuaLSCheck(
     const filtered: DiagnosticReport = {};
     const normTarget = path.resolve(targetFileOnly).toLowerCase();
     for (const [rawUri, diags] of Object.entries(diagnostics)) {
-      let filePath = rawUri.startsWith("file://")
-        ? decodeURIComponent(rawUri.replace(/^file:\/\/\/?/, ""))
-        : rawUri;
-      if (/^[a-zA-Z]:\//.test(filePath)) {
-        filePath = filePath.charAt(0).toUpperCase() + filePath.slice(1);
-      }
+      const filePath = fileUriToPath(rawUri);
       if (path.resolve(filePath).toLowerCase() === normTarget) {
         filtered[rawUri] = diags;
       }

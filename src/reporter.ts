@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileUriToPath } from "./types.js";
 import type { CheckResult, DiagnosticSeverity } from "./types.js";
 
 const SEVERITY_NAMES: Record<number, DiagnosticSeverity> = {
@@ -48,17 +49,7 @@ export function formatPretty(result: CheckResult, cwd: string = process.cwd()): 
     if (!diags || diags.length === 0) continue;
 
     // Convert file:// or absolute path to relative if within cwd
-    let filePath = rawUri.startsWith("file://")
-      ? decodeURIComponent(rawUri.replace(/^file:\/\/\/?/, ""))
-      : rawUri;
-
-    // On Windows, fix /C:/ to C:/
-    filePath = filePath.replace(/^\/([a-zA-Z]:)/, "$1");
-
-    // On Windows, fix drive letter lowercase c:/ to C:/
-    if (/^[a-zA-Z]:\//.test(filePath)) {
-      filePath = filePath.charAt(0).toUpperCase() + filePath.slice(1);
-    }
+    const filePath = fileUriToPath(rawUri);
 
     const relPath = path.isAbsolute(filePath)
       ? path.relative(cwd, filePath) || filePath
@@ -115,15 +106,7 @@ export function formatGitHubAnnotations(result: CheckResult, cwd: string = proce
   for (const [rawUri, diags] of Object.entries(result.diagnostics)) {
     if (!diags || diags.length === 0) continue;
 
-    let filePath = rawUri.startsWith("file://")
-      ? decodeURIComponent(rawUri.replace(/^file:\/\/\/?/, ""))
-      : rawUri;
-
-    filePath = filePath.replace(/^\/([a-zA-Z]:)/, "$1");
-
-    if (/^[a-zA-Z]:\//.test(filePath)) {
-      filePath = filePath.charAt(0).toUpperCase() + filePath.slice(1);
-    }
+    const filePath = fileUriToPath(rawUri);
 
     const relPath = path.isAbsolute(filePath)
       ? path.relative(cwd, filePath).replace(/\\/g, "/")
