@@ -1,63 +1,71 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
-      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_run:
+    workflows: ["CI"]
+    branches: [master, main]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name to release (e.g. v1.1.0)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
   packages: write
-  actions: read
 
 jobs:
   build-and-release:
     name: Build & Publish Release
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
           submodules: recursive
 
-      - name: Wait for CI workflow to complete
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Detect Release Tag
+        id: tag
         run: |
-          echo "Waiting for CI workflow run to start for commit ${{ github.sha }}..."
-          RUN_IDS=""
-          for i in {1..30}; do
-            RUN_IDS=$(gh run list --workflow=ci.yml --commit="${{ github.sha }}" --json databaseId -q ".[].databaseId")
-            if [ -n "$RUN_IDS" ]; then
-              break
-            fi
-            sleep 2
-          done
-
-          if [ -z "$RUN_IDS" ]; then
-            echo "Error: CI workflow did not start for commit ${{ github.sha }} within 60 seconds."
-            exit 1
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG=$(git tag --points-at HEAD | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)
           fi
 
-          for id in $RUN_IDS; do
-            echo "Watching CI workflow run $id..."
-            gh run watch "$id" --exit-status
-          done
+          if [ -z "$TAG" ]; then
+            echo "No release tag found on commit. Skipping release build."
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Found release tag: $TAG"
+          echo "tag_name=$TAG" >> "$GITHUB_OUTPUT"
+          echo "is_release=true" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
+        if: steps.tag.outputs.is_release == 'true'
         uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
+        if: steps.tag.outputs.is_release == 'true'
         run: npm ci
 
       - name: Build distribution package
+        if: steps.tag.outputs.is_release == 'true'
         run: npm run build
 
       - name: Package standalone distributions with LuaLS binaries
+        if: steps.tag.outputs.is_release == 'true'
         run: |
           LUALS_VERSION=$(node -e "
             fetch('https://api.github.com/repos/LuaLS/lua-language-server/releases/latest', {
@@ -71,7 +79,7 @@ jobs:
             .catch(() => console.log('3.19.1'));
           ")
           echo "Using latest LuaLS release: ${LUALS_VERSION}"
-          TAG_NAME="${{ github.ref_name }}"
+          TAG_NAME="${{ steps.tag.outputs.tag_name }}"
           mkdir -p release-builds
 
           # 1. Windows x64 Package
@@ -115,8 +123,11 @@ jobs:
           tar -czf "release-builds/nanos-lint-${TAG_NAME}-linux-x64.tar.gz" -C pkg-linux .
 
       - name: Create GitHub Release
+        if: steps.tag.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ steps.tag.outputs.tag_name }}
+          target_commitish: ${{ github.event.workflow_run.head_sha || github.sha }}
           files: |
             release-builds/nanos-lint-*-windows-x64.zip
             release-builds/nanos-lint-*-linux-x64.tar.gz
@@ -127,7 +138,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to npm
-        if: env.NPM_TOKEN != ''
+        if: steps.tag.outputs.is_release == 'true' && env.NPM_TOKEN != ''
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
