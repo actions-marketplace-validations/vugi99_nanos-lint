@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-09-23
+
+### Security
+- Dropped security support for versions `< 2.6.0` in `SECURITY.md`.
+
 ### Added
 - `npm run test:coverage` script using `@vitest/coverage-v8` to enforce strict test coverage thresholds across the codebase without autoUpdate.
 - Vitest global coverage thresholds: statements (85%), functions (88%), lines (85%), branches (75%).
