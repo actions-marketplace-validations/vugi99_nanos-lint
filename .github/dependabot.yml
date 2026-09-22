@@ -5,7 +5,18 @@
 
 version: 2
 updates:
-  - package-ecosystem: "npm" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "npm"
+    directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # typescript-eslint v8 requires peer dependency typescript < 6.1.0
+      # Ignore typescript >= 6.1.0 until typescript-eslint adds support
+      - dependency-name: "typescript"
+        versions: [">= 6.1.0"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
