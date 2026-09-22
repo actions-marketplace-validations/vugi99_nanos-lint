@@ -4,8 +4,8 @@
 #
 # 1. Lint the codebase (must have 0 errors and 0 warnings)
 # 2. Type-check TypeScript (must produce 0 type errors)
-# 3. Run all Vitest unit and live LuaLS integration tests (must be 100% passing)
-# 4. Build distribution bundle
+# 3. Build distribution bundle
+# 4. Run all Vitest unit and live LuaLS integration tests (must be 100% passing)
 
 set -e
 
@@ -25,11 +25,11 @@ $NPM_CMD run lint
 echo "[pre-commit] 2/4: Typechecking TypeScript ($NPM_CMD run typecheck)..."
 $NPM_CMD run typecheck
 
-echo "[pre-commit] 3/4: Running Vitest test suite ($NPM_CMD test)..."
-$NPM_CMD test
-
-echo "[pre-commit] 4/4: Building distribution bundle ($NPM_CMD run build)..."
+echo "[pre-commit] 3/4: Building distribution bundle ($NPM_CMD run build)..."
 $NPM_CMD run build
+
+echo "[pre-commit] 4/4: Running Vitest test suite ($NPM_CMD test)..."
+$NPM_CMD test
 
 echo "[pre-commit] All project quality gates passed successfully!"
 

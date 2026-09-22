@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GITHUB_TOKEN` environment variable support for GitHub API authentication during LuaLS and annotations resolution to avoid rate limiting.
 - Automatic probing and transparent migration of legacy LuaLS cache directories (`%LOCALAPPDATA%\nanos-lint\luals` on Windows, `~/.cache/nanos-lint/luals` on macOS/Linux) from versions <= 2.2.1 to prevent unnecessary re-downloads.
 - `annotations` input to GitHub Action (`action.yml`).
-- Git pre-commit hook in `.githooks/pre-commit` to automatically run quality gates (`npm run lint`, `npm run typecheck`, `npm test`, `npm run build`) before each commit.
+- Git pre-commit hook in `.githooks/pre-commit` to automatically run quality gates (`npm run lint`, `npm run typecheck`, `npm run build`, `npm test`) before each commit.
 - Atomic cache update transaction for annotations with automated rollback on failure.
 - npm version badge in `README.md`.
 

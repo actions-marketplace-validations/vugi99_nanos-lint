@@ -198,11 +198,11 @@ npm run lint
 # Run type check
 npm run typecheck
 
-# Run Vitest test suite (unit + live LuaLS integration tests)
-npm test
-
 # Build distribution bundle
 npm run build
+
+# Run Vitest test suite (unit + live LuaLS integration tests)
+npm test
 ```
 
 See [AGENTS.md](AGENTS.md) for development philosophy and quality gate requirements.

@@ -71,11 +71,11 @@ npm run lint
 # 2. Type-check TypeScript (must produce 0 type errors)
 npm run typecheck
 
-# 3. Run all Vitest unit and live LuaLS integration tests (must be 100% passing)
-npm test
-
-# 4. Build distribution bundle
+# 3. Build distribution bundle
 npm run build
+
+# 4. Run all Vitest unit and live LuaLS integration tests (must be 100% passing)
+npm test
 ```
 
 These quality gates are automated in `.githooks/pre-commit` (configured via `git config core.hooksPath .githooks`), running on every `git commit`.
