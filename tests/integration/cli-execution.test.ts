@@ -210,5 +210,53 @@ describe("CLI entrypoint execution regression tests", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("executes dist/cli.js clean-cache and clean subcommands in an isolated environment", async () => {
+    const tempEnvDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cli-clean-test-"));
+    try {
+      const isWindows = process.platform === "win32";
+      const isMac = process.platform === "darwin";
+
+      let expectedCacheDir: string;
+      if (isWindows) {
+        expectedCacheDir = path.join(tempEnvDir, "nanos-lint", "Cache");
+      } else if (isMac) {
+        expectedCacheDir = path.join(tempEnvDir, "Library", "Caches", "nanos-lint");
+      } else {
+        expectedCacheDir = path.join(tempEnvDir, "cache", "nanos-lint");
+      }
+
+      // Pre-populate the cache directory
+      fs.mkdirSync(expectedCacheDir, { recursive: true });
+      fs.writeFileSync(path.join(expectedCacheDir, "test-binary"), "dummy content");
+      expect(fs.existsSync(expectedCacheDir)).toBe(true);
+
+      const isolatedEnv = {
+        ...process.env,
+        LOCALAPPDATA: tempEnvDir,
+        XDG_CACHE_HOME: path.join(tempEnvDir, "cache"),
+        HOME: tempEnvDir,
+      };
+
+      // 1. Run clean-cache
+      const { stdout: stdoutClean } = await execFileAsync(
+        process.execPath,
+        [distCli, "clean-cache"],
+        { env: isolatedEnv }
+      );
+      expect(stdoutClean).toContain("[cache] Cleared cache at:");
+      expect(fs.existsSync(expectedCacheDir)).toBe(false);
+
+      // 2. Run alias clean on already empty cache
+      const { stdout: stdoutEmpty } = await execFileAsync(
+        process.execPath,
+        [distCli, "clean"],
+        { env: isolatedEnv }
+      );
+      expect(stdoutEmpty).toContain("[cache] Cache is already empty");
+    } finally {
+      fs.rmSync(tempEnvDir, { recursive: true, force: true });
+    }
+  });
 });
 

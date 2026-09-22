@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
 import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
+import { cleanCache, systemPaths } from "./paths.js";
 import { formatReport } from "./reporter.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
 
@@ -147,6 +148,27 @@ export function createProgram(options?: CreateProgramOptions): Command {
     });
 
   program
+    .command("clean-cache")
+    .alias("clean")
+    .description("Clear the nanos-lint cache")
+    .action(() => {
+      try {
+        const cleared = cleanCache();
+        if (cleared) {
+          console.log(`[cache] Cleared cache at: ${cleared}`);
+        } else {
+          console.log(`[cache] Cache is already empty (${systemPaths.cache})`);
+        }
+        setExitCode(0);
+      } catch (err) {
+        console.error(
+          `[cache] Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`
+        );
+        setExitCode(1);
+      }
+    });
+
+  program
     .command("version")
     .description("Show version information")
     .action(() => {
@@ -165,6 +187,7 @@ Examples:
   $ npx nanos-lint check . --checklevel=Error
   $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"
   $ npx nanos-lint init
+  $ npx nanos-lint clean-cache
 `
   );
 

@@ -41,6 +41,18 @@ describe("cli module flag and command parsing", () => {
     spy.mockRestore();
   });
 
+  it("handles clean-cache and clean subcommands", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const codeCleanCache = await runCLI(["clean-cache"]);
+    expect(codeCleanCache).toBe(0);
+    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/\[cache\]/));
+
+    const codeClean = await runCLI(["clean"]);
+    expect(codeClean).toBe(0);
+    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/\[cache\]/));
+    spy.mockRestore();
+  });
+
   it("errors on unrecognized flags and returns 1", async () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
