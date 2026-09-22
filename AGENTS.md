@@ -10,7 +10,7 @@ This document outlines the architectural principles, codebase structure, develop
 
 - **Runtime**: Node.js (>=20)
 - **Language**: TypeScript 6 (ES2022 / NodeNext modules)
-- **Bundler**: `tsup` (compiles `src/` to a single standalone `dist/` with zero runtime dependencies)
+- **Bundler**: `tsdown` 0.23 (powered by Rolldown, compiles `src/` to a standalone `dist/` targeting Node.js 24 with zero runtime dependencies)
 - **Testing**: `vitest` 5 (unit tests and live LuaLS integration tests)
 - **Linting & Code Quality**: `eslint` 10 (flat config `eslint.config.mjs` with `typescript-eslint`)
 - **API Definitions**: Upstream submodule tracking `https://github.com/nanos-world/vscode-extension` (`docgen-output` branch), patched into `definitions/annotations.lua`
