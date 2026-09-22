@@ -268,6 +268,11 @@ describe("Regression tests for audit review issues", () => {
       const malformed = "file:///path/%E0%A4%A/script.lua";
       expect(() => fileUriToPath(malformed)).not.toThrow();
     });
+
+    it("strips leading slash from Windows drive letter URIs across all platforms", () => {
+      expect(fileUriToPath("file:///C:/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
+      expect(fileUriToPath("file:///d:/workspace/test.lua")).toBe("D:/workspace/test.lua");
+    });
   });
 
   describe("Issue 18: GitHub annotations escape commas in file paths", () => {

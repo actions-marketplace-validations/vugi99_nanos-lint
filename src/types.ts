@@ -86,6 +86,9 @@ export function fileUriToPath(uri: string): string {
   try {
     const parsed = nodeFileURLToPath(uri);
     let res = parsed.replace(/\\/g, "/");
+    if (/^\/[a-zA-Z]:/.test(res)) {
+      res = res.slice(1);
+    }
     if (/^[a-zA-Z]:/.test(res)) {
       res = res.charAt(0).toUpperCase() + res.slice(1);
     }
