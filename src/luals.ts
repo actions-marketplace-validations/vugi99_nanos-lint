@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { getPackageRoot } from "./config.js";
 import { fileUriToPath } from "./types.js";
@@ -126,6 +126,29 @@ export interface DownloadOptions {
   quiet?: boolean;
 }
 
+/**
+ * Verifies that a LuaLS binary exists, has non-trivial size, and is executable.
+ */
+export function isBinaryValid(binaryPath: string): boolean {
+  if (!fs.existsSync(binaryPath)) {
+    return false;
+  }
+  try {
+    const stats = fs.statSync(binaryPath);
+    if (!stats.isFile() || stats.size < 100_000) {
+      return false;
+    }
+    const output = execFileSync(binaryPath, ["--version"], {
+      timeout: 5000,
+      stdio: "pipe",
+      encoding: "utf-8",
+    });
+    return /^\d+\.\d+\.\d+/.test(output.trim());
+  } catch {
+    return false;
+  }
+}
+
 export async function downloadAndExtractLuaLS(
   version: string = DEFAULT_LUALS_VERSION,
   targetDir?: string,
@@ -135,15 +158,38 @@ export async function downloadAndExtractLuaLS(
   const info = getPlatformInfo(resolvedVersion);
   const destDir = targetDir || getCacheDir(resolvedVersion);
   const binaryPath = path.join(destDir, info.binaryRelativePath);
+  const completeMarker = path.join(destDir, ".complete");
 
-  if (fs.existsSync(binaryPath)) {
-    return binaryPath;
+  if (fs.existsSync(destDir)) {
+    if (fs.existsSync(binaryPath) && isBinaryValid(binaryPath)) {
+      if (!fs.existsSync(completeMarker)) {
+        try {
+          fs.writeFileSync(completeMarker, resolvedVersion, "utf-8");
+        } catch {
+          // Ignore marker write error
+        }
+      }
+      return binaryPath;
+    }
+    // destDir exists but is invalid/corrupted: clean it up before downloading
+    try {
+      fs.rmSync(destDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error
+    }
   }
 
-  fs.mkdirSync(destDir, { recursive: true });
+  const parentDir = path.dirname(destDir);
+  fs.mkdirSync(parentDir, { recursive: true });
+
+  const tempDir = path.join(
+    parentDir,
+    `.${path.basename(destDir)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  );
+  fs.mkdirSync(tempDir, { recursive: true });
 
   const url = `https://github.com/LuaLS/lua-language-server/releases/download/${resolvedVersion}/${info.assetName}`;
-  const archivePath = path.join(destDir, info.assetName);
+  const archivePath = path.join(tempDir, info.assetName);
 
   if (!options?.quiet) {
     console.log(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
@@ -158,6 +204,7 @@ export async function downloadAndExtractLuaLS(
         response = res;
         break;
       }
+      await res.body?.cancel();
       lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
     } catch (err) {
       lastErr = err;
@@ -168,55 +215,107 @@ export async function downloadAndExtractLuaLS(
   }
 
   if (!response || !response.body) {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error
+    }
     throw lastErr || new Error(`Failed to download ${url}`);
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
-
-  if (!options?.quiet) {
-    console.log(`[luals] Extracting to ${destDir}...`);
-  }
   try {
-    // Both Windows 10+ and UNIX systems have tar built in
-    await execFileAsync("tar", ["-xf", archivePath, "-C", destDir]);
-  } catch (tarErr) {
-    // Fallback for PowerShell Expand-Archive on Windows if tar fails
-    if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
-      await execFileAsync("powershell.exe", [
-        "-NoProfile",
-        "-Command",
-        `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(destDir)}' -Force`,
-      ]);
-    } else {
-      throw tarErr;
+    const arrayBuffer = await response.arrayBuffer();
+    fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
+
+    if (!options?.quiet) {
+      console.log(`[luals] Extracting to ${destDir}...`);
     }
-  }
 
-  // Cleanup archive file
-  try {
-    fs.unlinkSync(archivePath);
-  } catch {
-    // Ignore cleanup error
-  }
-
-  // Make executable on unix
-  if (process.platform !== "win32") {
     try {
-      fs.chmodSync(binaryPath, 0o755);
+      // Both Windows 10+ and UNIX systems have tar built in
+      await execFileAsync("tar", ["-xf", archivePath, "-C", tempDir]);
+    } catch (tarErr) {
+      // Fallback for PowerShell Expand-Archive on Windows if tar fails
+      if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
+        await execFileAsync("powershell.exe", [
+          "-NoProfile",
+          "-Command",
+          `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(tempDir)}' -Force`,
+        ]);
+      } else {
+        throw tarErr;
+      }
+    }
+
+    // Cleanup archive file
+    try {
+      fs.unlinkSync(archivePath);
     } catch {
-      // Ignore
+      // Ignore cleanup error
+    }
+
+    const tempBinaryPath = path.join(tempDir, info.binaryRelativePath);
+
+    // Make executable on unix
+    if (process.platform !== "win32") {
+      try {
+        fs.chmodSync(tempBinaryPath, 0o755);
+      } catch {
+        // Ignore chmod error
+      }
+    }
+
+    // Verify file exists and has non-trivial size before promotion
+    if (!fs.existsSync(tempBinaryPath) || fs.statSync(tempBinaryPath).size < 100_000) {
+      throw new Error(`Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`);
+    }
+
+    // Write .complete marker in tempDir before promotion
+    fs.writeFileSync(path.join(tempDir, ".complete"), resolvedVersion, "utf-8");
+
+    // Atomic promotion with retry and race resolution
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        fs.renameSync(tempDir, destDir);
+        break;
+      } catch (renameErr) {
+        if (fs.existsSync(binaryPath) && isBinaryValid(binaryPath)) {
+          // A concurrent worker already promoted destDir successfully
+          try {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+          } catch {
+            // Ignore cleanup error
+          }
+          if (!options?.quiet) {
+            console.log(`[luals] Ready: ${binaryPath}`);
+          }
+          return binaryPath;
+        }
+        if (attempt < 4) {
+          await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+        } else {
+          throw renameErr;
+        }
+      }
+    }
+
+    if (!isBinaryValid(binaryPath)) {
+      throw new Error(`Extracted LuaLS binary at ${binaryPath} is invalid or non-functional.`);
+    }
+
+    if (!options?.quiet) {
+      console.log(`[luals] Ready: ${binaryPath}`);
+    }
+    return binaryPath;
+  } finally {
+    if (fs.existsSync(tempDir)) {
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup error
+      }
     }
   }
-
-  if (!fs.existsSync(binaryPath)) {
-    throw new Error(`Failed to extract LuaLS binary to expected path: ${binaryPath}`);
-  }
-
-  if (!options?.quiet) {
-    console.log(`[luals] Ready: ${binaryPath}`);
-  }
-  return binaryPath;
 }
 
 export interface ResolveLuaLSOptions {
@@ -237,14 +336,35 @@ export async function resolveLuaLSBinary(
 
   // 2. Bundled with package (release distribution)
   const bundledPath = path.join(getPackageRoot(), info.binaryRelativePath);
-  if (fs.existsSync(bundledPath)) {
+  if (fs.existsSync(bundledPath) && isBinaryValid(bundledPath)) {
     return bundledPath;
   }
 
   // 3. User cache
-  const cachedPath = path.join(getCacheDir(resolvedVersion), info.binaryRelativePath);
+  const cachedDir = getCacheDir(resolvedVersion);
+  const cachedPath = path.join(cachedDir, info.binaryRelativePath);
+  const completeMarker = path.join(cachedDir, ".complete");
+
   if (fs.existsSync(cachedPath)) {
-    return cachedPath;
+    if (isBinaryValid(cachedPath)) {
+      if (!fs.existsSync(completeMarker)) {
+        try {
+          fs.writeFileSync(completeMarker, resolvedVersion, "utf-8");
+        } catch {
+          // Ignore marker write error
+        }
+      }
+      return cachedPath;
+    }
+    // Cached binary is corrupted/incomplete - clean up and re-download
+    if (!options?.quiet) {
+      console.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
+    }
+    try {
+      fs.rmSync(cachedDir, { recursive: true, force: true });
+    } catch {
+      // Ignore cleanup error
+    }
   }
 
   // 4. In PATH
@@ -252,7 +372,7 @@ export async function resolveLuaLSBinary(
     const cmd = process.platform === "win32" ? "where.exe" : "which";
     const { stdout } = await execFileAsync(cmd, ["lua-language-server"]);
     const found = stdout.trim().split(/\r?\n/)[0];
-    if (found && fs.existsSync(found)) {
+    if (found && fs.existsSync(found) && isBinaryValid(found)) {
       return found;
     }
   } catch {
@@ -333,13 +453,14 @@ export async function runLuaLSCheck(
   }
 
   if (!parseSucceeded) {
+    const cacheHint = `(Cache location: ${getCacheDir()})`;
     if (execError) {
       throw new Error(
-        `LuaLS check failed to execute or produce diagnostic output: ${execError instanceof Error ? execError.message : String(execError)}`
+        `LuaLS check failed to execute or produce diagnostic output: ${execError instanceof Error ? execError.message : String(execError)}. ${cacheHint}`
       );
     }
     throw new Error(
-      `LuaLS check failed to produce diagnostic output at: ${checkOutPath}`
+      `LuaLS check failed to produce diagnostic output at: ${checkOutPath}. ${cacheHint}`
     );
   }
 
@@ -403,7 +524,7 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
     return absPath.toLowerCase().endsWith(".lua") ? 1 : 0;
   }
 
-  let ignoreDirs: string[] = [".git", ".vscode", "node_modules"];
+  let ignoreDirs: string[] = [".git", ".vscode", ".nanos-lint", "node_modules"];
   let excludePatterns: string[] = [];
 
   if (configPath && fs.existsSync(configPath)) {

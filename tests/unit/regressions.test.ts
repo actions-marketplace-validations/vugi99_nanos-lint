@@ -311,5 +311,134 @@ describe("Regression tests for audit review issues", () => {
       }
     });
   });
+
+  describe("Finding N0: initWorkspace excludes .nanos-lint from workspace diagnostics", () => {
+    it("configures files.exclude and workspace.ignoreDir for .nanos-lint in initialized workspace", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n0-init-"));
+      try {
+        const configFile = initWorkspace(tempDir, { force: true });
+        const config = JSON.parse(fs.readFileSync(configFile, "utf-8"));
+
+        // Must exclude .nanos-lint from files to prevent diagnostics on annotations.lua
+        expect(config.files?.exclude).toContain(".nanos-lint/**");
+        expect(config.workspace?.ignoreDir).toContain(".nanos-lint");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("mergeConfigs includes .nanos-lint in default ignore dirs", () => {
+      const base = loadConfigFile(getDefaultTemplatePath());
+      const merged = mergeConfigs(base, {}, "C:/fake/defs");
+      expect(merged.workspace?.ignoreDir).toContain(".nanos-lint");
+    });
+
+    it("countCheckedFiles ignores files inside .nanos-lint", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n0-count-"));
+      try {
+        fs.writeFileSync(path.join(tempDir, "game.lua"), "-- game code");
+        const nanosDir = path.join(tempDir, ".nanos-lint");
+        fs.mkdirSync(nanosDir, { recursive: true });
+        fs.writeFileSync(path.join(nanosDir, "annotations.lua"), "-- vendor annotations");
+
+        const count = countCheckedFiles(tempDir);
+        expect(count).toBe(1);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("Finding N1: Atomic and race-safe download and extraction", () => {
+    it("safely handles concurrent download/extraction to the same target directory", async () => {
+      const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n1-race-"));
+      try {
+        const { downloadAndExtractLuaLS } = await import("../../src/luals.js");
+        const targetDir = path.join(tempBase, "luals-target");
+
+        // Run 2 concurrent extractions to the exact same targetDir
+        const [bin1, bin2] = await Promise.all([
+          downloadAndExtractLuaLS("latest", targetDir, { quiet: true }),
+          downloadAndExtractLuaLS("latest", targetDir, { quiet: true }),
+        ]);
+
+        expect(bin1).toBe(bin2);
+        expect(fs.existsSync(bin1)).toBe(true);
+        expect(fs.existsSync(path.join(targetDir, ".complete"))).toBe(true);
+
+        // Verify no leftover .tmp-* directories in the parent dir
+        const parentEntries = fs.readdirSync(tempBase);
+        const tmpDirs = parentEntries.filter((e) => e.includes(".tmp-"));
+        expect(tmpDirs.length).toBe(0);
+      } finally {
+        fs.rmSync(tempBase, { recursive: true, force: true });
+      }
+    }, 120000);
+  });
+
+  describe("Finding N2: Corrupted cached LuaLS binary detection and recovery", () => {
+    it("does not accept a truncated or corrupted cached binary as valid", async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n2-corrupt-"));
+      try {
+        const binSubdir = path.join(tempDir, "bin");
+        fs.mkdirSync(binSubdir, { recursive: true });
+        const binaryName = process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
+        const fakeCorruptBin = path.join(binSubdir, binaryName);
+        fs.writeFileSync(fakeCorruptBin, "corrupted-truncated-binary-data");
+
+        const { isBinaryValid } = await import("../../src/luals.js");
+        expect(isBinaryValid(fakeCorruptBin)).toBe(false);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("detects and repairs corrupted targetDir when downloadAndExtractLuaLS is invoked", async () => {
+      const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n2-repair-"));
+      try {
+        const { downloadAndExtractLuaLS, isBinaryValid } = await import("../../src/luals.js");
+        const corruptDir = path.join(tempBase, "corrupt-cache");
+        const binSubdir = path.join(corruptDir, "bin");
+        fs.mkdirSync(binSubdir, { recursive: true });
+        const binaryName = process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
+        fs.writeFileSync(path.join(binSubdir, binaryName), "corrupted truncated file");
+
+        const repairedBin = await downloadAndExtractLuaLS("latest", corruptDir, { quiet: true });
+        expect(isBinaryValid(repairedBin)).toBe(true);
+        expect(fs.existsSync(path.join(corruptDir, ".complete"))).toBe(true);
+      } finally {
+        fs.rmSync(tempBase, { recursive: true, force: true });
+      }
+    }, 120000);
+
+    it("includes cache directory in LuaLS execution error message", async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n2-errmsg-"));
+      try {
+        const dummyLua = path.join(tempDir, "dummy.lua");
+        fs.writeFileSync(dummyLua, "-- dummy");
+        const templatePath = getDefaultTemplatePath();
+
+        let fakeBin: string;
+        if (process.platform === "win32") {
+          fakeBin = path.join(tempDir, "mock-fail.cmd");
+          fs.writeFileSync(fakeBin, "@exit /b 1\r\n");
+        } else {
+          fakeBin = path.join(tempDir, "mock-fail.sh");
+          fs.writeFileSync(fakeBin, "#!/bin/sh\nexit 1\n");
+          fs.chmodSync(fakeBin, 0o755);
+        }
+
+        await expect(
+          runLuaLSCheck(tempDir, templatePath, {
+            path: tempDir,
+            checklevel: "Warning",
+            lualsBin: fakeBin,
+          })
+        ).rejects.toThrow(/Cache location:/i);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
 });
 

@@ -192,6 +192,7 @@ export function mergeConfigs(
   const defaultIgnore = [
     ".git",
     ".vscode",
+    ".nanos-lint",
     "node_modules",
     "dist",
     "bin",
@@ -367,16 +368,31 @@ export function initWorkspace(workspacePath: string, options?: InitWorkspaceOpti
   const definitionsDir = getDefinitionsDir();
   const sourceAnnotations = path.join(definitionsDir, "annotations.lua");
 
+  if (!fs.existsSync(sourceAnnotations)) {
+    throw new Error(
+      `Definitions file not found at ${sourceAnnotations}. Make sure submodules are initialized.`
+    );
+  }
+
   // Copy annotations to .nanos-lint/annotations.lua inside workspace for portability
   const targetNanosDir = path.join(workspacePath, ".nanos-lint");
   fs.mkdirSync(targetNanosDir, { recursive: true });
   const targetAnnotations = path.join(targetNanosDir, "annotations.lua");
-  if (fs.existsSync(sourceAnnotations)) {
-    fs.copyFileSync(sourceAnnotations, targetAnnotations);
-  }
+  fs.copyFileSync(sourceAnnotations, targetAnnotations);
 
   template.workspace = template.workspace ?? {};
   template.workspace.library = [".nanos-lint/annotations.lua"];
+
+  const existingIgnore = template.workspace.ignoreDir ?? [];
+  if (!existingIgnore.includes(".nanos-lint")) {
+    template.workspace.ignoreDir = [".nanos-lint", ...existingIgnore];
+  }
+
+  template.files = template.files ?? {};
+  const existingExclude = template.files.exclude ?? [];
+  if (!existingExclude.includes(".nanos-lint/**")) {
+    template.files.exclude = [".nanos-lint/**", ...existingExclude];
+  }
 
   fs.writeFileSync(targetFile, JSON.stringify(template, null, 2), "utf-8");
   return targetFile;

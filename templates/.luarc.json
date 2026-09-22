@@ -12,6 +12,7 @@
     "ignoreDir": [
       ".git",
       ".vscode",
+      ".nanos-lint",
       "node_modules",
       "dist",
       "bin",
@@ -22,6 +23,11 @@
       "log"
     ],
     "library": []
+  },
+  "files": {
+    "exclude": [
+      ".nanos-lint/**"
+    ]
   },
   "diagnostics": {
     "enable": true,

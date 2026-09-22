@@ -5,6 +5,14 @@ All notable changes to `nanos-lint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Critical (Finding N0)**: Added `.nanos-lint` to `workspace.ignoreDir` and `.nanos-lint/**` to `files.exclude` in `templates/.luarc.json`, `src/config.ts`, and `initWorkspace()`, preventing LuaLS from diagnosing `.nanos-lint/annotations.lua` as workspace source code and eliminating false-positive luadoc warnings on initialized workspaces.
+- **High (Finding N1)**: Made LuaLS download and extraction atomic and race-safe for concurrent cold-cache runs using unique PID/timestamp temporary directories, isolated archive downloads, cancellation of non-OK response bodies, and atomic directory promotion with conflict resolution.
+- **Medium (Finding N2)**: Added self-healing cache validation and recovery via `isBinaryValid()` smoke testing and `.complete` installation markers; automatically detects, cleans up, and repairs corrupted/truncated binaries, and includes the cache directory path in error messages when LuaLS check execution fails.
+- **Low**: Ensured `initWorkspace()` throws an informative error if source `annotations.lua` is missing instead of generating broken workspace configurations.
+
 ## [2.2.1] - 2026-09-22
 
 ### Changed

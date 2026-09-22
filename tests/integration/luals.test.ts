@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { resolveWorkspaceConfig, getPackageRoot } from "../../src/config.js";
+import { resolveWorkspaceConfig, getPackageRoot, initWorkspace } from "../../src/config.js";
 import { runLuaLSCheck, resolveLuaLSBinary } from "../../src/luals.js";
 
 describe("LuaLS live integration tests", () => {
@@ -181,6 +181,42 @@ describe("LuaLS live integration tests", () => {
         });
 
         // undefined-field should be disabled, so totalProblems should be 0
+        expect(result.passed).toBe(true);
+        expect(result.totalProblems).toBe(0);
+      } finally {
+        if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+          fs.unlinkSync(resolved.configPath);
+        }
+      }
+    } finally {
+      fs.rmSync(tempWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  it("passes cleanly when initWorkspace is run in a workspace and checked (Finding N0)", async () => {
+    const tempWorkspace = path.join(os.tmpdir(), `nanos-n0-live-${Date.now()}`);
+    fs.mkdirSync(tempWorkspace, { recursive: true });
+
+    try {
+      // 1. Initialize workspace (copies .nanos-lint/annotations.lua and writes .luarc.json)
+      initWorkspace(tempWorkspace, { force: true });
+
+      // 2. Add valid nanos world code that relies on types from annotations.lua
+      const code = `
+        local char = Character(Vector(0, 0, 0), Rotator(0, 0, 0), "nanos-world::SK_Mannequin")
+        local health = char:GetHealth()
+      `;
+      fs.writeFileSync(path.join(tempWorkspace, "Server.lua"), code, "utf-8");
+
+      // 3. Resolve and run check on root workspace
+      const resolved = resolveWorkspaceConfig(tempWorkspace);
+      try {
+        const result = await runLuaLSCheck(tempWorkspace, resolved.configPath, {
+          path: tempWorkspace,
+          checklevel: "Warning",
+        });
+
+        // Must not diagnose .nanos-lint/annotations.lua with luadoc warnings
         expect(result.passed).toBe(true);
         expect(result.totalProblems).toBe(0);
       } finally {
