@@ -103,7 +103,11 @@ jobs:
           cat << 'EOF' > pkg-windows/nanos-lint.cmd
           @echo off
           node "%~dp0dist\cli.js" %*
+          exit /b %ERRORLEVEL%
           EOF
+
+          # Verify Windows distribution entrypoint outputs help
+          node pkg-windows/dist/cli.js --help > /dev/null
 
           (cd pkg-windows && zip -rq "../release-builds/nanos-lint-${TAG_NAME}-windows-x64.zip" .)
 
@@ -125,6 +129,9 @@ jobs:
           exec node "$DIR/dist/cli.js" "$@"
           EOF
           chmod +x pkg-linux/nanos-lint
+
+          # Verify Linux distribution launcher
+          ./pkg-linux/nanos-lint --help > /dev/null
 
           tar -czf "release-builds/nanos-lint-${TAG_NAME}-linux-x64.tar.gz" -C pkg-linux .
 

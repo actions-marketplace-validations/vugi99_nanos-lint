@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command, CommanderError } from "commander";
 import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
@@ -156,4 +157,62 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
     }
     throw err;
   }
+}
+
+export function isDirectExecution(
+  importMetaUrl: string = import.meta.url,
+  argv1: string | undefined = process.argv[1]
+): boolean {
+  if (!argv1) {
+    return false;
+  }
+  const toPath = (urlStr: string): string => {
+    try {
+      if (urlStr.startsWith("file:")) {
+        return fileURLToPath(urlStr);
+      }
+      return urlStr;
+    } catch {
+      return urlStr.replace(/^file:\/\/\/?/, "");
+    }
+  };
+
+  try {
+    const scriptPath = fs.realpathSync(path.resolve(argv1)).toLowerCase();
+    const modulePath = fs.realpathSync(toPath(importMetaUrl)).toLowerCase();
+    if (scriptPath === modulePath) {
+      return true;
+    }
+    const moduleDir = path.dirname(modulePath);
+    const cliJsPath = path.join(moduleDir, "cli.js").toLowerCase();
+    const cliTsPath = path.join(moduleDir, "cli.ts").toLowerCase();
+    if (scriptPath === cliJsPath || scriptPath === cliTsPath) {
+      return true;
+    }
+  } catch {
+    const normArgv = path.resolve(argv1).toLowerCase();
+    const normMeta = toPath(importMetaUrl).toLowerCase();
+    if (normArgv === normMeta) {
+      return true;
+    }
+    const normDir = path.dirname(normMeta);
+    if (
+      normArgv === path.join(normDir, "cli.js").toLowerCase() ||
+      normArgv === path.join(normDir, "cli.ts").toLowerCase()
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+if (isDirectExecution()) {
+  runCLI()
+    .then((code) => {
+      process.exit(code);
+    })
+    .catch((err) => {
+      console.error(err);
+      process.exit(1);
+    });
 }

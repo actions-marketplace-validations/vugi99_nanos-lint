@@ -46,16 +46,23 @@ jobs:
       - name: Build distribution package
         run: npm run build
 
-      - name: Test CLI directly on passing fixtures
-        run: node bin/nanos-lint.js check tests/pass
+      - name: Test CLI directly on passing fixtures (via bin/nanos-lint.js and dist/cli.js)
+        run: |
+          node bin/nanos-lint.js check tests/pass
+          node dist/cli.js check tests/pass
+          node dist/cli.js --help
+          node dist/cli.js -v
 
       - name: Test CLI directly on failing fixtures
         shell: bash
         run: |
           if node bin/nanos-lint.js check tests/fail/type_mismatch.lua; then
-            echo "Expected tests/fail/type_mismatch.lua to fail, but it succeeded!"
+            echo "Expected tests/fail/type_mismatch.lua to fail via bin/nanos-lint.js, but it succeeded!"
             exit 1
-          else
-            echo "tests/fail/type_mismatch.lua failed as expected."
           fi
+          if node dist/cli.js check tests/fail/type_mismatch.lua; then
+            echo "Expected tests/fail/type_mismatch.lua to fail via dist/cli.js, but it succeeded!"
+            exit 1
+          fi
+          echo "Both bin/nanos-lint.js and dist/cli.js failed as expected on failing fixtures."
 

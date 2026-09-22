@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, it, expect, vi } from "vitest";
-import { runCLI } from "../../src/cli.js";
+import { runCLI, isDirectExecution } from "../../src/cli.js";
 
 describe("cli module flag and command parsing", () => {
   it("prints help and returns 0 on --help and -h", async () => {
@@ -83,4 +84,35 @@ describe("cli module flag and command parsing", () => {
       logSpy.mockRestore();
     }
   });
+
+  describe("isDirectExecution entrypoint detection", () => {
+    it("returns false when argv[1] is undefined", () => {
+      expect(isDirectExecution(import.meta.url, undefined)).toBe(false);
+    });
+
+    it("returns true when argv[1] matches module path exactly", () => {
+      const fakeFile = path.resolve("/workspace/dist/cli.js");
+      const fakeUrl = pathToFileURL(fakeFile).href;
+      expect(isDirectExecution(fakeUrl, fakeFile)).toBe(true);
+    });
+
+    it("returns true when argv[1] points to cli.js or cli.ts in the same directory as a bundled chunk", () => {
+      const chunkFile = path.resolve("/workspace/dist/cli-xyz123.js");
+      const chunkUrl = pathToFileURL(chunkFile).href;
+      const cliJsArgv = path.resolve("/workspace/dist/cli.js");
+      const cliTsArgv = path.resolve("/workspace/dist/cli.ts");
+      expect(isDirectExecution(chunkUrl, cliJsArgv)).toBe(true);
+      expect(isDirectExecution(chunkUrl, cliTsArgv)).toBe(true);
+    });
+
+    it("returns false when argv[1] points to a different script or parent runner", () => {
+      const chunkFile = path.resolve("/workspace/dist/cli-xyz123.js");
+      const chunkUrl = pathToFileURL(chunkFile).href;
+      const binArgv = path.resolve("/workspace/bin/nanos-lint.js");
+      const userScript = path.resolve("/workspace/my-app/index.js");
+      expect(isDirectExecution(chunkUrl, binArgv)).toBe(false);
+      expect(isDirectExecution(chunkUrl, userScript)).toBe(false);
+    });
+  });
 });
+
