@@ -31,6 +31,7 @@ export interface CheckOptions {
   failOnError?: boolean;
   quiet?: boolean;
   lualsBin?: string;
+  ignore?: string[];
 }
 
 export interface CheckResult {

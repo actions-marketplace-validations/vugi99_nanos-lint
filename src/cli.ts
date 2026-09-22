@@ -17,6 +17,14 @@ function getVersionString(): string {
   }
 }
 
+export function collectIgnorePatterns(val: string, prev?: string[]): string[] {
+  const parts = val
+    .split(/[\r\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return (prev ?? []).concat(parts);
+}
+
 interface CheckCommandOptions {
   checklevel: DiagnosticSeverity;
   config?: string;
@@ -25,6 +33,7 @@ interface CheckCommandOptions {
   fail: boolean;
   quiet?: boolean;
   github?: boolean;
+  ignore?: string[];
 }
 
 export interface CreateProgramOptions {
@@ -50,6 +59,11 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .option("--checklevel <level>", "Minimum diagnostic level: Error, Warning, Information, Hint", "Warning")
     .option("--config <path>", "Path to custom .luarc.json configuration file")
     .option("--format <format>", "Output format: pretty, json, github (default: pretty, auto-detects GitHub Actions)")
+    .option(
+      "-i, --ignore <patterns...>",
+      "Files or directories to ignore (supports glob patterns, repeatable)",
+      collectIgnorePatterns
+    )
     .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`, DEFAULT_LUALS_VERSION)
     .option("--no-fail", "Do not exit with code 1 if diagnostics are found")
     .option("--quiet", "Suppress progress output")
@@ -67,9 +81,12 @@ export function createProgram(options?: CreateProgramOptions): Command {
         lualsVersion: opts.lualsVersion,
         failOnError: opts.fail !== false,
         quiet: opts.quiet,
+        ignore: opts.ignore,
       };
 
-      const resolved = resolveWorkspaceConfig(targetPath, checkOptions.configpath);
+      const resolved = resolveWorkspaceConfig(targetPath, checkOptions.configpath, {
+        ignore: checkOptions.ignore,
+      });
       let result;
       try {
         result = await runLuaLSCheck(targetPath, resolved.configPath, checkOptions);
@@ -133,6 +150,7 @@ Examples:
   $ npx nanos-lint
   $ npx nanos-lint check ./my-package
   $ npx nanos-lint check . --checklevel=Error
+  $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"
   $ npx nanos-lint init
 `
   );

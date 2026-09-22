@@ -95,6 +95,7 @@ jobs:
 | `path` | Path to workspace directory or Lua file to check | `.` |
 | `checklevel` | Minimum severity to report (`Error`, `Warning`, `Information`, `Hint`) | `Warning` |
 | `config` | Path to a custom `.luarc.json` configuration file | `""` |
+| `ignore` | Files or directories to ignore (supports glob patterns, newline or comma separated) | `""` |
 | `luals-version` | Version of `lua-language-server` to use | `latest` |
 | `fail-on-error` | Fail the workflow step if diagnostics are found | `true` |
 | `quiet` | Suppress progress messages | `false` |
@@ -116,6 +117,7 @@ COMMANDS:
   version, --version, -v   Show version information
 
 OPTIONS:
+  -i, --ignore <patterns...> Files or directories to ignore (supports glob patterns, e.g. myfolder/hello-*.lua)
   --checklevel=<level>     Minimum diagnostic level: Error, Warning, Information, Hint (default: Warning)
   --config=<path>          Path to custom .luarc.json configuration file
   --format=<format>        Output format: pretty, json, github (default: pretty)

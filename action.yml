@@ -30,6 +30,10 @@ inputs:
     description: 'Suppress progress output'
     required: false
     default: 'false'
+  ignore:
+    description: 'Files or directories to ignore (supports glob patterns, multiple entries can be newline or comma separated)'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -46,6 +50,15 @@ runs:
 
         if [ -n "${{ inputs.config }}" ]; then
           ARGS+=("--config=${{ inputs.config }}")
+        fi
+
+        if [ -n "${{ inputs.ignore }}" ]; then
+          while IFS= read -r line || [ -n "$line" ]; do
+            trimmed=$(echo "$line" | xargs)
+            if [ -n "$trimmed" ]; then
+              ARGS+=("--ignore=$trimmed")
+            fi
+          done <<< "${{ inputs.ignore }}"
         fi
 
         if [ "${{ inputs.fail-on-error }}" = "false" ]; then

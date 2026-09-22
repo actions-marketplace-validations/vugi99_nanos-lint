@@ -146,6 +146,10 @@ export function loadConfigFile(filePath: string): LuaRCConfig {
   return parseJsonc<LuaRCConfig>(content);
 }
 
+export interface MergeConfigOptions {
+  cliIgnore?: string[];
+}
+
 /**
  * Merges a base nanos configuration with a workspace override configuration.
  * Guarantees that the nanos definitions directory is included in workspace.library,
@@ -154,7 +158,8 @@ export function loadConfigFile(filePath: string): LuaRCConfig {
 export function mergeConfigs(
   base: LuaRCConfig,
   override: LuaRCConfig = {},
-  definitionsDir: string = getDefinitionsDir()
+  definitionsDir: string = getDefinitionsDir(),
+  options?: MergeConfigOptions
 ): LuaRCConfig {
   const normalizedDefDir = definitionsDir.split(path.sep).join("/");
 
@@ -174,22 +179,56 @@ export function mergeConfigs(
     ...(override.diagnostics?.severity ?? {}),
   };
 
-  // Merge ignoreDir
-  const defaultIgnore = [
-    ".git",
-    ".vscode",
-    "node_modules",
-    "dist",
-    "bin",
-    "vendor",
-    "script",
-    "meta",
-    "locale",
-    "log",
-  ];
-  const baseIgnore = base.workspace?.ignoreDir ?? defaultIgnore;
-  const overrideIgnore = override.workspace?.ignoreDir ?? [];
-  const ignoreSet = new Set<string>([...defaultIgnore, ...baseIgnore, ...overrideIgnore]);
+  const hasCliIgnore = Boolean(options?.cliIgnore && options.cliIgnore.length > 0);
+
+  let mergedIgnoreDir: string[];
+  let mergedFilesExclude: string[];
+
+  const baseFilesExclude = base.files?.exclude ?? [];
+  const overrideFilesExclude = override.files?.exclude ?? [];
+
+  if (hasCliIgnore) {
+    // When CLI ignore rules are passed, DO NOT use the hardcoded default ignore rules
+    const normalizedCliIgnore = (options?.cliIgnore ?? [])
+      .map((p) => p.replace(/\\/g, "/").trim())
+      .filter(Boolean);
+
+    const excludePatterns = new Set<string>(overrideFilesExclude);
+    for (const pat of normalizedCliIgnore) {
+      excludePatterns.add(pat);
+      if (!pat.includes("*") && !pat.includes("?") && !pat.endsWith(".lua")) {
+        const dirPat = pat.replace(/\/+$/, "");
+        excludePatterns.add(`${dirPat}/**`);
+      }
+    }
+    mergedFilesExclude = Array.from(excludePatterns);
+
+    // For workspace.ignoreDir, only use what the user configured in override,
+    // plus any directory-only patterns from cliIgnore (without globs)
+    const cliDirs = normalizedCliIgnore
+      .filter((p) => !p.includes("*") && !p.includes("?") && !p.endsWith(".lua"))
+      .map((p) => p.replace(/\/+$/, ""));
+    const overrideIgnore = override.workspace?.ignoreDir ?? [];
+    mergedIgnoreDir = Array.from(new Set([...overrideIgnore, ...cliDirs]));
+  } else {
+    // Merge ignoreDir using default rules
+    const defaultIgnore = [
+      ".git",
+      ".vscode",
+      "node_modules",
+      "dist",
+      "bin",
+      "vendor",
+      "script",
+      "meta",
+      "locale",
+      "log",
+    ];
+    const baseIgnore = base.workspace?.ignoreDir ?? defaultIgnore;
+    const overrideIgnore = override.workspace?.ignoreDir ?? [];
+    mergedIgnoreDir = Array.from(new Set([...defaultIgnore, ...baseIgnore, ...overrideIgnore]));
+    mergedFilesExclude = Array.from(new Set([...baseFilesExclude, ...overrideFilesExclude]));
+  }
 
   const merged: LuaRCConfig = {
     $schema: override.$schema ?? base.$schema,
@@ -205,7 +244,12 @@ export function mergeConfigs(
       ...(base.workspace ?? {}),
       ...(override.workspace ?? {}),
       library: Array.from(librarySet),
-      ignoreDir: Array.from(ignoreSet),
+      ignoreDir: mergedIgnoreDir,
+    },
+    files: {
+      ...(base.files ?? {}),
+      ...(override.files ?? {}),
+      exclude: mergedFilesExclude,
     },
     diagnostics: {
       enable: true,
@@ -219,13 +263,18 @@ export function mergeConfigs(
   return merged;
 }
 
+export interface ResolveWorkspaceConfigOptions {
+  ignore?: string[];
+}
+
 /**
  * Discovers any existing workspace configuration and returns the path to an active
  * configuration file with nanos definitions properly injected.
  */
 export function resolveWorkspaceConfig(
   workspacePath: string,
-  customConfigPath?: string
+  customConfigPath?: string,
+  options?: ResolveWorkspaceConfigOptions
 ): { configPath: string; isTemp: boolean } {
   const defaultTemplate = loadConfigFile(getDefaultTemplatePath());
   const definitionsDir = getDefinitionsDir();
@@ -245,26 +294,48 @@ export function resolveWorkspaceConfig(
     }
   }
 
-  const merged = mergeConfigs(defaultTemplate, userConfig, definitionsDir);
+  const hasCliIgnore = Boolean(options?.ignore && options.ignore.length > 0);
 
-  const resolvedTarget = path.resolve(workspacePath);
-  const isToolDirectory =
-    fs.existsSync(path.join(resolvedTarget, "main.lua")) &&
-    (fs.existsSync(path.join(resolvedTarget, "bin", "lua-language-server.exe")) ||
-      fs.existsSync(path.join(resolvedTarget, "bin", "lua-language-server")));
+  // When relative to workspacePath, expand patterns if they start with workspace prefix
+  let cliIgnore = options?.ignore;
+  if (hasCliIgnore && cliIgnore) {
+    const normWs = workspacePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+    const expanded: string[] = [];
+    for (const pat of cliIgnore) {
+      expanded.push(pat);
+      const normPat = pat.replace(/\\/g, "/");
+      if (normWs && normWs !== "." && normPat.startsWith(`${normWs}/`)) {
+        expanded.push(normPat.slice(normWs.length + 1));
+      }
+    }
+    cliIgnore = expanded;
+  }
 
-  if (isToolDirectory) {
-    merged.files = merged.files ?? {};
-    const existingExclude = merged.files.exclude ?? [];
-    merged.files.exclude = [
-      ...new Set([
-        ...existingExclude,
-        "main.lua",
-        "debugger.lua",
-        "**/main.lua",
-        "**/debugger.lua",
-      ]),
-    ];
+  const merged = mergeConfigs(defaultTemplate, userConfig, definitionsDir, {
+    cliIgnore,
+  });
+
+  // Only apply hardcoded tool directory exclusions when CLI ignore was NOT provided
+  if (!hasCliIgnore) {
+    const resolvedTarget = path.resolve(workspacePath);
+    const isToolDirectory =
+      fs.existsSync(path.join(resolvedTarget, "main.lua")) &&
+      (fs.existsSync(path.join(resolvedTarget, "bin", "lua-language-server.exe")) ||
+        fs.existsSync(path.join(resolvedTarget, "bin", "lua-language-server")));
+
+    if (isToolDirectory) {
+      merged.files = merged.files ?? {};
+      const existingExclude = merged.files.exclude ?? [];
+      merged.files.exclude = [
+        ...new Set([
+          ...existingExclude,
+          "main.lua",
+          "debugger.lua",
+          "**/main.lua",
+          "**/debugger.lua",
+        ]),
+      ];
+    }
   }
 
   // Write to a temporary configuration file for LuaLS execution

@@ -128,5 +128,85 @@ describe("CLI entrypoint execution regression tests", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   }, 15000);
+
+  it("executes with --ignore pattern matching (myfolder/hello-*.lua)", async () => {
+    const fixtureDir = path.join(rootDir, "tests", "fixtures", "ignore_test");
+    try {
+      await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        fixtureDir,
+        "--ignore",
+        "myfolder/hello-*.lua",
+      ]);
+      expect.fail("Expected check to fail because other.lua still has an error");
+    } catch (err: unknown) {
+      const execErr = err as { code?: number; stdout?: string };
+      expect(execErr.code).toBe(1);
+      expect(execErr.stdout).toContain("other.lua");
+      expect(execErr.stdout).not.toContain("hello-1.lua");
+      expect(execErr.stdout).not.toContain("hello-2.lua");
+      expect(execErr.stdout).toContain("2 problems (2 errors) found across 1 file.");
+    }
+  });
+
+  it("executes with multiple --ignore rules and exits cleanly", async () => {
+    const fixtureDir = path.join(rootDir, "tests", "fixtures", "ignore_test");
+    const { stdout } = await execFileAsync(process.execPath, [
+      distCli,
+      "check",
+      fixtureDir,
+      "--ignore",
+      "myfolder/hello-*.lua",
+      "-i",
+      "myfolder/other.lua",
+    ]);
+
+    expect(stdout).toContain("Diagnosis completed, no problems found");
+  });
+
+  it("executes with directory --ignore rule and exits cleanly", async () => {
+    const fixtureDir = path.join(rootDir, "tests", "fixtures", "ignore_test");
+    const { stdout } = await execFileAsync(process.execPath, [
+      distCli,
+      "check",
+      fixtureDir,
+      "--ignore",
+      "myfolder",
+    ]);
+
+    expect(stdout).toContain("Diagnosis completed, no problems found");
+  });
+
+  it("does not use hardcoded ignore rules when --ignore is passed", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-hardcoded-bypass-test-"));
+    try {
+      // Create a file inside `script/` which is in defaultIgnore
+      fs.mkdirSync(path.join(tempDir, "script"), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, "script", "broken.lua"), "function invalid(");
+
+      // 1. Without --ignore, defaultIgnore ignores `script/`, so 0 problems found
+      const { stdout: stdoutDefault } = await execFileAsync(process.execPath, [distCli, "check", tempDir]);
+      expect(stdoutDefault).toContain("Diagnosis completed, no problems found");
+
+      // 2. With --ignore, hardcoded ignore rules are bypassed, so `script/broken.lua` is analyzed
+      try {
+        await execFileAsync(process.execPath, [
+          distCli,
+          "check",
+          tempDir,
+          "--ignore",
+          "unrelated_folder",
+        ]);
+        expect.fail("Expected check to fail because script/ is not ignored when custom --ignore is passed");
+      } catch (err: unknown) {
+        const execErr = err as { code?: number; stdout?: string };
+        expect(execErr.code).toBe(1);
+        expect(execErr.stdout).toContain("broken.lua");
+      }
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 

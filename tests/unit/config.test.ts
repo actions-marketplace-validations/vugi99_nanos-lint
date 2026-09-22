@@ -69,6 +69,46 @@ describe("config module", () => {
     expect(merged.diagnostics?.disable).toContain("lowercase-global");
   });
 
+  it("does not use hardcoded ignore rules when cliIgnore is passed", () => {
+    const base: LuaRCConfig = {
+      runtime: { version: "Lua 5.4" },
+      workspace: {
+        library: [],
+        ignoreDir: ["script", "meta", "locale", "log", "node_modules"],
+      },
+    };
+
+    const override: LuaRCConfig = {
+      workspace: {
+        ignoreDir: ["user_override_dir"],
+      },
+      files: {
+        exclude: ["user_config_exclude.lua"],
+      },
+    };
+
+    const fakeDefDir = "C:/mock/definitions";
+    const merged = mergeConfigs(base, override, fakeDefDir, {
+      cliIgnore: ["myfolder/hello-*.lua", "custom_folder", "other/**/*.lua"],
+    });
+
+    // Hardcoded rules must NOT be in ignoreDir
+    expect(merged.workspace?.ignoreDir).not.toContain("script");
+    expect(merged.workspace?.ignoreDir).not.toContain("meta");
+    expect(merged.workspace?.ignoreDir).not.toContain("node_modules");
+
+    // Only user's override ignoreDir and plain directories from cliIgnore
+    expect(merged.workspace?.ignoreDir).toContain("user_override_dir");
+    expect(merged.workspace?.ignoreDir).toContain("custom_folder");
+
+    // files.exclude must contain user override and CLI ignore patterns
+    expect(merged.files?.exclude).toContain("user_config_exclude.lua");
+    expect(merged.files?.exclude).toContain("myfolder/hello-*.lua");
+    expect(merged.files?.exclude).toContain("custom_folder");
+    expect(merged.files?.exclude).toContain("custom_folder/**");
+    expect(merged.files?.exclude).toContain("other/**/*.lua");
+  });
+
   it("strips JSON comments and trailing commas correctly", () => {
     const jsonc = `{
       // Single line comment

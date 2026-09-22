@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, it, expect, vi } from "vitest";
-import { runCLI, isDirectExecution } from "../../src/cli.js";
+import { runCLI, isDirectExecution, collectIgnorePatterns } from "../../src/cli.js";
 
 describe("cli module flag and command parsing", () => {
   it("prints help and returns 0 on --help and -h", async () => {
@@ -83,6 +83,39 @@ describe("cli module flag and command parsing", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
       logSpy.mockRestore();
     }
+  });
+
+  describe("collectIgnorePatterns helper", () => {
+    it("handles single pattern", () => {
+      expect(collectIgnorePatterns("myfolder/hello-*.lua")).toEqual(["myfolder/hello-*.lua"]);
+    });
+
+    it("handles comma-separated patterns", () => {
+      expect(collectIgnorePatterns("myfolder/hello-*.lua, vendor/**, dist")).toEqual([
+        "myfolder/hello-*.lua",
+        "vendor/**",
+        "dist",
+      ]);
+    });
+
+    it("handles newline-separated patterns", () => {
+      const multiline = `
+        myfolder/hello-*.lua
+        temp/*
+        vendor
+      `;
+      expect(collectIgnorePatterns(multiline)).toEqual([
+        "myfolder/hello-*.lua",
+        "temp/*",
+        "vendor",
+      ]);
+    });
+
+    it("accumulates across multiple calls", () => {
+      const first = collectIgnorePatterns("pat1, pat2");
+      const second = collectIgnorePatterns("pat3", first);
+      expect(second).toEqual(["pat1", "pat2", "pat3"]);
+    });
   });
 
   describe("isDirectExecution entrypoint detection", () => {
