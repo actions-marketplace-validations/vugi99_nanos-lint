@@ -13,7 +13,7 @@ This document outlines the architectural principles, codebase structure, develop
 - **Bundler**: `tsdown` 0.23 (powered by Rolldown, compiles `src/` to a standalone `dist/` targeting Node.js 24 with zero runtime dependencies)
 - **Testing**: `vitest` 5 (unit tests and live LuaLS integration tests)
 - **Linting & Code Quality**: `eslint` 10 (flat config `eslint.config.mjs` with `typescript-eslint`)
-- **API Definitions**: Upstream submodule tracking `https://github.com/nanos-world/vscode-extension` (`docgen-output` branch), loaded directly via `vendor/nanos-world-vscode-extension/annotations.lua`
+- **API Definitions**: Upstream repository `https://github.com/nanos-world/vscode-extension` (`docgen-output` branch), loaded via bundled `annotations.lua` or dynamic date-based user cache
 
 ---
 
@@ -27,7 +27,7 @@ This document outlines the architectural principles, codebase structure, develop
    - LuaLS binary downloading and extraction must use cross-platform extraction (`tar` with PowerShell `Expand-Archive` fallback on Windows).
 3. **Respect Workspace Configurations**:
    - `nanos-lint` must never overwrite or ignore user workspace `.luarc.json` configurations.
-   - When a user provides custom settings or disabled diagnostics, `src/config.ts` merges them on top of the base template while ensuring `vendor/nanos-world-vscode-extension` annotations are included in `workspace.library`.
+   - When a user provides custom settings or disabled diagnostics, `src/config.ts` merges them on top of the base template while ensuring nanos world annotations are included in `workspace.library`.
 
 ---
 
@@ -39,7 +39,6 @@ nanos-lint/
 ├── action.yml               # GitHub Action composite definition
 ├── bin/nanos-lint.js        # Executable CLI entrypoint (#!/usr/bin/env node)
 ├── templates/               # Default base .luarc.json template (Lua 5.4, globals)
-├── vendor/                  # Submodule for upstream nanos-world vscode-extension
 ├── src/
 │   ├── types.ts             # Type definitions
 │   ├── config.ts            # Configuration discovery, merging, and init

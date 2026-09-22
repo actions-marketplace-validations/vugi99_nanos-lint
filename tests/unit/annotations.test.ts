@@ -181,5 +181,110 @@ describe("annotations management and date-based caching", () => {
         globalThis.fetch = originalFetch;
       }
     });
+
+    it("respects NANOS_ANNOTATIONS environment variable as an alias", async () => {
+      const envCustomFile = path.join(tempBaseDir, "env-annotations-alias.lua");
+      fs.writeFileSync(envCustomFile, "-- env annotations alias");
+      process.env.NANOS_ANNOTATIONS = envCustomFile;
+
+      const resolved = await resolveAnnotations();
+      expect(resolved).toBe(path.resolve(envCustomFile));
+
+      process.env.NANOS_ANNOTATIONS = path.join(tempBaseDir, "missing-alias.lua");
+      await expect(resolveAnnotations()).rejects.toThrow(/Annotations file specified in environment not found/);
+    });
+
+    it("reports filesystem cause rather than network error on EACCES/ENOSPC", async () => {
+      const originalFetch = globalThis.fetch;
+      // Network fails so it attempts fallback download
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("fetch failed"));
+
+      // Force cacheDir to fail with EACCES
+      const mockDir = path.join(tempBaseDir, "readonly-cache");
+      const fsError = new Error("permission denied") as NodeJS.ErrnoException;
+      fsError.code = "EACCES";
+
+      const mkdirSpy = vi.spyOn(fs, "mkdirSync").mockImplementation((p: fs.PathLike) => {
+        if (String(p).includes("readonly-cache")) {
+          throw fsError;
+        }
+        return undefined;
+      });
+
+      try {
+        await expect(
+          resolveAnnotations({ cacheDir: mockDir })
+        ).rejects.toThrow(/filesystem error|permission denied|EACCES/i);
+
+        await expect(
+          resolveAnnotations({ cacheDir: mockDir })
+        ).rejects.not.toThrow(/check your network connection/i);
+      } finally {
+        mkdirSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("updates lastChecked to today on offline fallback with existing cache", async () => {
+      const cacheSubdir = path.join(tempBaseDir, "annotations-offline");
+      fs.mkdirSync(cacheSubdir, { recursive: true });
+
+      const cachedLua = path.join(cacheSubdir, "annotations.lua");
+      fs.writeFileSync(cachedLua, "-- old cached annotations");
+
+      // Yesterday's metadata
+      const oldMeta: AnnotationsMetadata = {
+        commitId: "sha-old",
+        lastChecked: "2026-09-01",
+        date: { year: 2026, month: 9, day: 1 },
+      };
+      fs.writeFileSync(path.join(cacheSubdir, "metadata.json"), JSON.stringify(oldMeta));
+
+      // Network fails (rate-limit 403 or offline)
+      const originalFetch = globalThis.fetch;
+      const fetchSpy = vi.fn().mockRejectedValue(new Error("Network offline"));
+      globalThis.fetch = fetchSpy;
+
+      try {
+        const resolved = await resolveAnnotations({ cacheDir: cacheSubdir });
+        expect(resolved).toBe(cachedLua);
+
+        // Verify lastChecked was updated to today
+        const updatedMeta = readAnnotationsMetadata(cacheSubdir);
+        const { dateStr } = getTodayDateString();
+        expect(updatedMeta?.lastChecked).toBe(dateStr);
+
+        // A second call on the same day should now short-circuit without fetch
+        fetchSpy.mockClear();
+        const secondResolved = await resolveAnnotations({ cacheDir: cacheSubdir });
+        expect(secondResolved).toBe(cachedLua);
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("does not print 'commit unknown' when commitId is unknown", async () => {
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockImplementation((_url: string | URL | Request) => {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("-- annotations\n" + " ".repeat(1200)),
+        } as unknown as Response);
+      });
+
+      try {
+        await downloadAndCacheAnnotations("unknown", tempBaseDir, { quiet: false });
+        for (const call of consoleSpy.mock.calls) {
+          const msg = call.join(" ");
+          expect(msg).not.toContain("commit unknown");
+        }
+      } finally {
+        consoleSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
   });
 });

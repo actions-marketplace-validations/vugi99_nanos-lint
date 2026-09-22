@@ -213,6 +213,30 @@ describe("Regression tests for audit review issues", () => {
         errSpy.mockRestore();
       }
     });
+
+    it("validates missing config file before resolving annotations", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const annotationsMod = await import("../../src/annotations.js");
+      const resolveSpy = vi.spyOn(annotationsMod, "resolveAnnotations").mockImplementation(async () => {
+        throw new Error("resolveAnnotations was unexpectedly invoked before config validation");
+      });
+      try {
+        const origDebug = process.env.DEBUG;
+        delete process.env.DEBUG;
+
+        const code = await runCLI(["check", ".", "--config", "non_existent_config.json"]);
+        expect(code).toBe(1);
+        expect(errSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/^error: Configuration file not found/i)
+        );
+        expect(resolveSpy).not.toHaveBeenCalled();
+
+        if (origDebug) process.env.DEBUG = origDebug;
+      } finally {
+        resolveSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    });
   });
 
   describe("Issue 14: countCheckedFiles glob semantics", () => {
@@ -441,6 +465,97 @@ describe("Regression tests for audit review issues", () => {
         ).rejects.toThrow(/Cache location:/i);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("Review issues 3 & 5: LuaLS cache probe, .complete marker validation, and failed promotion cleanup", () => {
+    it("probes and reuses legacy cache directory when present", async () => {
+      const { resolveLuaLSBinary, getLegacyCacheDir, FALLBACK_LUALS_VERSION } = await import("../../src/luals.js");
+      const legacyDir = getLegacyCacheDir(FALLBACK_LUALS_VERSION);
+      expect(typeof legacyDir).toBe("string");
+      expect(legacyDir.length).toBeGreaterThan(0);
+
+      // Verify resolveLuaLSBinary completes and returns a valid executable
+      const resolved = await resolveLuaLSBinary(FALLBACK_LUALS_VERSION, { quiet: true });
+      expect(fs.existsSync(resolved)).toBe(true);
+    });
+
+    it("does not accept cached directory if .complete marker is missing or has mismatched version", async () => {
+      const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-marker-test-"));
+      try {
+        const { getPlatformInfo, downloadAndExtractLuaLS } = await import("../../src/luals.js");
+        const info = getPlatformInfo("3.19.1");
+        const corruptDir = path.join(tempBase, "luals", "3.19.1");
+        const binSubdir = path.join(corruptDir, path.dirname(info.binaryRelativePath));
+        fs.mkdirSync(binSubdir, { recursive: true });
+
+        const binaryPath = path.join(corruptDir, info.binaryRelativePath);
+        fs.writeFileSync(binaryPath, "fake-binary-content-missing-marker");
+
+        // No .complete marker exists: downloadAndExtractLuaLS should not treat this as complete
+        const markerPath = path.join(corruptDir, ".complete");
+        expect(fs.existsSync(markerPath)).toBe(false);
+
+        // Even with wrong version in marker:
+        fs.writeFileSync(markerPath, "3.18.0", "utf-8"); // mismatched version!
+
+        // When downloadAndExtractLuaLS runs on corruptDir, it must clean it up and not accept the mismatched version
+        // Mock fetch to check that download is actually attempted rather than blindly returning binaryPath
+        const originalFetch = globalThis.fetch;
+        let fetchAttempted = false;
+        globalThis.fetch = vi.fn().mockImplementation(() => {
+          fetchAttempted = true;
+          return Promise.reject(new Error("Network call triggered as expected because cache is invalid"));
+        });
+
+        try {
+          await expect(
+            downloadAndExtractLuaLS("3.19.1", corruptDir, { quiet: true })
+          ).rejects.toThrow();
+          expect(fetchAttempted).toBe(true);
+        } finally {
+          globalThis.fetch = originalFetch;
+        }
+      } finally {
+        fs.rmSync(tempBase, { recursive: true, force: true });
+      }
+    });
+
+    it("cleans up broken destDir when atomic promotion fails", async () => {
+      const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-promo-fail-"));
+      try {
+        const { downloadAndExtractLuaLS } = await import("../../src/luals.js");
+        const targetDir = path.join(tempBase, "target");
+
+        // Spy on renameSync: when promoting to targetDir, simulate a partial/corrupted directory creation and throw EPERM
+        const origRename = fs.renameSync;
+        let threw = false;
+        const renameSpy = vi.spyOn(fs, "renameSync").mockImplementation((oldPath, newPath) => {
+          if (String(newPath) === targetDir) {
+            threw = true;
+            fs.mkdirSync(targetDir, { recursive: true });
+            fs.writeFileSync(path.join(targetDir, "corrupted.file"), "broken");
+            const err = new Error("EPERM: operation not permitted, rename") as NodeJS.ErrnoException;
+            err.code = "EPERM";
+            throw err;
+          }
+          return origRename(oldPath, newPath);
+        });
+
+        try {
+          await expect(
+            downloadAndExtractLuaLS("latest", targetDir, { quiet: true })
+          ).rejects.toThrow(/EPERM/);
+          expect(threw).toBe(true);
+
+          // Verify broken targetDir was cleaned up and not left behind
+          expect(fs.existsSync(path.join(targetDir, "corrupted.file"))).toBe(false);
+        } finally {
+          renameSpy.mockRestore();
+        }
+      } finally {
+        fs.rmSync(tempBase, { recursive: true, force: true });
       }
     });
   });

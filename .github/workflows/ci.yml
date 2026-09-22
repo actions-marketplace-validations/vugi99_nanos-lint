@@ -45,6 +45,7 @@ jobs:
           path: |
             ~/.cache/nanos-lint
             ~/AppData/Local/nanos-lint
+            ~/Library/Caches/nanos-lint
           key: nanos-cache-${{ runner.os }}-${{ hashFiles('src/luals.ts', 'src/annotations.ts') }}
           restore-keys: |
             nanos-cache-${{ runner.os }}-

@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   getPackageRoot,
@@ -19,6 +21,7 @@ describe("config module", () => {
     expect(root).toBeDefined();
     expect(typeof root).toBe("string");
 
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
     const defDir = getDefinitionsDir();
     expect(defDir).toBeDefined();
     expect(defDir).toContain("annotations");
@@ -199,6 +202,23 @@ describe("config module", () => {
       const merged = mergeConfigs({}, {}, "C:/mock/definitions", { cliIgnore: pathological });
       expect(Date.now() - started).toBeLessThan(2000);
       expect(merged.files?.exclude).toContain(pathological[0]);
+    });
+
+    it("accepts a directory containing annotations.lua and resolves it to annotations.lua path", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cfg-dir-"));
+      try {
+        const annFile = path.join(tempDir, "annotations.lua");
+        fs.writeFileSync(annFile, "-- test");
+
+        const mergedWithDir = mergeConfigs({}, {}, tempDir);
+        const expectedNorm = annFile.split(path.sep).join("/");
+        expect(mergedWithDir.workspace?.library).toContain(expectedNorm);
+
+        const mergedWithFile = mergeConfigs({}, {}, annFile);
+        expect(mergedWithFile.workspace?.library).toContain(expectedNorm);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     });
   });
 });

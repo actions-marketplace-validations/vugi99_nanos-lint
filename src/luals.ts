@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { getPackageRoot } from "./config.js";
@@ -182,6 +183,17 @@ export function getCacheDir(version: string = FALLBACK_LUALS_VERSION): string {
   return path.join(systemPaths.cache, "luals", version);
 }
 
+/**
+ * Returns the legacy cache directory used in nanos-lint <= 2.2.1.
+ */
+export function getLegacyCacheDir(version: string = FALLBACK_LUALS_VERSION): string {
+  const base =
+    process.platform === "win32"
+      ? process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local")
+      : process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
+  return path.join(base, "nanos-lint", "luals", version);
+}
+
 export interface DownloadOptions {
   quiet?: boolean;
 }
@@ -221,17 +233,17 @@ export async function downloadAndExtractLuaLS(
   const completeMarker = path.join(destDir, ".complete");
 
   if (fs.existsSync(destDir)) {
-    if (fs.existsSync(binaryPath) && isBinaryValid(binaryPath)) {
-      if (!fs.existsSync(completeMarker)) {
-        try {
-          fs.writeFileSync(completeMarker, resolvedVersion, "utf-8");
-        } catch {
-          // Ignore marker write error
+    if (fs.existsSync(binaryPath) && fs.existsSync(completeMarker)) {
+      try {
+        const storedVersion = fs.readFileSync(completeMarker, "utf-8").trim();
+        if (storedVersion === resolvedVersion && isBinaryValid(binaryPath)) {
+          return binaryPath;
         }
+      } catch {
+        // Ignore marker read error
       }
-      return binaryPath;
     }
-    // destDir exists but is invalid/corrupted: clean it up before downloading
+    // destDir exists but is invalid/corrupted/stale: clean it up before downloading
     try {
       fs.rmSync(destDir, { recursive: true, force: true });
     } catch {
@@ -325,9 +337,12 @@ export async function downloadAndExtractLuaLS(
       }
     }
 
-    // Verify file exists and has non-trivial size before promotion
+    // Verify file exists, has non-trivial size, and is valid executable before promotion
     if (!fs.existsSync(tempBinaryPath) || fs.statSync(tempBinaryPath).size < 100_000) {
       throw new Error(`Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`);
+    }
+    if (!isBinaryValid(tempBinaryPath)) {
+      throw new Error(`Extracted LuaLS binary at ${tempBinaryPath} is invalid or non-functional.`);
     }
 
     // Write .complete marker in tempDir before promotion
@@ -354,13 +369,17 @@ export async function downloadAndExtractLuaLS(
         if (attempt < 4) {
           await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
         } else {
+          // Clean up broken destDir if partially created or left corrupted during failed promotion
+          if (fs.existsSync(destDir) && (!fs.existsSync(binaryPath) || !fs.existsSync(completeMarker))) {
+            try {
+              fs.rmSync(destDir, { recursive: true, force: true });
+            } catch {
+              // Ignore cleanup error
+            }
+          }
           throw renameErr;
         }
       }
-    }
-
-    if (!isBinaryValid(binaryPath)) {
-      throw new Error(`Extracted LuaLS binary at ${binaryPath} is invalid or non-functional.`);
     }
 
     if (!options?.quiet) {
@@ -415,17 +434,17 @@ export async function resolveLuaLSBinary(
   const completeMarker = path.join(cachedDir, ".complete");
 
   if (fs.existsSync(cachedPath)) {
-    if (isBinaryValid(cachedPath)) {
-      if (!fs.existsSync(completeMarker)) {
-        try {
-          fs.writeFileSync(completeMarker, resolvedVersion, "utf-8");
-        } catch {
-          // Ignore marker write error
+    if (fs.existsSync(completeMarker)) {
+      try {
+        const storedVersion = fs.readFileSync(completeMarker, "utf-8").trim();
+        if (storedVersion === resolvedVersion && isBinaryValid(cachedPath)) {
+          return cachedPath;
         }
+      } catch {
+        // Marker read error
       }
-      return cachedPath;
     }
-    // Cached binary is corrupted/incomplete - clean up and re-download
+    // Cached binary is corrupted/incomplete/stale - clean up and re-download
     if (!options?.quiet) {
       console.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
     }
@@ -433,6 +452,43 @@ export async function resolveLuaLSBinary(
       fs.rmSync(cachedDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup error
+    }
+  }
+
+  // 3b. Probe legacy cache location from nanos-lint <= 2.2.1
+  const legacyDir = getLegacyCacheDir(resolvedVersion);
+  const legacyPath = path.join(legacyDir, info.binaryRelativePath);
+  const legacyMarker = path.join(legacyDir, ".complete");
+
+  if (fs.existsSync(legacyPath)) {
+    let validLegacy = false;
+    if (fs.existsSync(legacyMarker)) {
+      try {
+        const stored = fs.readFileSync(legacyMarker, "utf-8").trim();
+        if (stored === resolvedVersion && isBinaryValid(legacyPath)) {
+          validLegacy = true;
+        }
+      } catch {
+        // Ignore marker read error
+      }
+    } else if (isBinaryValid(legacyPath)) {
+      validLegacy = true;
+    }
+
+    if (validLegacy) {
+      // Migrate legacy cache to new location if paths differ
+      if (path.resolve(legacyDir) !== path.resolve(cachedDir)) {
+        try {
+          fs.mkdirSync(path.dirname(cachedDir), { recursive: true });
+          fs.cpSync(legacyDir, cachedDir, { recursive: true });
+          if (fs.existsSync(cachedPath) && isBinaryValid(cachedPath)) {
+            return cachedPath;
+          }
+        } catch {
+          // If migration copy fails, use legacy binary directly
+        }
+      }
+      return legacyPath;
     }
   }
 

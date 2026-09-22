@@ -100,6 +100,13 @@ export function createProgram(options?: CreateProgramOptions): Command {
         ignore: opts.ignore,
       };
 
+      if (opts.config) {
+        const resolvedConfig = path.resolve(opts.config);
+        if (!fs.existsSync(resolvedConfig)) {
+          throw new Error(`Configuration file not found: ${resolvedConfig}`);
+        }
+      }
+
       const annotationsPath = await resolveAnnotations({
         customPath: opts.annotations,
         quiet: opts.quiet,

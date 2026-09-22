@@ -137,7 +137,8 @@ OPTIONS:
 | Variable | Description |
 | :--- | :--- |
 | `LUALS_BIN` | Explicit path to a pre-installed `lua-language-server` binary |
-| `NANOS_ANNOTATIONS_PATH` | Explicit path to a custom `annotations.lua` file |
+| `NANOS_ANNOTATIONS_PATH`, `NANOS_ANNOTATIONS` | Explicit path to a custom `annotations.lua` file |
+| `GITHUB_TOKEN` | GitHub personal access token used for authenticated GitHub API requests (avoids unauthenticated rate limits) |
 | `NO_COLOR` | Disables ANSI color output when set to any non-empty value |
 | `FORCE_COLOR` | Forces ANSI color output even in non-TTY environments |
 
@@ -184,15 +185,12 @@ These bundles are fully self-contained and ready for offline CI/CD environments 
 ## Development
 
 ```bash
-# Clone with submodules
-git clone --recursive https://github.com/vugi99/nanos-lint.git
+# Clone the repository
+git clone https://github.com/vugi99/nanos-lint.git
 cd nanos-lint
 
 # Install dependencies
 npm install
-
-# Update annotations submodule from upstream
-git submodule update --remote --merge
 
 # Run ESLint
 npm run lint

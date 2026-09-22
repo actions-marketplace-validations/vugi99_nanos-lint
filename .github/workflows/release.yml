@@ -102,11 +102,15 @@ jobs:
           mkdir -p release-builds
 
           # Download latest annotations for offline bundle distribution
-          curl -sL "https://raw.githubusercontent.com/nanos-world/vscode-extension/refs/heads/docgen-output/annotations.lua" -o annotations.lua
+          curl -fsSL "https://raw.githubusercontent.com/nanos-world/vscode-extension/refs/heads/docgen-output/annotations.lua" -o annotations.lua
+          if [ ! -s annotations.lua ] || [ $(wc -c < annotations.lua) -lt 1000 ]; then
+            echo "Downloaded annotations.lua is missing or invalid" >&2
+            exit 1
+          fi
 
           # 1. Windows x64 Package
           mkdir -p pkg-windows/bin pkg-windows/templates pkg-windows/dist
-          curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-win32-x64.zip" -o luals-win.zip
+          curl -fsSL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-win32-x64.zip" -o luals-win.zip
           unzip -q luals-win.zip -d pkg-windows-luals
           cp -r pkg-windows-luals/bin/* pkg-windows/bin/
           cp -r pkg-windows-luals/locale pkg-windows-luals/meta pkg-windows-luals/script pkg-windows-luals/main.lua pkg-windows/ 2>/dev/null || true
@@ -129,7 +133,7 @@ jobs:
 
           # 2. Linux x64 Package
           mkdir -p pkg-linux/bin pkg-linux/templates pkg-linux/dist
-          curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-linux-x64.tar.gz" -o luals-linux.tar.gz
+          curl -fsSL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-linux-x64.tar.gz" -o luals-linux.tar.gz
           tar -xzf luals-linux.tar.gz -C pkg-linux-luals 2>/dev/null || (mkdir -p pkg-linux-luals && tar -xzf luals-linux.tar.gz -C pkg-linux-luals)
           cp -r pkg-linux-luals/bin/* pkg-linux/bin/
           cp -r pkg-linux-luals/locale pkg-linux-luals/meta pkg-linux-luals/script pkg-linux-luals/main.lua pkg-linux/ 2>/dev/null || true

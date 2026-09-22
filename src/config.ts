@@ -37,6 +37,10 @@ export function getDefaultAnnotationsPath(): string {
   return path.join(systemPaths.cache, "annotations", "annotations.lua");
 }
 
+/**
+ * @deprecated Use getDefaultAnnotationsPath() instead.
+ * Returns the directory containing the resolved annotations.lua file.
+ */
 export function getDefinitionsDir(): string {
   return path.dirname(getDefaultAnnotationsPath());
 }
@@ -97,8 +101,13 @@ export interface MergeConfigOptions {
 
 /**
  * Merges a base nanos configuration with a workspace override configuration.
- * Guarantees that the nanos definitions directory is included in workspace.library,
+ * Guarantees that nanos API annotations are included in workspace.library,
  * and standardizes paths for LuaLS.
+ *
+ * @param base Base configuration template
+ * @param override Workspace override configuration
+ * @param definitionsPath Path to annotations.lua file or directory containing it
+ * @param options Additional merge options
  */
 export function mergeConfigs(
   base: LuaRCConfig,
@@ -106,7 +115,20 @@ export function mergeConfigs(
   definitionsPath: string = getDefaultAnnotationsPath(),
   options?: MergeConfigOptions
 ): LuaRCConfig {
-  const normalizedDefPath = definitionsPath.split(path.sep).join("/");
+  let resolvedPath = definitionsPath;
+  if (fs.existsSync(definitionsPath)) {
+    try {
+      if (fs.statSync(definitionsPath).isDirectory()) {
+        const candidate = path.join(definitionsPath, "annotations.lua");
+        if (fs.existsSync(candidate)) {
+          resolvedPath = candidate;
+        }
+      }
+    } catch {
+      // Ignore stat error
+    }
+  }
+  const normalizedDefPath = resolvedPath.split(path.sep).join("/");
 
   // Merge library paths
   const baseLibraries = base.workspace?.library ?? [];

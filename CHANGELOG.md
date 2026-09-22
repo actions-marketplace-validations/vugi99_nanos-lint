@@ -12,18 +12,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dynamic downloading and date-based cache validation for `annotations.lua` from repository `nanos-world/vscode-extension` (`docgen-output` branch), eliminating the upstream Git submodule.
 - `--annotations <path>` CLI option for `check` and `init` commands to supply a custom annotations file.
 - `NANOS_ANNOTATIONS_PATH` and `NANOS_ANNOTATIONS` environment variables to configure a custom annotations file.
+- `GITHUB_TOKEN` environment variable support for GitHub API authentication during LuaLS and annotations resolution to avoid rate limiting.
+- Automatic probing and transparent migration of legacy LuaLS cache directories (`%LOCALAPPDATA%\nanos-lint\luals` on Windows, `~/.cache/nanos-lint/luals` on macOS/Linux) from versions <= 2.2.1 to prevent unnecessary re-downloads.
 - `annotations` input to GitHub Action (`action.yml`).
 - Atomic cache update transaction for annotations with automated rollback on failure.
 - npm version badge in `README.md`.
 
 ### Changed
 - Standardized cross-platform application cache, config, data, and temp path resolution using `env-paths` in `src/paths.ts`.
+- **Cache relocation migration note**: System cache paths now resolve to `%LOCALAPPDATA%\nanos-lint\Cache` on Windows and `~/Library/Caches/nanos-lint` on macOS (standard platform cache paths). Existing cache directories from <= 2.2.1 are automatically probed and migrated.
+- `mergeConfigs()` now accepts either an `annotations.lua` file path or a directory containing `annotations.lua` for seamless backwards compatibility.
+- Deprecated `getDefinitionsDir()` in favor of `getDefaultAnnotationsPath()`.
 - Removed Git submodule `vendor/nanos-world-vscode-extension`, `.gitmodules`, and the periodic synchronization workflow `.github/workflows/sync-annotations.yml`.
 - Standalone packaged release builds now download and bundle `annotations.lua` at build time to enable complete offline execution.
 - Clarified in `README.md` that standalone binary distributions require Node.js installed on the host machine.
 - Updated vulnerability reporting link in `SECURITY.md` to GitHub repository security advisories.
 
 ### Fixed
+- **Annotation error reporting**: Differentiated filesystem and permission errors (`EACCES`, `ENOSPC`, etc.) from network errors in `resolveAnnotations()`, preserving the original error cause without incorrectly diagnosing a network failure.
+- **Early configuration validation**: CLI `check` command now verifies the existence of any custom `--config` path before initiating annotation resolution.
+- **Offline cache persistence**: Updated `lastChecked` date when falling back to existing cached annotations during offline or rate-limited sessions, avoiding repeated failing network calls.
+- **Cache marker validation**: `resolveLuaLSBinary()` now strictly verifies that `.complete` exists and matches the expected version before accepting a cache hit, preventing stale or partially extracted binaries from being used.
+- **Atomic promotion cleanup**: Cleans up corrupted destination directories if promotion fails in `downloadAndExtractLuaLS()`, and eliminated redundant `isBinaryValid()` subprocess execution during binary extraction.
+- **Release workflow hardening**: Used `curl -fsSL` with minimum size verification in `.github/workflows/release.yml` to prevent bundling error pages into release packages.
 - **Race conditions & Windows file locking (`EBUSY`/`EPERM`)**: Staged temporary downloads in `os.tmpdir()` and introduced retry backoffs (`copyFileWithRetry`) when promoting cached annotations files across concurrent multi-worker processes.
 - **Integration test isolation**: Ensured annotations are pre-cached in `beforeAll` for live LuaLS test suites, and isolated `cleanCache()` operations in unit tests to prevent accidental deletion of shared cache.
 - **CodeQL `js/incomplete-url-substring-sanitization`**: Replaced substring URL check in annotations unit test mocks with strict URL hostname parsing.

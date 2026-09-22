@@ -182,7 +182,11 @@ export async function downloadAndCacheAnnotations(
     fs.mkdirSync(tempDir, { recursive: true });
 
     if (!options?.quiet) {
-      console.log(`[annotations] Downloading nanos world API annotations (${commitId.slice(0, 7)})...`);
+      if (commitId && commitId !== "unknown") {
+        console.log(`[annotations] Downloading nanos world API annotations (${commitId.slice(0, 7)})...`);
+      } else {
+        console.log("[annotations] Downloading nanos world API annotations...");
+      }
     }
 
     // Step 1: Download annotations text
@@ -230,7 +234,11 @@ export async function downloadAndCacheAnnotations(
     await copyFileWithRetry(tempMetaPath, finalMetaPath);
 
     if (!options?.quiet) {
-      console.log(`[annotations] Updated annotations.lua to commit ${commitId.slice(0, 7)}.`);
+      if (commitId && commitId !== "unknown") {
+        console.log(`[annotations] Updated annotations.lua to commit ${commitId.slice(0, 7)}.`);
+      } else {
+        console.log("[annotations] Updated annotations.lua.");
+      }
     }
 
     return finalAnnotationsPath;
@@ -333,6 +341,11 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
 
   // If GitHub API could not be reached (offline or rate limit):
   if (fs.existsSync(cachedAnnotationsFile)) {
+    try {
+      updateLastCheckedDate(metadata?.commitId || "unknown", cacheDir);
+    } catch {
+      // Ignore write errors (e.g. read-only filesystem)
+    }
     return cachedAnnotationsFile;
   }
 
@@ -340,6 +353,25 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
   try {
     return await downloadAndCacheAnnotations("unknown", cacheDir, options);
   } catch (err) {
+    const isFsError =
+      Boolean(
+        err &&
+          typeof err === "object" &&
+          "code" in err &&
+          typeof (err as { code: unknown }).code === "string" &&
+          ["EACCES", "EPERM", "ENOSPC", "EROFS", "EEXIST", "ENOENT"].includes(
+            (err as { code: string }).code
+          )
+      ) ||
+      (err instanceof Error &&
+        /permission denied|read-only|no space left/i.test(err.message));
+
+    if (isFsError) {
+      throw new Error(
+        `Failed to resolve nanos world API annotations due to a filesystem error: ${err instanceof Error ? err.message : String(err)}. Please check directory permissions or pass a custom file with --annotations.`,
+        { cause: err }
+      );
+    }
     throw new Error(
       `Failed to resolve nanos world API annotations. Please check your network connection or pass a custom file with --annotations. (${err instanceof Error ? err.message : String(err)})`,
       { cause: err }
