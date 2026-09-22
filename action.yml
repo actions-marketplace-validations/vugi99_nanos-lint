@@ -38,6 +38,10 @@ inputs:
     description: 'Files or directories to ignore (supports glob patterns, multiple entries can be newline or comma separated)'
     required: false
     default: ''
+  cache:
+    description: 'Whether to cache the LuaLS binary and annotations across workflow runs'
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -46,6 +50,19 @@ runs:
       uses: actions/setup-node@v7
       with:
         node-version: '24'
+
+    - name: Cache LuaLS binary and annotations
+      if: ${{ inputs.cache != 'false' }}
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.cache/nanos-lint
+          ~/AppData/Local/nanos-lint
+          ~/Library/Caches/nanos-lint
+        key: nanos-lint-${{ runner.os }}-${{ inputs.luals-version }}
+        restore-keys: |
+          nanos-lint-${{ runner.os }}-${{ inputs.luals-version }}-
+          nanos-lint-${{ runner.os }}-
 
     - name: Run nanos-lint
       shell: bash
@@ -90,7 +107,7 @@ runs:
         if [ -f "$ACTION_PATH/dist/cli.js" ]; then
           node "$ACTION_PATH/dist/cli.js" "${ARGS[@]}"
         else
-          npx --yes nanos-lint@^2.1.0 "${ARGS[@]}"
+          npx --yes nanos-lint@^2.6.0 "${ARGS[@]}"
         fi
 
 

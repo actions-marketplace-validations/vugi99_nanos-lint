@@ -101,6 +101,7 @@ jobs:
 | `luals-version` | Version of `lua-language-server` to use | `latest` |
 | `fail-on-error` | Fail the workflow step if diagnostics are found | `true` |
 | `quiet` | Suppress progress messages | `false` |
+| `cache` | Whether to cache the LuaLS binary and annotations across workflow runs | `true` |
 
 When running inside GitHub Actions, `nanos-lint` automatically outputs **workflow annotations** (`::error` / `::warning`) that appear inline on PR diffs.
 
