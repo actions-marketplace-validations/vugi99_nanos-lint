@@ -7,11 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-09-23
+
 ### Added
 - Built-in GitHub Actions caching in `action.yml` using `actions/cache@v6` with a configurable `cache` input (default: `true`), automatically caching LuaLS binaries and annotations across runs for consumers of the action.
 
 ### Changed
-- Updated fallback npx execution in `action.yml` to target `nanos-lint@^2.6.0`.
+- Updated fallback npx execution in `action.yml` to target `nanos-lint@^2.6.1`.
 
 ## [2.6.0] - 2026-09-23
 

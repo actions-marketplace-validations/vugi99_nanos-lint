@@ -107,7 +107,7 @@ runs:
         if [ -f "$ACTION_PATH/dist/cli.js" ]; then
           node "$ACTION_PATH/dist/cli.js" "${ARGS[@]}"
         else
-          npx --yes nanos-lint@^2.6.0 "${ARGS[@]}"
+          npx --yes nanos-lint@^2.6.1 "${ARGS[@]}"
         fi
 
 
