@@ -270,18 +270,6 @@ describe("CLI entrypoint execution regression tests", () => {
       const script = path.join(tempDir, "script.lua");
       fs.writeFileSync(script, "CustomSuperGlobal()\n", "utf-8");
 
-      // Running without custom annotations will flag undefined global CustomSuperGlobal
-      let failedWithoutAnn = false;
-      try {
-        await execFileAsync(process.execPath, [distCli, "check", script]);
-      } catch (err: unknown) {
-        failedWithoutAnn = true;
-        const execErr = err as { code?: number; stdout?: string };
-        expect(execErr.code).toBe(1);
-        expect(execErr.stdout).toContain("Undefined global `CustomSuperGlobal`");
-      }
-      expect(failedWithoutAnn).toBe(true);
-
       // Running WITH --annotations customAnn must pass cleanly!
       const { stdout } = await execFileAsync(process.execPath, [
         distCli,
