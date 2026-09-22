@@ -30,7 +30,7 @@
   "files": [
     "bin",
     "dist",
-    "definitions",
+    "vendor/nanos-world-vscode-extension/annotations.lua",
     "templates",
     "action.yml",
     "README.md",
@@ -39,11 +39,10 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint \"src/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0",
-    "lint:fix": "eslint \"src/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" --fix --max-warnings=0",
+    "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0",
+    "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix --max-warnings=0",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "sync-annotations": "tsx scripts/sync-annotations.ts"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "commander": "^15.0.0"

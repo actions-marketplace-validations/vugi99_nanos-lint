@@ -2,12 +2,16 @@ name: Sync Annotations
 
 on:
   schedule:
-    - cron: '0 4 * * 1' # Every Monday at 04:00 UTC
+    - cron: '0 1 * * *' # Every day at 01:00 UTC (1h after upstream docgen schedule)
   workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   sync:
-    name: Sync & Patch Upstream Annotations
+    name: Update Upstream Annotations Submodule
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -27,9 +31,6 @@ jobs:
       - name: Update submodule
         run: git submodule update --remote --merge
 
-      - name: Sync and sanitize annotations
-        run: npm run sync-annotations
-
       - name: Run verification tests
         run: |
           npm run typecheck
@@ -38,14 +39,12 @@ jobs:
       - name: Create Pull Request if changes detected
         uses: peter-evans/create-pull-request@v8
         with:
-          commit-message: 'chore: update and patch nanos world annotations'
-          title: 'chore: update and patch nanos world annotations'
+          commit-message: 'chore: update nanos world annotations submodule'
+          title: 'chore: update nanos world annotations submodule'
           body: |
-            Automated synchronization from upstream `nanos-world/vscode-extension` (`docgen-output` branch).
-            
-            - Synced upstream changes.
-            - Sanitized Issue #20 multi-line parameter tables.
-            - Verified against Vitest test suite.
+            Automated synchronization of submodule `vendor/nanos-world-vscode-extension` from upstream `docgen-output` branch.
+
+            - Synced upstream submodule changes.
+            - Verified against TypeScript typecheck and Vitest test suite.
           branch: 'chore/sync-annotations'
           delete-branch: true
-

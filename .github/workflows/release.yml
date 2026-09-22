@@ -89,13 +89,13 @@ jobs:
           mkdir -p release-builds
 
           # 1. Windows x64 Package
-          mkdir -p pkg-windows/bin pkg-windows/definitions pkg-windows/templates pkg-windows/dist
+          mkdir -p pkg-windows/bin pkg-windows/vendor/nanos-world-vscode-extension pkg-windows/templates pkg-windows/dist
           curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-win32-x64.zip" -o luals-win.zip
           unzip -q luals-win.zip -d pkg-windows-luals
           cp -r pkg-windows-luals/bin/* pkg-windows/bin/
           cp -r pkg-windows-luals/locale pkg-windows-luals/meta pkg-windows-luals/script pkg-windows-luals/main.lua pkg-windows/ 2>/dev/null || true
           cp -r dist/. pkg-windows/dist/
-          cp -r definitions/. pkg-windows/definitions/
+          cp -r vendor/nanos-world-vscode-extension/. pkg-windows/vendor/nanos-world-vscode-extension/
           cp -r templates/. pkg-windows/templates/
           cp package.json README.md LICENSE pkg-windows/
           
@@ -108,13 +108,13 @@ jobs:
           (cd pkg-windows && zip -rq "../release-builds/nanos-lint-${TAG_NAME}-windows-x64.zip" .)
 
           # 2. Linux x64 Package
-          mkdir -p pkg-linux/bin pkg-linux/definitions pkg-linux/templates pkg-linux/dist
+          mkdir -p pkg-linux/bin pkg-linux/vendor/nanos-world-vscode-extension pkg-linux/templates pkg-linux/dist
           curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-linux-x64.tar.gz" -o luals-linux.tar.gz
           tar -xzf luals-linux.tar.gz -C pkg-linux-luals 2>/dev/null || (mkdir -p pkg-linux-luals && tar -xzf luals-linux.tar.gz -C pkg-linux-luals)
           cp -r pkg-linux-luals/bin/* pkg-linux/bin/
           cp -r pkg-linux-luals/locale pkg-linux-luals/meta pkg-linux-luals/script pkg-linux-luals/main.lua pkg-linux/ 2>/dev/null || true
           cp -r dist/. pkg-linux/dist/
-          cp -r definitions/. pkg-linux/definitions/
+          cp -r vendor/nanos-world-vscode-extension/. pkg-linux/vendor/nanos-world-vscode-extension/
           cp -r templates/. pkg-linux/templates/
           cp package.json README.md LICENSE pkg-linux/
 

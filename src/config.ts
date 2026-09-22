@@ -23,7 +23,7 @@ export function getPackageRoot(): string {
 
 export function getDefinitionsDir(): string {
   const root = getPackageRoot();
-  return path.join(root, "definitions");
+  return path.join(root, "vendor", "nanos-world-vscode-extension");
 }
 
 export function getDefaultTemplatePath(): string {

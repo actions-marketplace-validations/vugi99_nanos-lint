@@ -13,7 +13,7 @@ This document outlines the architectural principles, codebase structure, develop
 - **Bundler**: `tsdown` 0.23 (powered by Rolldown, compiles `src/` to a standalone `dist/` targeting Node.js 24 with zero runtime dependencies)
 - **Testing**: `vitest` 5 (unit tests and live LuaLS integration tests)
 - **Linting & Code Quality**: `eslint` 10 (flat config `eslint.config.mjs` with `typescript-eslint`)
-- **API Definitions**: Upstream submodule tracking `https://github.com/nanos-world/vscode-extension` (`docgen-output` branch), patched into `definitions/annotations.lua`
+- **API Definitions**: Upstream submodule tracking `https://github.com/nanos-world/vscode-extension` (`docgen-output` branch), loaded directly via `vendor/nanos-world-vscode-extension/annotations.lua`
 
 ---
 
@@ -27,10 +27,7 @@ This document outlines the architectural principles, codebase structure, develop
    - LuaLS binary downloading and extraction must use cross-platform extraction (`tar` with PowerShell `Expand-Archive` fallback on Windows).
 3. **Respect Workspace Configurations**:
    - `nanos-lint` must never overwrite or ignore user workspace `.luarc.json` configurations.
-   - When a user provides custom settings or disabled diagnostics, `src/config.ts` merges them on top of the base template while ensuring `definitions/annotations.lua` is included in `workspace.library`.
-4. **Issue #20 Upstream Workaround**:
-   - Upstream `annotations.lua` contains multiline parameter default tables in `VehicleWheeled:SetEngineSetup`, `SetSteeringSetup`, and `SetTransmissionSetup` that lack `---` comment prefixes.
-   - Any annotations sync **must** pass through `scripts/sync-annotations.ts` (`sanitizeAnnotations`) to maintain valid EmmyLua syntax so LuaLS does not drop function annotations.
+   - When a user provides custom settings or disabled diagnostics, `src/config.ts` merges them on top of the base template while ensuring `vendor/nanos-world-vscode-extension` annotations are included in `workspace.library`.
 
 ---
 
@@ -41,7 +38,6 @@ nanos-lint/
 ├── .github/workflows/       # CI, CD Release, and Annotations Sync workflows
 ├── action.yml               # GitHub Action composite definition
 ├── bin/nanos-lint.js        # Executable CLI entrypoint (#!/usr/bin/env node)
-├── definitions/             # Sanitized nanos world Lua API annotations
 ├── templates/               # Default base .luarc.json template (Lua 5.4, globals)
 ├── vendor/                  # Submodule for upstream nanos-world vscode-extension
 ├── src/
@@ -51,8 +47,6 @@ nanos-lint/
 │   ├── reporter.ts          # Terminal pretty, JSON, and GitHub Actions annotation formatters
 │   ├── cli.ts               # CLI command-line parser
 │   └── index.ts             # Public programmatic exports
-├── scripts/
-│   └── sync-annotations.ts  # Fetches and patches annotations for Issue #20
 ├── tests/
 │   ├── pass/                # Valid nanos world Lua fixtures (must pass with 0 errors)
 │   ├── fail/                # Invalid Lua fixtures (must produce expected diagnostics)

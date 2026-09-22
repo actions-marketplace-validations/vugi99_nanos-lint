@@ -11,8 +11,7 @@ A dedicated, fast linter and type-checker for **[nanos world](https://nanos.worl
 
 ## Features
 
-- **Accurate nanos world Type Checking**: Bundles verified, sanitized API annotations for nanos world (Lua 5.4.9).
-- **[Issue #20 Fixed](https://github.com/nanos-world/vscode-extension/issues/20)**: Includes patches for multiline parameter default tables in `VehicleWheeled:SetEngineSetup`, `SetSteeringSetup`, and `SetTransmissionSetup` so function types are completely validated.
+- **Accurate nanos world Type Checking**: Bundles verified nanos world API annotations (Lua 5.4.9).
 - **Zero-Install Local CLI**: Run directly via `npx nanos-lint [path]` without installing anything.
 - **Native GitHub Action**: Use `vugi99/nanos-lint` directly in CI workflows with inline GitHub PR annotations.
 - **Workspace Config Merging**: Fully respects local `.luarc.json` files, merging your project globals and disabled diagnostics on top of the nanos API.
@@ -160,8 +159,8 @@ cd nanos-lint
 # Install dependencies
 npm install
 
-# Sync & sanitize latest annotations from upstream
-npm run sync-annotations
+# Update annotations submodule from upstream
+git submodule update --remote --merge
 
 # Run ESLint
 npm run lint

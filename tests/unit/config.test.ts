@@ -18,7 +18,7 @@ describe("config module", () => {
     expect(typeof root).toBe("string");
 
     const defDir = getDefinitionsDir();
-    expect(defDir).toBe(path.join(root, "definitions"));
+    expect(defDir).toBe(path.join(root, "vendor", "nanos-world-vscode-extension"));
 
     const template = getDefaultTemplatePath();
     expect(template).toBe(path.join(root, "templates", ".luarc.json"));
