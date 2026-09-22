@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { parse, stripComments, type ParseError, printParseErrorCode } from "jsonc-parser";
 import type { LuaRCConfig } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -32,112 +33,24 @@ export function getDefaultTemplatePath(): string {
 }
 
 /**
- * Strips single-line comments (//), multi-line comments (/* ... *\/),
- * and trailing commas before '}' or ']' from JSONC text while preserving string literals.
+ * Strips single-line and multi-line comments from JSONC text using jsonc-parser.
  */
 export function stripJsonComments(text: string): string {
   const cleanText = text.replace(/^\uFEFF/, "");
-  let result = "";
-  let i = 0;
-  const len = cleanText.length;
-
-  while (i < len) {
-    const ch = cleanText[i];
-
-    // String literal: preserve entirely, including escaped characters
-    if (ch === '"') {
-      result += ch;
-      i++;
-      while (i < len) {
-        const c = cleanText[i];
-        result += c;
-        if (c === "\\") {
-          i++;
-          if (i < len) {
-            result += cleanText[i];
-          }
-        } else if (c === '"') {
-          break;
-        }
-        i++;
-      }
-      i++;
-      continue;
-    }
-
-    // Single-line comment: // ...
-    if (ch === "/" && i + 1 < len && cleanText[i + 1] === "/") {
-      i += 2;
-      while (i < len && cleanText[i] !== "\n" && cleanText[i] !== "\r") {
-        i++;
-      }
-      continue;
-    }
-
-    // Multi-line comment: /* ... */
-    if (ch === "/" && i + 1 < len && cleanText[i + 1] === "*") {
-      i += 2;
-      while (i + 1 < len && !(cleanText[i] === "*" && cleanText[i + 1] === "/")) {
-        i++;
-      }
-      i += 2;
-      continue;
-    }
-
-    // Trailing comma check before '}' or ']'
-    if (ch === ",") {
-      let j = i + 1;
-      let isTrailing = false;
-
-      while (j < len) {
-        const nextChar = cleanText[j];
-        if (
-          nextChar === " " ||
-          nextChar === "\t" ||
-          nextChar === "\n" ||
-          nextChar === "\r"
-        ) {
-          j++;
-          continue;
-        }
-        if (nextChar === "/" && j + 1 < len && cleanText[j + 1] === "/") {
-          j += 2;
-          while (j < len && cleanText[j] !== "\n" && cleanText[j] !== "\r") {
-            j++;
-          }
-          continue;
-        }
-        if (nextChar === "/" && j + 1 < len && cleanText[j + 1] === "*") {
-          j += 2;
-          while (j + 1 < len && !(cleanText[j] === "*" && cleanText[j + 1] === "/")) {
-            j++;
-          }
-          j += 2;
-          continue;
-        }
-        if (nextChar === "}" || nextChar === "]") {
-          isTrailing = true;
-        }
-        break;
-      }
-
-      if (isTrailing) {
-        result += " ";
-        i++;
-        continue;
-      }
-    }
-
-    result += ch;
-    i++;
-  }
-
-  return result;
+  return stripComments(cleanText);
 }
 
 export function parseJsonc<T = unknown>(text: string): T {
-  const stripped = stripJsonComments(text);
-  return JSON.parse(stripped) as T;
+  const cleanText = text.replace(/^\uFEFF/, "");
+  const errors: ParseError[] = [];
+  const result = parse(cleanText, errors, { allowTrailingComma: true });
+  if (errors.length > 0) {
+    const errorDetails = errors
+      .map((e) => `${printParseErrorCode(e.error)} at offset ${e.offset}`)
+      .join(", ");
+    throw new SyntaxError(`Invalid JSONC: ${errorDetails}`);
+  }
+  return result as T;
 }
 
 export function loadConfigFile(filePath: string): LuaRCConfig {

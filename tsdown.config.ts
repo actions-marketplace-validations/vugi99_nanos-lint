@@ -9,9 +9,12 @@ export default defineConfig({
   target: "node24",
   shims: true,
   fixedExtension: false,
+  alias: {
+    "jsonc-parser": "jsonc-parser/lib/esm/main.js",
+  },
   deps: {
-    alwaysBundle: ["commander"],
-    onlyBundle: ["commander"],
+    alwaysBundle: ["commander", "jsonc-parser"],
+    onlyBundle: ["commander", "jsonc-parser"],
   },
 });
 
