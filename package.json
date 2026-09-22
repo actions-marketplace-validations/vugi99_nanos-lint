@@ -15,7 +15,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vugi99/nanos-lint.git"
+    "url": "git+https://github.com/vugi99/nanos-lint.git"
   },
   "bugs": {
     "url": "https://github.com/vugi99/nanos-lint/issues"
@@ -25,7 +25,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "nanos-lint": "./bin/nanos-lint.js"
+    "nanos-lint": "bin/nanos-lint.js"
   },
   "files": [
     "bin",
