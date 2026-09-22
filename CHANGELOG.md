@@ -8,16 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Dynamic download and date-based caching for `annotations.lua` from `nanos-world/vscode-extension` (`docgen-output` branch), removing the git submodule.
-- `--annotations <path>` CLI option to specify a custom annotations file for `check` and `init` commands.
+- `clean-cache` (and `clean` alias) CLI command to safely purge cached LuaLS binaries and annotations (`nanos-lint clean-cache`).
+- Dynamic downloading and date-based cache validation for `annotations.lua` from repository `nanos-world/vscode-extension` (`docgen-output` branch), eliminating the upstream Git submodule.
+- `--annotations <path>` CLI option for `check` and `init` commands to supply a custom annotations file.
 - `NANOS_ANNOTATIONS_PATH` and `NANOS_ANNOTATIONS` environment variables to configure a custom annotations file.
-- `annotations` input in GitHub Action (`action.yml`).
-- Atomic cache update transaction with rollback on failure.
+- `annotations` input to GitHub Action (`action.yml`).
+- Atomic cache update transaction for annotations with automated rollback on failure.
+- npm version badge in `README.md`.
 
 ### Changed
-- Removed git submodule `vendor/nanos-world-vscode-extension` and `.gitmodules`.
-- Pre-packaged release bundles download and bundle `annotations.lua` at build time for offline execution.
-- Clarified in `README.md` that standalone release distributions require Node.js on the host machine.
+- Standardized cross-platform application cache, config, data, and temp path resolution using `env-paths` in `src/paths.ts`.
+- Removed Git submodule `vendor/nanos-world-vscode-extension`, `.gitmodules`, and the periodic synchronization workflow `.github/workflows/sync-annotations.yml`.
+- Standalone packaged release builds now download and bundle `annotations.lua` at build time to enable complete offline execution.
+- Clarified in `README.md` that standalone binary distributions require Node.js installed on the host machine.
+- Updated vulnerability reporting link in `SECURITY.md` to GitHub repository security advisories.
+
+### Fixed
+- **Race conditions & Windows file locking (`EBUSY`/`EPERM`)**: Staged temporary downloads in `os.tmpdir()` and introduced retry backoffs (`copyFileWithRetry`) when promoting cached annotations files across concurrent multi-worker processes.
+- **Integration test isolation**: Ensured annotations are pre-cached in `beforeAll` for live LuaLS test suites, and isolated `cleanCache()` operations in unit tests to prevent accidental deletion of shared cache.
+- **CodeQL `js/incomplete-url-substring-sanitization`**: Replaced substring URL check in annotations unit test mocks with strict URL hostname parsing.
 
 ## [2.5.0] - 2026-09-22
 
