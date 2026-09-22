@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
 import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.js";
+import { resolveAnnotations } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
 import { formatReport } from "./reporter.js";
@@ -29,6 +30,7 @@ export function collectIgnorePatterns(val: string, prev?: string[]): string[] {
 interface CheckCommandOptions {
   checklevel: DiagnosticSeverity;
   config?: string;
+  annotations?: string;
   format?: "pretty" | "json" | "github";
   lualsVersion: string;
   fail: boolean;
@@ -66,6 +68,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
         .default("Warning")
     )
     .option("--config <path>", "Path to custom .luarc.json configuration file")
+    .option("--annotations <path>", "Path to custom annotations.lua file")
     .addOption(
       new Option(
         "--format <format>",
@@ -97,8 +100,14 @@ export function createProgram(options?: CreateProgramOptions): Command {
         ignore: opts.ignore,
       };
 
+      const annotationsPath = await resolveAnnotations({
+        customPath: opts.annotations,
+        quiet: opts.quiet,
+      });
+
       const resolved = resolveWorkspaceConfig(targetPath, checkOptions.configpath, {
         ignore: checkOptions.ignore,
+        annotationsPath,
       });
       let result;
       try {
@@ -129,8 +138,15 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .command("init [path]")
     .description("Scaffold a .luarc.json configuration in the workspace")
     .option("-f, --force", "Overwrite existing .luarc.json configuration")
-    .action((targetPath: string = ".", opts: { force?: boolean }) => {
-      const created = initWorkspace(path.resolve(targetPath), { force: opts.force });
+    .option("--annotations <path>", "Path to custom annotations.lua file")
+    .action(async (targetPath: string = ".", opts: { force?: boolean; annotations?: string }) => {
+      const annotationsPath = await resolveAnnotations({
+        customPath: opts.annotations,
+      });
+      const created = initWorkspace(path.resolve(targetPath), {
+        force: opts.force,
+        annotationsPath,
+      });
       console.log(`[init] Initialized nanos world LuaLS configuration: ${created}`);
       setExitCode(0);
     });

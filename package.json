@@ -30,7 +30,6 @@
   "files": [
     "bin",
     "dist",
-    "vendor/nanos-world-vscode-extension/annotations.lua",
     "templates",
     "action.yml",
     "README.md",

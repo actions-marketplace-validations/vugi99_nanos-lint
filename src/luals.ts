@@ -386,15 +386,24 @@ export async function resolveLuaLSBinary(
   version: string = DEFAULT_LUALS_VERSION,
   options?: ResolveLuaLSOptions
 ): Promise<string> {
-  // 1. Explicit env var
+  // 1. Environment variable override
   if (process.env.LUALS_BIN && fs.existsSync(process.env.LUALS_BIN)) {
     return process.env.LUALS_BIN;
+  }
+
+  // 2. Bundled with package (release distribution) - check early for default version to avoid network delay
+  if (!version || version === "latest") {
+    const defaultInfo = getPlatformInfo(FALLBACK_LUALS_VERSION);
+    const defaultBundledPath = path.join(getPackageRoot(), defaultInfo.binaryRelativePath);
+    if (fs.existsSync(defaultBundledPath) && isBinaryValid(defaultBundledPath)) {
+      return defaultBundledPath;
+    }
   }
 
   const resolvedVersion = await resolveLuaLSVersion(version);
   const info = getPlatformInfo(resolvedVersion);
 
-  // 2. Bundled with package (release distribution)
+  // Bundled with package for explicitly requested version
   const bundledPath = path.join(getPackageRoot(), info.binaryRelativePath);
   if (fs.existsSync(bundledPath) && isBinaryValid(bundledPath)) {
     return bundledPath;

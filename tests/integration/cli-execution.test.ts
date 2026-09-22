@@ -258,5 +258,67 @@ describe("CLI entrypoint execution regression tests", () => {
       fs.rmSync(tempEnvDir, { recursive: true, force: true });
     }
   });
+
+  it("executes dist/cli.js check with custom --annotations path", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-custom-ann-test-"));
+    const annDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-ann-dir-"));
+    try {
+      const customAnn = path.join(annDir, "custom-annotations.lua");
+      // Define a custom global function in the custom annotations file
+      fs.writeFileSync(customAnn, "---@type fun(): void\nCustomSuperGlobal = nil\n", "utf-8");
+
+      const script = path.join(tempDir, "script.lua");
+      fs.writeFileSync(script, "CustomSuperGlobal()\n", "utf-8");
+
+      // Running without custom annotations will flag undefined global CustomSuperGlobal
+      let failedWithoutAnn = false;
+      try {
+        await execFileAsync(process.execPath, [distCli, "check", script]);
+      } catch (err: unknown) {
+        failedWithoutAnn = true;
+        const execErr = err as { code?: number; stdout?: string };
+        expect(execErr.code).toBe(1);
+        expect(execErr.stdout).toContain("Undefined global `CustomSuperGlobal`");
+      }
+      expect(failedWithoutAnn).toBe(true);
+
+      // Running WITH --annotations customAnn must pass cleanly!
+      const { stdout } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        script,
+        "--annotations",
+        customAnn,
+      ]);
+      expect(stdout).toMatch(/Diagnosis completed, no problems found/);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      fs.rmSync(annDir, { recursive: true, force: true });
+    }
+  });
+
+  it("executes dist/cli.js check with custom NANOS_ANNOTATIONS_PATH environment variable", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-env-ann-test-"));
+    const annDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-env-ann-dir-"));
+    try {
+      const customAnn = path.join(annDir, "custom-annotations.lua");
+      fs.writeFileSync(customAnn, "---@type fun(): void\nEnvSuperGlobal = nil\n", "utf-8");
+
+      const script = path.join(tempDir, "script.lua");
+      fs.writeFileSync(script, "EnvSuperGlobal()\n", "utf-8");
+
+      const { stdout } = await execFileAsync(process.execPath, [distCli, "check", script], {
+        env: {
+          ...process.env,
+          NANOS_ANNOTATIONS_PATH: customAnn,
+        },
+      });
+      expect(stdout).toMatch(/Diagnosis completed, no problems found/);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      fs.rmSync(annDir, { recursive: true, force: true });
+    }
+  });
 });
+
 

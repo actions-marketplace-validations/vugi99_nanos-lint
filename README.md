@@ -96,6 +96,7 @@ jobs:
 | `path` | Path to workspace directory or Lua file to check | `.` |
 | `checklevel` | Minimum severity to report (`Error`, `Warning`, `Information`, `Hint`) | `Warning` |
 | `config` | Path to a custom `.luarc.json` configuration file | `""` |
+| `annotations` | Path to a custom `annotations.lua` file | `""` |
 | `ignore` | Files or directories to ignore (supports glob patterns, newline or comma separated) | `""` |
 | `luals-version` | Version of `lua-language-server` to use | `latest` |
 | `fail-on-error` | Fail the workflow step if diagnostics are found | `true` |
@@ -122,6 +123,7 @@ OPTIONS:
   -i, --ignore <pattern>   Files or directories to ignore (supports globs, repeatable, comma/newline-separated)
   --checklevel=<level>     Minimum diagnostic level: Error, Warning, Information, Hint (default: Warning)
   --config=<path>          Path to custom .luarc.json configuration file
+  --annotations=<path>     Path to custom annotations.lua file
   --format=<format>        Output format: pretty, json, github (default: pretty)
   --github                 Output in GitHub Actions format (shortcut for --format=github)
   --luals-version=<ver>    Version of LuaLS to use (default: latest)
@@ -135,6 +137,7 @@ OPTIONS:
 | Variable | Description |
 | :--- | :--- |
 | `LUALS_BIN` | Explicit path to a pre-installed `lua-language-server` binary |
+| `NANOS_ANNOTATIONS_PATH` | Explicit path to a custom `annotations.lua` file |
 | `NO_COLOR` | Disables ANSI color output when set to any non-empty value |
 | `FORCE_COLOR` | Forces ANSI color output even in non-TTY environments |
 
@@ -167,14 +170,14 @@ npx nanos-lint init --force
 
 ---
 
-## Standalone Binary Distributions (Offline / CD)
+## Pre-packaged Release Distributions (Offline / CD)
 
-For environments without Node.js, pre-packaged release bundles containing the compiled `lua-language-server` binary and nanos-lint wrapper are available on the [Releases](https://github.com/vugi99/nanos-lint/releases) page:
+Pre-packaged release bundles containing the platform's `lua-language-server` binary, vendored `annotations.lua`, and the nanos-lint CLI wrapper are available on the [Releases](https://github.com/vugi99/nanos-lint/releases) page:
 
 - `nanos-lint-<version>-windows-x64.zip`
 - `nanos-lint-<version>-linux-x64.tar.gz`
 
-Simply extract the archive and run `./nanos-lint` (Linux) or `nanos-lint.cmd` (Windows).
+These bundles are fully self-contained and ready for offline CI/CD environments with Node.js installed, eliminating the need to download LuaLS or annotations at runtime. Simply extract the archive and run `./nanos-lint` (Linux) or `nanos-lint.cmd` (Windows).
 
 ---
 

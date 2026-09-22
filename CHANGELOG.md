@@ -5,6 +5,20 @@ All notable changes to `nanos-lint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Dynamic download and date-based caching for `annotations.lua` from `nanos-world/vscode-extension` (`docgen-output` branch), removing the git submodule.
+- `--annotations <path>` CLI option to specify a custom annotations file for `check` and `init` commands.
+- `NANOS_ANNOTATIONS_PATH` and `NANOS_ANNOTATIONS` environment variables to configure a custom annotations file.
+- `annotations` input in GitHub Action (`action.yml`).
+- Atomic cache update transaction with rollback on failure.
+
+### Changed
+- Removed git submodule `vendor/nanos-world-vscode-extension` and `.gitmodules`.
+- Pre-packaged release bundles download and bundle `annotations.lua` at build time for offline execution.
+- Clarified in `README.md` that standalone release distributions require Node.js on the host machine.
+
 ## [2.5.0] - 2026-09-22
 
 ### Security

@@ -18,6 +18,10 @@ inputs:
     description: 'Path to a custom .luarc.json configuration file'
     required: false
     default: ''
+  annotations:
+    description: 'Path to a custom annotations.lua file'
+    required: false
+    default: ''
   luals-version:
     description: 'Version of LuaLS to use (or "latest")'
     required: false
@@ -49,6 +53,7 @@ runs:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_CHECKLEVEL: ${{ inputs.checklevel }}
         INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_ANNOTATIONS: ${{ inputs.annotations }}
         INPUT_LUALS_VERSION: ${{ inputs.luals-version }}
         INPUT_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         INPUT_QUIET: ${{ inputs.quiet }}
@@ -59,6 +64,10 @@ runs:
 
         if [ -n "$INPUT_CONFIG" ]; then
           ARGS+=("--config=$INPUT_CONFIG")
+        fi
+
+        if [ -n "$INPUT_ANNOTATIONS" ]; then
+          ARGS+=("--annotations=$INPUT_ANNOTATIONS")
         fi
 
         if [ -n "$INPUT_IGNORE" ]; then

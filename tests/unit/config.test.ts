@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   getPackageRoot,
   getDefinitionsDir,
+  getDefaultAnnotationsPath,
   getDefaultTemplatePath,
   loadConfigFile,
   mergeConfigs,
@@ -19,7 +20,12 @@ describe("config module", () => {
     expect(typeof root).toBe("string");
 
     const defDir = getDefinitionsDir();
-    expect(defDir).toBe(path.join(root, "vendor", "nanos-world-vscode-extension"));
+    expect(defDir).toBeDefined();
+    expect(defDir).toContain("annotations");
+
+    const annotationsPath = getDefaultAnnotationsPath();
+    expect(annotationsPath).toBeDefined();
+    expect(annotationsPath).toContain("annotations.lua");
 
     const template = getDefaultTemplatePath();
     expect(template).toBe(path.join(root, "templates", ".luarc.json"));

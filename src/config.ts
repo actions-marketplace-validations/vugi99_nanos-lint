@@ -22,9 +22,23 @@ export function getPackageRoot(): string {
   return path.resolve(__dirname, "..");
 }
 
+export function getDefaultAnnotationsPath(): string {
+  // 1. Env variable
+  const envPath = process.env.NANOS_ANNOTATIONS_PATH || process.env.NANOS_ANNOTATIONS;
+  if (envPath && fs.existsSync(envPath)) {
+    return path.resolve(envPath);
+  }
+  // 2. Bundled with package (release distribution)
+  const bundled = path.join(getPackageRoot(), "annotations.lua");
+  if (fs.existsSync(bundled)) {
+    return bundled;
+  }
+  // 3. User cache
+  return path.join(systemPaths.cache, "annotations", "annotations.lua");
+}
+
 export function getDefinitionsDir(): string {
-  const root = getPackageRoot();
-  return path.join(root, "vendor", "nanos-world-vscode-extension");
+  return path.dirname(getDefaultAnnotationsPath());
 }
 
 export function getDefaultTemplatePath(): string {
@@ -89,15 +103,15 @@ export interface MergeConfigOptions {
 export function mergeConfigs(
   base: LuaRCConfig,
   override: LuaRCConfig = {},
-  definitionsDir: string = getDefinitionsDir(),
+  definitionsPath: string = getDefaultAnnotationsPath(),
   options?: MergeConfigOptions
 ): LuaRCConfig {
-  const normalizedDefDir = definitionsDir.split(path.sep).join("/");
+  const normalizedDefPath = definitionsPath.split(path.sep).join("/");
 
   // Merge library paths
   const baseLibraries = base.workspace?.library ?? [];
   const overrideLibraries = override.workspace?.library ?? [];
-  const librarySet = new Set<string>([normalizedDefDir, ...baseLibraries, ...overrideLibraries]);
+  const librarySet = new Set<string>([normalizedDefPath, ...baseLibraries, ...overrideLibraries]);
 
   // Merge globals
   const baseGlobals = base.diagnostics?.globals ?? [];
@@ -195,6 +209,7 @@ export function mergeConfigs(
 
 export interface ResolveWorkspaceConfigOptions {
   ignore?: string[];
+  annotationsPath?: string;
 }
 
 /**
@@ -207,7 +222,7 @@ export function resolveWorkspaceConfig(
   options?: ResolveWorkspaceConfigOptions
 ): { configPath: string; isTemp: boolean } {
   const defaultTemplate = loadConfigFile(getDefaultTemplatePath());
-  const definitionsDir = getDefinitionsDir();
+  const activeAnnotationsPath = options?.annotationsPath || getDefaultAnnotationsPath();
 
   let userConfig: LuaRCConfig = {};
 
@@ -246,7 +261,7 @@ export function resolveWorkspaceConfig(
     cliIgnore = expanded;
   }
 
-  const merged = mergeConfigs(defaultTemplate, userConfig, definitionsDir, {
+  const merged = mergeConfigs(defaultTemplate, userConfig, activeAnnotationsPath, {
     cliIgnore,
   });
 
@@ -284,6 +299,7 @@ export function resolveWorkspaceConfig(
 
 export interface InitWorkspaceOptions {
   force?: boolean;
+  annotationsPath?: string;
 }
 
 /**
@@ -296,12 +312,11 @@ export function initWorkspace(workspacePath: string, options?: InitWorkspaceOpti
   }
 
   const template = loadConfigFile(getDefaultTemplatePath());
-  const definitionsDir = getDefinitionsDir();
-  const sourceAnnotations = path.join(definitionsDir, "annotations.lua");
+  const sourceAnnotations = options?.annotationsPath || getDefaultAnnotationsPath();
 
   if (!fs.existsSync(sourceAnnotations)) {
     throw new Error(
-      `Definitions file not found at ${sourceAnnotations}. Make sure submodules are initialized.`
+      `Definitions file not found at ${sourceAnnotations}. Make sure annotations have been downloaded or pass a valid file with --annotations.`
     );
   }
 

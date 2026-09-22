@@ -155,11 +155,13 @@ describe("Regression tests for audit review issues", () => {
 
     it("overwrites existing .luarc.json when force is true and writes portable relative library", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-init-force-"));
+      const dummyAnnotations = path.join(tempDir, "source-annotations.lua");
+      fs.writeFileSync(dummyAnnotations, "-- dummy annotations", "utf-8");
       try {
         const existingConfig = path.join(tempDir, ".luarc.json");
         fs.writeFileSync(existingConfig, "{\"old\": true}", "utf-8");
 
-        const created = initWorkspace(tempDir, { force: true });
+        const created = initWorkspace(tempDir, { force: true, annotationsPath: dummyAnnotations });
         expect(created).toBe(existingConfig);
 
         const config = JSON.parse(fs.readFileSync(existingConfig, "utf-8"));
@@ -315,8 +317,10 @@ describe("Regression tests for audit review issues", () => {
   describe("Finding N0: initWorkspace excludes .nanos-lint from workspace diagnostics", () => {
     it("configures files.exclude and workspace.ignoreDir for .nanos-lint in initialized workspace", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n0-init-"));
+      const dummyAnnotations = path.join(tempDir, "source-annotations.lua");
+      fs.writeFileSync(dummyAnnotations, "-- dummy annotations", "utf-8");
       try {
-        const configFile = initWorkspace(tempDir, { force: true });
+        const configFile = initWorkspace(tempDir, { force: true, annotationsPath: dummyAnnotations });
         const config = JSON.parse(fs.readFileSync(configFile, "utf-8"));
 
         // Must exclude .nanos-lint from files to prevent diagnostics on annotations.lua

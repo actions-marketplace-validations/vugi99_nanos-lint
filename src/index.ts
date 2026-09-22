@@ -4,4 +4,5 @@ export * from "./luals.js";
 export * from "./reporter.js";
 export * from "./cli.js";
 export * from "./paths.js";
+export * from "./annotations.js";
 
