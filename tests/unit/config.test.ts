@@ -8,6 +8,7 @@ import {
   mergeConfigs,
   parseJsonc,
   stripJsonComments,
+  stripTrailingSlashes,
 } from "../../src/config.js";
 import type { LuaRCConfig } from "../../src/types.js";
 
@@ -154,5 +155,44 @@ describe("config module", () => {
     const parsed = parseJsonc<{ escaped: string; valid: boolean }>(jsonc);
     expect(parsed.escaped).toBe('value with "quotes" and \\ backslash');
     expect(parsed.valid).toBe(true);
+  });
+
+  describe("stripTrailingSlashes", () => {
+    it("removes trailing slashes", () => {
+      expect(stripTrailingSlashes("myfolder/")).toBe("myfolder");
+      expect(stripTrailingSlashes("myfolder///")).toBe("myfolder");
+      expect(stripTrailingSlashes("myfolder")).toBe("myfolder");
+      expect(stripTrailingSlashes("a/b//")).toBe("a/b");
+      expect(stripTrailingSlashes("C:/dir/")).toBe("C:/dir");
+      expect(stripTrailingSlashes("///")).toBe("");
+      expect(stripTrailingSlashes("")).toBe("");
+    });
+
+    it("stays linear on slash-heavy input that would be quadratic for /\\/+$/", () => {
+      // A trailing-slash regex has to retry its repetition at every offset when the
+      // string does not end with a slash, which is quadratic in the input length.
+      const pathological = "/".repeat(100_000) + "!";
+      const started = Date.now();
+      expect(stripTrailingSlashes(pathological)).toBe(pathological);
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it("keeps CLI ignore expansion working for patterns with trailing slashes", () => {
+      const merged = mergeConfigs({}, {}, "C:/mock/definitions", {
+        cliIgnore: ["myfolder///", "other"],
+      });
+
+      expect(merged.files?.exclude).toContain("myfolder/**");
+      expect(merged.workspace?.ignoreDir).toContain("myfolder");
+      expect(merged.workspace?.ignoreDir).toContain("other");
+    });
+
+    it("merges pathological CLI ignore patterns quickly (js/polynomial-redos regression)", () => {
+      const pathological = ["/".repeat(100_000) + "!", "/".repeat(50_000) + "\\"];
+      const started = Date.now();
+      const merged = mergeConfigs({}, {}, "C:/mock/definitions", { cliIgnore: pathological });
+      expect(Date.now() - started).toBeLessThan(2000);
+      expect(merged.files?.exclude).toContain(pathological[0]);
+    });
   });
 });

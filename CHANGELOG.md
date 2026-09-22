@@ -5,6 +5,21 @@ All notable changes to `nanos-lint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **CodeQL `js/command-line-injection`**: LuaLS version/tag strings are now validated with an allow-list before use. Values obtained from the GitHub releases API (`tag_name`) and from user supplied `--luals-version` arguments are interpolated into cache directory paths, download URLs, and the path of the executed binary, so they are rebuilt character by character (`sanitizeLuaLSVersion()`) and rejected unless they form a single safe path segment. This prevents path traversal or command injection through a crafted release tag.
+- **CodeQL `js/shell-command-injection-from-environment`**: The Windows `.cmd` launcher integration test no longer puts an environment-derived absolute path on a command line interpreted by `cmd.exe`; the launcher is referenced by name and resolved through the `cwd` option.
+- **CodeQL `actions/missing-workflow-permissions`**: Added an explicit least-privilege `permissions: contents: read` block to `.github/workflows/ci.yml` so the workflow token stays read-only regardless of repository/organization defaults.
+- Validated the LuaLS release tag fetched in the release workflow before it is used in a shell command.
+
+### Fixed
+- **CodeQL `js/polynomial-redos`**: Removed the `\/+$` regular expressions used to trim trailing slashes in `src/config.ts` and replaced them with the linear `stripTrailingSlashes()` scan, eliminating quadratic backtracking on slash-heavy input.
+
+### Changed
+- `resolveLuaLSVersion()` now throws a descriptive error for an invalid explicitly requested version instead of returning it unchanged.
+- Added exported helpers `sanitizeLuaLSVersion()` (`src/luals.ts`) and `stripTrailingSlashes()` (`src/config.ts`).
+
 ## [2.4.0] - 2026-09-22
 
 ### Changed

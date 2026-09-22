@@ -13,6 +13,12 @@ on:
   pull_request:
     branches: [ master, main ]
 
+# Least privilege: this workflow only needs to read the repository. Declaring it
+# explicitly keeps the token read-only even when the repository or organization
+# default is read-write (CodeQL: actions/missing-workflow-permissions).
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test (${{ matrix.os }} - Node ${{ matrix.node }})

@@ -61,6 +61,22 @@ export function loadConfigFile(filePath: string): LuaRCConfig {
   return parseJsonc<LuaRCConfig>(content);
 }
 
+/**
+ * Removes trailing `/` characters from a path-like string.
+ *
+ * Implemented with a scan instead of a `\/+$` regular expression: on inputs made
+ * of many slashes that do not end in a slash, a backtracking engine retries the
+ * repetition at every offset, which is quadratic in the input length
+ * (CodeQL: js/polynomial-redos).
+ */
+export function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f /* "/" */) {
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
+}
+
 export interface MergeConfigOptions {
   cliIgnore?: string[];
 }
@@ -127,7 +143,7 @@ export function mergeConfigs(
     for (const pat of normalizedCliIgnore) {
       excludePatterns.add(pat);
       if (!pat.includes("*") && !pat.includes("?") && !pat.endsWith(".lua")) {
-        const dirPat = pat.replace(/\/+$/, "");
+        const dirPat = stripTrailingSlashes(pat);
         excludePatterns.add(`${dirPat}/**`);
       }
     }
@@ -136,7 +152,7 @@ export function mergeConfigs(
     // For workspace.ignoreDir, keep default structural exclusions plus any CLI ignore dirs
     const cliDirs = normalizedCliIgnore
       .filter((p) => !p.includes("*") && !p.includes("?") && !p.endsWith(".lua"))
-      .map((p) => p.replace(/\/+$/, ""));
+      .map((p) => stripTrailingSlashes(p));
     mergedIgnoreDir = Array.from(new Set([...defaultIgnore, ...baseIgnore, ...overrideIgnore, ...cliDirs]));
   } else {
     // Merge ignoreDir using default rules
@@ -216,7 +232,9 @@ export function resolveWorkspaceConfig(
   // When relative to workspacePath, expand patterns if they start with workspace prefix
   let cliIgnore = options?.ignore;
   if (hasCliIgnore && cliIgnore) {
-    const normWs = workspacePath.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+    const normWs = stripTrailingSlashes(
+      workspacePath.replace(/\\/g, "/").replace(/^\.\//, "")
+    );
     const expanded: string[] = [];
     for (const pat of cliIgnore) {
       expanded.push(pat);

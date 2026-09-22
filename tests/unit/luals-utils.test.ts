@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   escapePowerShellSingleQuote,
   resolveLatestLuaLSVersion,
+  resolveLuaLSVersion,
+  sanitizeLuaLSVersion,
   FALLBACK_LUALS_VERSION,
   countCheckedFiles,
 } from "../../src/luals.js";
@@ -29,6 +31,74 @@ describe("luals utilities", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  describe("sanitizeLuaLSVersion", () => {
+    it("accepts plain release tags and strips a leading v", () => {
+      expect(sanitizeLuaLSVersion("3.19.1")).toBe("3.19.1");
+      expect(sanitizeLuaLSVersion("v3.19.1")).toBe("3.19.1");
+      expect(sanitizeLuaLSVersion("  3.19.1  ")).toBe("3.19.1");
+      expect(sanitizeLuaLSVersion("3.19.1-nightly.2")).toBe("3.19.1-nightly.2");
+      expect(sanitizeLuaLSVersion("V3")).toBe("V3");
+    });
+
+    it("rejects values that could escape the cache directory", () => {
+      expect(sanitizeLuaLSVersion("../../etc")).toBeNull();
+      expect(sanitizeLuaLSVersion("..")).toBeNull();
+      expect(sanitizeLuaLSVersion(".")).toBeNull();
+      expect(sanitizeLuaLSVersion("3.19.1/../../evil")).toBeNull();
+      expect(sanitizeLuaLSVersion("C:\\Windows\\System32\\evil")).toBeNull();
+      expect(sanitizeLuaLSVersion("3.19.1; rm -rf /")).toBeNull();
+      expect(sanitizeLuaLSVersion("3.19.1$(whoami)")).toBeNull();
+      expect(sanitizeLuaLSVersion("")).toBeNull();
+      expect(sanitizeLuaLSVersion("   ")).toBeNull();
+      expect(sanitizeLuaLSVersion("v")).toBeNull();
+      expect(sanitizeLuaLSVersion("-3.19.1")).toBeNull();
+      expect(sanitizeLuaLSVersion("a".repeat(65))).toBeNull();
+    });
+
+    it("treats a malicious GitHub API tag name as unparsable and uses the fallback", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ tag_name: "v../../../../tmp/evil" }),
+      });
+
+      try {
+        await expect(resolveLatestLuaLSVersion()).resolves.toBe(FALLBACK_LUALS_VERSION);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("uses a valid GitHub API tag name", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ tag_name: "v3.20.0" }),
+      });
+
+      try {
+        await expect(resolveLatestLuaLSVersion()).resolves.toBe("3.20.0");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("rejects an explicitly requested invalid version", async () => {
+      await expect(resolveLuaLSVersion("../../evil")).rejects.toThrow(/Invalid LuaLS version/);
+      await expect(resolveLuaLSVersion("3.19.1 && whoami")).rejects.toThrow(
+        /Invalid LuaLS version/
+      );
+    });
+
+    it("accepts an explicitly requested valid version", async () => {
+      await expect(resolveLuaLSVersion("v3.19.1")).resolves.toBe("3.19.1");
+    });
   });
 
   describe("countCheckedFiles helper", () => {

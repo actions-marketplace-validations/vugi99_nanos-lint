@@ -84,8 +84,22 @@ jobs:
             })
             .catch(() => console.log('3.19.1'));
           ")
+          # The tag is an external API response: only accept a plain version token before it is
+          # interpolated into shell commands, URLs and archive file names (command injection).
+          case "$LUALS_VERSION" in
+            ""|.|..|*[!0-9A-Za-z._-]*)
+              echo "Refusing to use unexpected LuaLS version: '${LUALS_VERSION}'" >&2
+              exit 1
+              ;;
+          esac
           echo "Using latest LuaLS release: ${LUALS_VERSION}"
           TAG_NAME="${{ steps.tag.outputs.tag_name }}"
+          case "$TAG_NAME" in
+            ""|.|..|*[!0-9A-Za-z._-]*)
+              echo "Refusing to use unexpected release tag: '${TAG_NAME}'" >&2
+              exit 1
+              ;;
+          esac
           mkdir -p release-builds
 
           # 1. Windows x64 Package

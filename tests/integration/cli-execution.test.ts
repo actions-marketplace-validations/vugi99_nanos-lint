@@ -80,22 +80,30 @@ describe("CLI entrypoint execution regression tests", () => {
         `@echo off\r\nnode "${distCli}" %*\r\nexit /b %ERRORLEVEL%\r\n`
       );
 
+      // The launcher is referenced by its bare file name and resolved through the
+      // `cwd` option, so no environment-derived absolute path is ever placed on a
+      // command line interpreted by cmd.exe (CodeQL: js/shell-command-injection-from-environment).
+      const cmdLauncher = "nanos-lint.cmd";
+
       // 1. Verify --help via .cmd
-      const { stdout: helpStdout } = await execFileAsync("cmd.exe", ["/c", tempCmd, "--help"]);
+      const { stdout: helpStdout } = await execFileAsync("cmd.exe", ["/c", cmdLauncher, "--help"], {
+        cwd: tempDir,
+      });
       expect(helpStdout).toContain("Usage: nanos-lint");
 
       // 2. Verify -v via .cmd
-      const { stdout: versionStdout } = await execFileAsync("cmd.exe", ["/c", tempCmd, "-v"]);
+      const { stdout: versionStdout } = await execFileAsync("cmd.exe", ["/c", cmdLauncher, "-v"], {
+        cwd: tempDir,
+      });
       expect(versionStdout.trim()).toMatch(/^nanos-lint v\d+\.\d+\.\d+$/);
 
       // 3. Verify failure exit code propagation via .cmd
       try {
-        await execFileAsync("cmd.exe", [
-          "/c",
-          tempCmd,
-          "check",
-          path.join(rootDir, "tests", "fail", "type_mismatch.lua"),
-        ]);
+        await execFileAsync(
+          "cmd.exe",
+          ["/c", cmdLauncher, "check", "tests/fail/type_mismatch.lua"],
+          { cwd: rootDir }
+        );
         expect.fail("Expected .cmd launcher to propagate exit code 1");
       } catch (err: unknown) {
         const execErr = err as { code?: number };
