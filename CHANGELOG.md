@@ -5,6 +5,15 @@ All notable changes to `nanos-lint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-09-22
+
+### Changed
+- Configured npm Trusted Publishing using OpenID Connect (OIDC) via `id-token: write` workflow permission.
+- Updated nanos world official game website URL in `README.md` to `https://nanos-world.com/`.
+
+### Fixed
+- Fixed release workflow step condition where `env.NPM_TOKEN != ''` was evaluated before step-level environment variables were initialized, migrating to tokenless OIDC authentication.
+
 ## [2.2.0] - 2026-09-22
 
 ### Added
