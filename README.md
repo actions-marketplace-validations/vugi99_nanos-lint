@@ -6,7 +6,7 @@
 [![LuaLS Version](https://img.shields.io/badge/LuaLS-3.19.1-brightgreen.svg)](https://github.com/LuaLS/lua-language-server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A dedicated, fast linter and type-checker for **[nanos world](https://nanos.world)** Lua scripts powered by the **[Lua Language Server (LuaLS)](https://github.com/LuaLS/lua-language-server)**.
+A dedicated, fast linter and type-checker for **[nanos world](https://nanos-world.com/)** Lua scripts powered by the **[Lua Language Server (LuaLS)](https://github.com/LuaLS/lua-language-server)**.
 
 ---
 
