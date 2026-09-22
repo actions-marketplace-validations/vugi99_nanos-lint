@@ -36,6 +36,7 @@ This document outlines the architectural principles, codebase structure, develop
 ```
 nanos-lint/
 ├── .github/workflows/       # CI, CD Release, and Annotations Sync workflows
+├── .githooks/               # Git hooks (pre-commit quality gates)
 ├── action.yml               # GitHub Action composite definition
 ├── bin/nanos-lint.js        # Executable CLI entrypoint (#!/usr/bin/env node)
 ├── templates/               # Default base .luarc.json template (Lua 5.4, globals)
@@ -76,6 +77,8 @@ npm test
 # 4. Build distribution bundle
 npm run build
 ```
+
+These quality gates are automated in `.githooks/pre-commit` (configured via `git config core.hooksPath .githooks`), running on every `git commit`.
 
 If any of the above commands fail or emit warnings, investigate and fix them before responding to the user.
 

@@ -41,7 +41,8 @@
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0",
     "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix --max-warnings=0",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepare": "node -e \"try { require('node:child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
