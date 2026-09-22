@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-# AGENTS.md Mandatory Quality Gates Pre-Commit Hook
+# Project Quality Gates Pre-Commit Hook
 #
 # 1. Lint the codebase (must have 0 errors and 0 warnings)
 # 2. Type-check TypeScript (must produce 0 type errors)
@@ -17,7 +17,7 @@ if ! command -v "$NPM_CMD" >/dev/null 2>&1; then
   fi
 fi
 
-echo "[pre-commit] Running AGENTS.md quality gates..."
+echo "[pre-commit] Running project quality gates..."
 
 echo "[pre-commit] 1/4: Linting codebase ($NPM_CMD run lint)..."
 $NPM_CMD run lint
@@ -31,4 +31,5 @@ $NPM_CMD test
 echo "[pre-commit] 4/4: Building distribution bundle ($NPM_CMD run build)..."
 $NPM_CMD run build
 
-echo "[pre-commit] All AGENTS.md quality gates passed successfully!"
+echo "[pre-commit] All project quality gates passed successfully!"
+
