@@ -45,7 +45,9 @@
     "test:watch": "vitest",
     "sync-annotations": "tsx scripts/sync-annotations.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.2",

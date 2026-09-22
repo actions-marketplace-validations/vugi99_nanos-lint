@@ -9,5 +9,6 @@ export default defineConfig({
   splitting: false,
   target: "node20",
   shims: true,
+  noExternal: ["commander"],
 });
 
