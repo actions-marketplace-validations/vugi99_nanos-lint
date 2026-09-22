@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { systemPaths } from "./paths.js";
 import { getPackageRoot } from "./config.js";
 
@@ -102,6 +103,22 @@ export async function fetchRawAnnotationsContent(): Promise<string> {
   return text;
 }
 
+async function copyFileWithRetry(src: string, dest: string, maxRetries = 10): Promise<void> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      fs.copyFileSync(src, dest);
+      return;
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if ((code === "EBUSY" || code === "EPERM") && attempt < maxRetries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 /**
  * Updates the metadata lastChecked date atomically without modifying annotations.lua.
  */
@@ -116,13 +133,23 @@ export function updateLastCheckedDate(
     date: dateObj,
   };
   fs.mkdirSync(cacheDir, { recursive: true });
-  const metaPath = path.join(cacheDir, "metadata.json");
+  const metaPath = path.join(cacheDir, METADATA_FILENAME);
   const tempMetaPath = path.join(
-    cacheDir,
+    os.tmpdir(),
     `.metadata-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`
   );
-  fs.writeFileSync(tempMetaPath, JSON.stringify(metadata, null, 2), "utf-8");
-  fs.renameSync(tempMetaPath, metaPath);
+  try {
+    fs.writeFileSync(tempMetaPath, JSON.stringify(metadata, null, 2), "utf-8");
+    fs.copyFileSync(tempMetaPath, metaPath);
+  } finally {
+    try {
+      if (fs.existsSync(tempMetaPath)) {
+        fs.unlinkSync(tempMetaPath);
+      }
+    } catch {
+      // Ignore cleanup error
+    }
+  }
   return metadata;
 }
 
@@ -137,16 +164,16 @@ export async function downloadAndCacheAnnotations(
 ): Promise<string> {
   fs.mkdirSync(cacheDir, { recursive: true });
 
-  const finalAnnotationsPath = path.join(cacheDir, "annotations.lua");
-  const finalMetaPath = path.join(cacheDir, "metadata.json");
+  const finalAnnotationsPath = path.join(cacheDir, ANNOTATIONS_FILENAME);
+  const finalMetaPath = path.join(cacheDir, METADATA_FILENAME);
 
   const tempDir = path.join(
-    cacheDir,
-    `.tmp-update-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    os.tmpdir(),
+    `nanos-ann-tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   );
   const backupDir = path.join(
-    cacheDir,
-    `.backup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    os.tmpdir(),
+    `nanos-ann-bak-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   );
 
   let hasBackup = false;
@@ -160,7 +187,7 @@ export async function downloadAndCacheAnnotations(
 
     // Step 1: Download annotations text
     const content = await fetchRawAnnotationsContent();
-    const tempAnnotationsPath = path.join(tempDir, "annotations.lua");
+    const tempAnnotationsPath = path.join(tempDir, ANNOTATIONS_FILENAME);
     fs.writeFileSync(tempAnnotationsPath, content, "utf-8");
 
     // Step 2: Prepare new metadata
@@ -170,26 +197,37 @@ export async function downloadAndCacheAnnotations(
       lastChecked: dateStr,
       date: dateObj,
     };
-    const tempMetaPath = path.join(tempDir, "metadata.json");
+    const tempMetaPath = path.join(tempDir, METADATA_FILENAME);
     fs.writeFileSync(tempMetaPath, JSON.stringify(metadata, null, 2), "utf-8");
 
-    // Step 3: Create backup of current cache state if files exist
+    // Step 3: Check if another concurrent worker already completed the cache population
+    const existingMeta = readAnnotationsMetadata(cacheDir);
+    if (
+      existingMeta &&
+      existingMeta.commitId === commitId &&
+      fs.existsSync(finalAnnotationsPath) &&
+      fs.statSync(finalAnnotationsPath).size >= 1000
+    ) {
+      return finalAnnotationsPath;
+    }
+
+    // Step 4: Create backup of current cache state if files exist
     const oldAnnotationsExists = fs.existsSync(finalAnnotationsPath);
     const oldMetaExists = fs.existsSync(finalMetaPath);
     if (oldAnnotationsExists || oldMetaExists) {
       fs.mkdirSync(backupDir, { recursive: true });
       if (oldAnnotationsExists) {
-        fs.copyFileSync(finalAnnotationsPath, path.join(backupDir, "annotations.lua"));
+        await copyFileWithRetry(finalAnnotationsPath, path.join(backupDir, ANNOTATIONS_FILENAME));
       }
       if (oldMetaExists) {
-        fs.copyFileSync(finalMetaPath, path.join(backupDir, "metadata.json"));
+        await copyFileWithRetry(finalMetaPath, path.join(backupDir, METADATA_FILENAME));
       }
       hasBackup = true;
     }
 
-    // Step 4: Promote temporary files to final paths
-    fs.copyFileSync(tempAnnotationsPath, finalAnnotationsPath);
-    fs.copyFileSync(tempMetaPath, finalMetaPath);
+    // Step 5: Promote temporary files to final paths with retry
+    await copyFileWithRetry(tempAnnotationsPath, finalAnnotationsPath);
+    await copyFileWithRetry(tempMetaPath, finalMetaPath);
 
     if (!options?.quiet) {
       console.log(`[annotations] Updated annotations.lua to commit ${commitId.slice(0, 7)}.`);
@@ -200,13 +238,13 @@ export async function downloadAndCacheAnnotations(
     // Rollback to previous state on failure
     if (hasBackup && fs.existsSync(backupDir)) {
       try {
-        const backupAnnotations = path.join(backupDir, "annotations.lua");
-        const backupMeta = path.join(backupDir, "metadata.json");
+        const backupAnnotations = path.join(backupDir, ANNOTATIONS_FILENAME);
+        const backupMeta = path.join(backupDir, METADATA_FILENAME);
         if (fs.existsSync(backupAnnotations)) {
-          fs.copyFileSync(backupAnnotations, finalAnnotationsPath);
+          await copyFileWithRetry(backupAnnotations, finalAnnotationsPath);
         }
         if (fs.existsSync(backupMeta)) {
-          fs.copyFileSync(backupMeta, finalMetaPath);
+          await copyFileWithRetry(backupMeta, finalMetaPath);
         }
       } catch {
         // Ignore rollback copy error
@@ -217,10 +255,10 @@ export async function downloadAndCacheAnnotations(
     // Clean up tempDir and backupDir
     try {
       if (fs.existsSync(tempDir)) {
-        fs.rmSync(tempDir, { recursive: true });
+        fs.rmSync(tempDir, { recursive: true, force: true });
       }
       if (fs.existsSync(backupDir)) {
-        fs.rmSync(backupDir, { recursive: true });
+        fs.rmSync(backupDir, { recursive: true, force: true });
       }
     } catch {
       // Ignore cleanup error

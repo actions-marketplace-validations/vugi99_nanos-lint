@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { resolveWorkspaceConfig, getPackageRoot, initWorkspace } from "../../src/config.js";
 import { runLuaLSCheck, resolveLuaLSBinary } from "../../src/luals.js";
+import { resolveAnnotations } from "../../src/annotations.js";
 
 describe("LuaLS live integration tests", () => {
   const root = getPackageRoot();
@@ -11,8 +12,11 @@ describe("LuaLS live integration tests", () => {
   const failDir = path.join(root, "tests", "fail");
 
   beforeAll(async () => {
-    // Ensure LuaLS is downloaded and available before running integration tests
-    await resolveLuaLSBinary();
+    // Ensure LuaLS and annotations are downloaded and available before running integration tests
+    await Promise.all([
+      resolveLuaLSBinary(),
+      resolveAnnotations({ quiet: true }),
+    ]);
   }, 120000);
 
   it("passes cleanly on valid nanos world test suite", async () => {
