@@ -5,6 +5,15 @@ All notable changes to `nanos-lint` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-09-22
+
+### Changed
+- Replaced custom handwritten JSONC parser and comment stripper with `jsonc-parser` (`^3.3.1`).
+- Configured ESM module alias in `tsdown.config.ts` for `jsonc-parser` to ensure internal implementation modules (`./impl/*`) are statically bundled, resolving Node.js bundling issues ([microsoft/node-jsonc-parser#57](https://github.com/microsoft/node-jsonc-parser/issues/57)).
+
+### Security
+- Dropped security support for versions `< 2.4.0` in `SECURITY.md`.
+
 ## [2.3.0] - 2026-09-22
 
 ### Fixed
