@@ -31,23 +31,20 @@ describe("system paths resolution via env-paths", () => {
     const os = await import("node:os");
     const { cleanCache } = await import("../../src/paths.js");
 
-    const originalCache = systemPaths.cache;
     const tempTestCache = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cache-test-"));
     try {
-      (systemPaths as unknown as { cache: string }).cache = tempTestCache;
       const dummyFile = path.join(tempTestCache, "file.txt");
       fs.writeFileSync(dummyFile, "data");
       expect(fs.existsSync(dummyFile)).toBe(true);
 
-      const cleared = cleanCache();
+      const cleared = cleanCache(tempTestCache);
       expect(cleared).toBe(tempTestCache);
       expect(fs.existsSync(tempTestCache)).toBe(false);
 
       // Calling cleanCache again on non-existent cache returns null
-      const secondCall = cleanCache();
+      const secondCall = cleanCache(tempTestCache);
       expect(secondCall).toBeNull();
     } finally {
-      (systemPaths as unknown as { cache: string }).cache = originalCache;
       fs.rmSync(tempTestCache, { recursive: true, force: true });
     }
   });

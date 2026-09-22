@@ -4,6 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, it, expect, vi } from "vitest";
 import { runCLI, isDirectExecution, collectIgnorePatterns } from "../../src/cli.js";
+import * as pathsModule from "../../src/paths.js";
 
 describe("cli module flag and command parsing", () => {
   it("prints help and returns 0 on --help and -h", async () => {
@@ -41,15 +42,22 @@ describe("cli module flag and command parsing", () => {
     spy.mockRestore();
   });
 
-  it("handles clean-cache and clean subcommands", async () => {
+  it("handles clean-cache and clean subcommands without touching real cache on disk", async () => {
+    const cleanSpy = vi.spyOn(pathsModule, "cleanCache").mockReturnValue("/mock/cache/path");
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+
     const codeCleanCache = await runCLI(["clean-cache"]);
     expect(codeCleanCache).toBe(0);
-    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/\[cache\]/));
+    expect(cleanSpy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("[cache] Cleared cache at: /mock/cache/path"));
 
+    cleanSpy.mockReturnValue(null);
     const codeClean = await runCLI(["clean"]);
     expect(codeClean).toBe(0);
-    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/\[cache\]/));
+    expect(cleanSpy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/\[cache\] Cache is already empty/));
+
+    cleanSpy.mockRestore();
     spy.mockRestore();
   });
 

@@ -11,10 +11,10 @@ export const systemPaths = envPaths("nanos-lint", { suffix: "" });
  * Clears the nanos-lint cache directory.
  * Returns the path of the cleared cache directory, or null if it did not exist.
  */
-export function cleanCache(): string | null {
-  if (fs.existsSync(systemPaths.cache)) {
-    fs.rmSync(systemPaths.cache, { recursive: true });
-    return systemPaths.cache;
+export function cleanCache(targetDir: string = systemPaths.cache): string | null {
+  if (fs.existsSync(targetDir)) {
+    fs.rmSync(targetDir, { recursive: true });
+    return targetDir;
   }
   return null;
 }
