@@ -299,12 +299,21 @@ export async function runLuaLSCheck(
   }
 
   let totalProblems = 0;
+  let totalErrors = 0;
+  let totalWarnings = 0;
   let totalFiles = 0;
 
   for (const [_, diags] of Object.entries(diagnostics)) {
     if (diags.length > 0) {
       totalFiles += 1;
       totalProblems += diags.length;
+      for (const d of diags) {
+        if (d.severity === 1) {
+          totalErrors += 1;
+        } else if (d.severity === 2) {
+          totalWarnings += 1;
+        }
+      }
     }
   }
 
@@ -313,6 +322,8 @@ export async function runLuaLSCheck(
   return {
     passed,
     totalProblems,
+    totalErrors,
+    totalWarnings,
     totalFiles,
     diagnostics,
     outputPath: checkOutPath,

@@ -36,6 +36,8 @@ export interface CheckOptions {
 export interface CheckResult {
   passed: boolean;
   totalProblems: number;
+  totalErrors?: number;
+  totalWarnings?: number;
   totalFiles: number;
   diagnostics: DiagnosticReport;
   outputPath?: string;
@@ -52,6 +54,10 @@ export interface LuaRCConfig {
     checkThirdParty?: boolean;
     library?: string[];
     ignoreDir?: string[];
+    [key: string]: unknown;
+  };
+  files?: {
+    exclude?: string[];
     [key: string]: unknown;
   };
   diagnostics?: {

@@ -174,6 +174,23 @@ export function mergeConfigs(
     ...(override.diagnostics?.severity ?? {}),
   };
 
+  // Merge ignoreDir
+  const defaultIgnore = [
+    ".git",
+    ".vscode",
+    "node_modules",
+    "dist",
+    "bin",
+    "vendor",
+    "script",
+    "meta",
+    "locale",
+    "log",
+  ];
+  const baseIgnore = base.workspace?.ignoreDir ?? defaultIgnore;
+  const overrideIgnore = override.workspace?.ignoreDir ?? [];
+  const ignoreSet = new Set<string>([...defaultIgnore, ...baseIgnore, ...overrideIgnore]);
+
   const merged: LuaRCConfig = {
     $schema: override.$schema ?? base.$schema,
     ...base,
@@ -188,6 +205,7 @@ export function mergeConfigs(
       ...(base.workspace ?? {}),
       ...(override.workspace ?? {}),
       library: Array.from(librarySet),
+      ignoreDir: Array.from(ignoreSet),
     },
     diagnostics: {
       enable: true,
@@ -228,6 +246,26 @@ export function resolveWorkspaceConfig(
   }
 
   const merged = mergeConfigs(defaultTemplate, userConfig, definitionsDir);
+
+  const resolvedTarget = path.resolve(workspacePath);
+  const isToolDirectory =
+    fs.existsSync(path.join(resolvedTarget, "main.lua")) &&
+    (fs.existsSync(path.join(resolvedTarget, "bin", "lua-language-server.exe")) ||
+      fs.existsSync(path.join(resolvedTarget, "bin", "lua-language-server")));
+
+  if (isToolDirectory) {
+    merged.files = merged.files ?? {};
+    const existingExclude = merged.files.exclude ?? [];
+    merged.files.exclude = [
+      ...new Set([
+        ...existingExclude,
+        "main.lua",
+        "debugger.lua",
+        "**/main.lua",
+        "**/debugger.lua",
+      ]),
+    ];
+  }
 
   // Write to a temporary configuration file for LuaLS execution
   const tempDir = path.join(os.tmpdir(), "nanos-lint");

@@ -105,5 +105,28 @@ describe("CLI entrypoint execution regression tests", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("executes with no arguments inside a directory containing LuaLS without hanging", async () => {
+    // Regression test for issue where running `nanos-lint` with no arguments
+    // inside the release folder would hang analyzing LuaLS internal scripts
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-release-hang-test-"));
+    try {
+      // Mock LuaLS standalone layout
+      fs.writeFileSync(path.join(tempDir, "main.lua"), "-- dummy main.lua");
+      fs.mkdirSync(path.join(tempDir, "bin"), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, "bin", "lua-language-server.exe"), "");
+      fs.mkdirSync(path.join(tempDir, "script"), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, "script", "dummy.lua"), "-- dummy script");
+
+      const { stdout } = await execFileAsync(process.execPath, [distCli], {
+        cwd: tempDir,
+        timeout: 10000,
+      });
+
+      expect(stdout).toContain("Diagnosis completed, no problems found");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  }, 15000);
 });
 

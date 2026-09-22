@@ -9,6 +9,18 @@
   },
   "workspace": {
     "checkThirdParty": false,
+    "ignoreDir": [
+      ".git",
+      ".vscode",
+      "node_modules",
+      "dist",
+      "bin",
+      "vendor",
+      "script",
+      "meta",
+      "locale",
+      "log"
+    ],
     "library": []
   },
   "diagnostics": {

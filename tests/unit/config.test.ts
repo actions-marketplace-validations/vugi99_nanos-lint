@@ -31,6 +31,8 @@ describe("config module", () => {
     expect(config.diagnostics?.enable).toBe(true);
     expect(config.diagnostics?.globals).toContain("Package");
     expect(config.diagnostics?.globals).toContain("Server");
+    expect(config.workspace?.ignoreDir).toContain("script");
+    expect(config.workspace?.ignoreDir).toContain("node_modules");
   });
 
   it("merges custom workspace config while preserving nanos definitions", () => {
@@ -44,6 +46,9 @@ describe("config module", () => {
     };
 
     const override: LuaRCConfig = {
+      workspace: {
+        ignoreDir: ["custom_ignore"],
+      },
       diagnostics: {
         globals: ["MyCustomGlobal"],
         severity: { "undefined-field": "Information" },
@@ -56,6 +61,8 @@ describe("config module", () => {
 
     expect(merged.runtime?.version).toBe("Lua 5.4");
     expect(merged.workspace?.library).toContain(fakeDefDir);
+    expect(merged.workspace?.ignoreDir).toContain("custom_ignore");
+    expect(merged.workspace?.ignoreDir).toContain("script");
     expect(merged.diagnostics?.globals).toContain("Server");
     expect(merged.diagnostics?.globals).toContain("MyCustomGlobal");
     expect(merged.diagnostics?.severity?.["undefined-field"]).toBe("Information");

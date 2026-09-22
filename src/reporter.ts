@@ -71,14 +71,46 @@ export function formatSeverityBadge(
   }
 }
 
+export function pluralize(count: number, singular: string, plural: string = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+export function formatProblemSummary(
+  totalProblems: number,
+  errors: number,
+  warnings: number,
+  files: number
+): string {
+  const parts: string[] = [];
+  if (errors > 0) {
+    parts.push(pluralize(errors, "error"));
+  }
+  if (warnings > 0) {
+    parts.push(pluralize(warnings, "warning"));
+  }
+  const other = totalProblems - (errors + warnings);
+  if (other > 0) {
+    parts.push(pluralize(other, "other"));
+  }
+
+  const breakdown = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+  const problemStr = pluralize(totalProblems, "problem");
+  const fileStr = pluralize(files, "file");
+
+  return `Diagnosis complete: ${problemStr}${breakdown} found across ${fileStr}.`;
+}
+
 export function formatPretty(
   result: CheckResult,
   cwd: string = process.cwd(),
   useColor: boolean = shouldEnableColor()
 ): string {
   const c = getColors(useColor);
+  const symCross = process.platform === "win32" ? "✖  " : "✖ ";
+  const symCheck = process.platform === "win32" ? "✔  " : "✔ ";
+
   if (result.passed) {
-    return `${c.green}${c.bold}✔ Diagnosis completed, no problems found.${c.reset}`;
+    return `${c.green}${c.bold}${symCheck}Diagnosis completed, no problems found.${c.reset}`;
   }
 
   const lines: string[] = [];
@@ -130,10 +162,22 @@ export function formatPretty(
     }
   }
 
+  let errors = result.totalErrors;
+  let warnings = result.totalWarnings;
+  if (errors === undefined || warnings === undefined) {
+    errors = 0;
+    warnings = 0;
+    for (const diags of Object.values(result.diagnostics)) {
+      for (const d of diags) {
+        if (d.severity === 1) errors++;
+        else if (d.severity === 2) warnings++;
+      }
+    }
+  }
+
   lines.push("");
-  lines.push(
-    `${c.red}${c.bold}✖ Diagnosis complete: ${result.totalProblems} problem(s) found across ${result.totalFiles} file(s).${c.reset}`
-  );
+  const summary = formatProblemSummary(result.totalProblems, errors, warnings, result.totalFiles);
+  lines.push(`${c.red}${c.bold}${symCross}${summary}${c.reset}`);
 
   return lines.join("\n");
 }

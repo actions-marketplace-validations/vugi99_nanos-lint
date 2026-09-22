@@ -5,6 +5,8 @@ import {
   formatSeverityBadge,
   formatReport,
   shouldEnableColor,
+  pluralize,
+  formatProblemSummary,
 } from "../../src/reporter.js";
 import { fileUriToPath } from "../../src/types.js";
 import type { CheckResult } from "../../src/types.js";
@@ -58,7 +60,7 @@ describe("reporter module", () => {
     const pretty = formatPretty(mockFailingResult, mockCwd);
     expect(pretty).toContain("param-type-mismatch");
     expect(pretty).toContain("syntax-error");
-    expect(pretty).toContain("2 problem(s) found across 1 file(s)");
+    expect(pretty).toContain("2 problems (1 error, 1 warning) found across 1 file.");
   });
 
   it("formats GitHub Actions annotations correctly", () => {
@@ -128,12 +130,74 @@ describe("reporter module", () => {
     const plainPretty = formatPretty(mockFailingResult, mockCwd, false);
     // eslint-disable-next-line no-control-regex
     expect(plainPretty).not.toMatch(/\x1b\[[0-9;]*m/);
-    expect(plainPretty).toContain("2 problem(s) found across 1 file(s)");
+    expect(plainPretty).toContain("2 problems (1 error, 1 warning) found across 1 file.");
 
     // formatPretty with color should contain ANSI escapes
     const colorPretty = formatPretty(mockFailingResult, mockCwd, true);
     // eslint-disable-next-line no-control-regex
     expect(colorPretty).toMatch(/\x1b\[[0-9;]*m/);
+  });
+
+  describe("pluralize helper", () => {
+    it("handles singular and plural cases correctly without (s)", () => {
+      expect(pluralize(0, "problem")).toBe("0 problems");
+      expect(pluralize(1, "problem")).toBe("1 problem");
+      expect(pluralize(2, "problem")).toBe("2 problems");
+      expect(pluralize(1, "error")).toBe("1 error");
+      expect(pluralize(3, "error")).toBe("3 errors");
+      expect(pluralize(1, "warning")).toBe("1 warning");
+      expect(pluralize(4, "warning")).toBe("4 warnings");
+      expect(pluralize(1, "file")).toBe("1 file");
+      expect(pluralize(5, "file")).toBe("5 files");
+    });
+
+    it("supports custom plural forms", () => {
+      expect(pluralize(1, "category", "categories")).toBe("1 category");
+      expect(pluralize(3, "category", "categories")).toBe("3 categories");
+    });
+  });
+
+  describe("formatProblemSummary helper", () => {
+    it("formats summary with errors and warnings breakdown", () => {
+      const summary = formatProblemSummary(6, 2, 4, 5);
+      expect(summary).toBe("Diagnosis complete: 6 problems (2 errors, 4 warnings) found across 5 files.");
+      expect(summary).not.toContain("(s)");
+    });
+
+    it("formats summary with errors only", () => {
+      const summary = formatProblemSummary(2, 2, 0, 1);
+      expect(summary).toBe("Diagnosis complete: 2 problems (2 errors) found across 1 file.");
+    });
+
+    it("formats summary with warnings only", () => {
+      const summary = formatProblemSummary(1, 0, 1, 1);
+      expect(summary).toBe("Diagnosis complete: 1 problem (1 warning) found across 1 file.");
+    });
+
+    it("formats summary with single error and single file", () => {
+      const summary = formatProblemSummary(1, 1, 0, 1);
+      expect(summary).toBe("Diagnosis complete: 1 problem (1 error) found across 1 file.");
+    });
+
+    it("includes other diagnostics when present", () => {
+      const summary = formatProblemSummary(3, 1, 1, 2);
+      expect(summary).toBe("Diagnosis complete: 3 problems (1 error, 1 warning, 1 other) found across 2 files.");
+    });
+  });
+
+  describe("terminal symbol spacing", () => {
+    it("formats check and cross symbols with trailing space", () => {
+      const pass = formatPretty(mockPassingResult, mockCwd, false);
+      const fail = formatPretty(mockFailingResult, mockCwd, false);
+
+      if (process.platform === "win32") {
+        expect(pass).toContain("✔  Diagnosis completed");
+        expect(fail).toContain("✖  Diagnosis complete:");
+      } else {
+        expect(pass).toContain("✔ Diagnosis completed");
+        expect(fail).toContain("✖ Diagnosis complete:");
+      }
+    });
   });
 });
 
