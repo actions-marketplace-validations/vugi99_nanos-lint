@@ -66,10 +66,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Low**: Fixed `fileUriToPath` handling of UNC paths, malformed percent encodings, and normalized Windows drive letter URIs on POSIX environments (Linux & macOS).
 - **Low**: Escaped commas (`%2C`) in GitHub Actions annotation file paths.
 
-## [2.1.0] - 2026-08-01
+## [2.1.0] - 2026-09-22
 
 ### Added
-- Complete nanos world API definitions integration from upstream vscode extension.
-- Multi-platform LuaLS standalone binary download and caching.
-- Formatter support for pretty terminal output, JSON output, and GitHub Actions workflow annotations.
+- `-i/--ignore` option with glob pattern matching for CLI and GitHub Action input (`action.yml`).
+- Total count of checked files in terminal output upon passing diagnosis (`Diagnosis completed, no problems found across N files`).
+
+### Fixed
+- Applied universal two-space symbol padding across all platforms for consistent alignment in terminal output.
+
+## [2.0.1] - 2026-09-22
+
+### Added
+- Error and warning breakdown in terminal problem summary (`N errors, M warnings across X files`).
+
+### Fixed
+- Automatic pluralization of nouns ("problem", "warning", "error", "file") in CLI report output.
+- Prevented LuaLS check from hanging indefinitely when running with default positional path inside a directory containing the tool itself or a cached LuaLS binary.
+
+## [2.0.0] - 2026-09-22
+
+### Changed
+- **Breaking**: Require Node.js `>= 24.0.0` (`engines.node: ">=24.0.0"`).
+- Replaced deprecated `Command#addHelpCommand` with `Command#helpCommand` in Commander setup, enabling `@typescript-eslint/no-deprecated` rule.
+
+### Added
+- Node.js 26 to CI test matrix on Ubuntu and Windows runners.
+- Submodule tracking upstream `nanos-world-vscode-extension` (`docgen-output` branch) under `vendor/nanos-world-vscode-extension`, loading `annotations.lua` directly from the submodule and removing `definitions/` directory and custom sanitizers.
+- Automated daily synchronization workflow (`.github/workflows/sync-annotations.yml`) at 01:00 UTC to track upstream annotations updates.
+- Direct execution detection (`isDirectExecution`) in `dist/cli.js` so it executes CLI commands immediately when invoked directly via `node`.
+- Smoke tests and regression test suite for CLI entrypoints and launcher scripts.
+
+### Fixed
+- Fixed Windows batch launcher (`bin/nanos-lint.cmd`) errorlevel propagation on non-zero exit codes.
+- Ensured `dist/` is compiled before running CLI integration tests in CI.
+
+## [1.2.0] - 2026-09-22
+
+### Changed
+- Migrated bundler from `tsup` to `tsdown` (`v0.23.0`) powered by Rolldown, compiling standalone bundles targeting Node.js 24.
+- Rewrote CLI argument parsing with `commander` (`v15.0.0`), supporting `check`, `init`, `download-luals`, and `version` subcommands.
+- Configured `tsdown.config.ts` with `deps.alwaysBundle: ["commander"]` to maintain zero external runtime dependencies.
+- Configured Dependabot with `npm` package ecosystem and pinned TypeScript < 6.1.0 to prevent peer dependency conflicts.
+
+## [1.1.2] - 2026-09-21
+
+### Security
+- Hardened release workflow by requiring `workflow_run` events to originate from upstream `push` events (ignoring `pull_request` and preventing unauthorized fork triggers).
+
+## [1.1.1] - 2026-09-21
+
+### Added
+- Pre-release test matrix job (Ubuntu and Windows) in release workflow before building and publishing.
+
+### Changed
+- Chained release workflow to execute upon successful completion of CI workflow via GitHub Actions `workflow_run` on `master`.
+
+### Fixed
+- Added automated detection of release tags on HEAD using `git tag --points-at`, cleanly skipping untagged runs.
+
+## [1.1.0] - 2026-09-21
+
+### Added
+- JSONC support in `.luarc.json` configuration files (support for comments and trailing commas).
+- Respect for `NO_COLOR` environment variable convention and TTY detection in reporter output.
+- CLI validation for unrecognized flags and missing required options.
+
+### Fixed
+- Added 10-second timeout to GitHub API LuaLS version resolution fetch.
+- Guaranteed temporary check configuration file cleanup in `finally` block.
+- Escaped single quotes in PowerShell `Expand-Archive` command on Windows.
+- Tightened `Diagnostic.severity` typing to `1 | 2 | 3 | 4`.
+
+## [1.0.0] - 2026-09-21
+
+### Added
+- Initial release of `nanos-lint`.
+- Lua Language Server (LuaLS) integration targeting Lua 5.4.9 for nanos world scripts.
+- Automatic download and caching of platform-specific LuaLS standalone binaries (Windows x64, Linux x64, macOS).
+- Built-in nanos world API definitions bundled from `nanos-world/vscode-extension`.
+- CLI commands: `check`, `init`, and `download-luals`.
+- Multiple report formatters: human-readable terminal output, JSON output (`--format=json`), and GitHub Actions workflow annotations (`--format=github`).
+- GitHub Action composite action (`action.yml`) for automated CI linting.
+- Multi-platform CI/CD release workflow for npm publishing and GitHub Releases.
+
+### Fixed
+- Normalized LuaLS file URI schemes across Windows (`file:///C:/...`) and Linux/POSIX (`file:///...`).
+
 
