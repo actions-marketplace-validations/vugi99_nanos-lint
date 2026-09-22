@@ -1,5 +1,9 @@
 name: CI
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ master, main ]
@@ -30,6 +34,16 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: 'npm'
+
+      - name: Cache LuaLS binary
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/nanos-lint
+            ~/AppData/Local/nanos-lint
+          key: luals-${{ runner.os }}-${{ hashFiles('src/luals.ts') }}
+          restore-keys: |
+            luals-${{ runner.os }}-
 
       - name: Install dependencies
         run: npm ci

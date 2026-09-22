@@ -6,7 +6,12 @@ runCLI()
     process.exit(code);
   })
   .catch((err) => {
-    console.error(err);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`error: ${message}`);
+    if (process.env.DEBUG && err instanceof Error && err.stack) {
+      console.error(err.stack);
+    }
     process.exit(1);
   });
+
 

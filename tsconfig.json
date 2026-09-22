@@ -3,7 +3,7 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022"],
     "types": ["node"],
     "outDir": "./dist",
     "rootDir": ".",
@@ -20,9 +20,8 @@
   },
   "include": [
     "src/**/*.ts",
-    "scripts/**/*.ts",
     "tests/**/*.ts",
-    "tsup.config.ts",
+    "tsdown.config.ts",
     "vitest.config.ts"
   ],
   "exclude": [

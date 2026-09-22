@@ -53,7 +53,9 @@ nanos-lint/
 │   ├── unit/                # Vitest unit tests
 │   └── integration/         # Vitest integration tests with live LuaLS execution
 ├── AGENTS.md                # This guideline document
-└── README.md                # User-facing documentation
+├── CHANGELOG.md             # Keep a Changelog 1.1.0 version history
+├── README.md                # User-facing documentation
+└── SECURITY.md              # Security policy and reporting instructions
 ```
 
 ---
@@ -77,4 +79,15 @@ npm run build
 ```
 
 If any of the above commands fail or emit warnings, investigate and fix them before responding to the user.
+
+---
+
+## 5. Releases & Changelog Maintenance
+
+Whenever publishing a new tagged release or cutting a new version:
+
+- **Update `CHANGELOG.md`**: Maintain documentation adhering strictly to [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+- **Standardized Categories**: Group changes under `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or `Security`.
+- **Pre-Release Requirement**: Record the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
+
 

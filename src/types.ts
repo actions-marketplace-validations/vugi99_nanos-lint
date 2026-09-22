@@ -1,3 +1,5 @@
+import { fileURLToPath as nodeFileURLToPath } from "node:url";
+
 export type DiagnosticSeverity = "Error" | "Warning" | "Information" | "Hint";
 export type DiagnosticSeverityLevel = 1 | 2 | 3 | 4;
 
@@ -42,7 +44,6 @@ export interface CheckResult {
   totalFiles: number;
   totalFilesChecked?: number;
   diagnostics: DiagnosticReport;
-  outputPath?: string;
 }
 
 export interface LuaRCConfig {
@@ -74,7 +75,7 @@ export interface LuaRCConfig {
 }
 
 /**
- * Converts a URI (e.g. `file:///path/to/file` or `file:///C:/path/to/file` or `file:///c%3A/path`)
+ * Converts a URI (e.g. `file:///path/to/file` or `file:///C:/path/to/file` or `file:///c%3A/path` or `file://server/share/file`)
  * to a standard local file system path across both Windows and Unix.
  */
 export function fileUriToPath(uri: string): string {
@@ -82,20 +83,43 @@ export function fileUriToPath(uri: string): string {
     return uri;
   }
 
-  let decoded = decodeURIComponent(uri.slice(7));
+  try {
+    const parsed = nodeFileURLToPath(uri);
+    let res = parsed.replace(/\\/g, "/");
+    if (/^[a-zA-Z]:/.test(res)) {
+      res = res.charAt(0).toUpperCase() + res.slice(1);
+    }
+    return res;
+  } catch {
+    // Fallback if nodeFileURLToPath fails (e.g. malformed percent encoding)
+    let decoded = uri.slice(7);
+    try {
+      decoded = decodeURIComponent(decoded);
+    } catch {
+      // Keep unescaped if malformed
+    }
 
-  // Windows file URIs often look like /C:/foo or /c:/foo
-  if (/^\/[a-zA-Z]:/.test(decoded)) {
-    decoded = decoded.slice(1);
+    if (decoded.startsWith("//")) {
+      return decoded;
+    }
+
+    if (!decoded.startsWith("/") && uri.startsWith("file://") && !uri.startsWith("file:///")) {
+      return `//${decoded}`;
+    }
+
+    // Windows file URIs often look like /C:/foo or /c:/foo
+    if (/^\/[a-zA-Z]:/.test(decoded)) {
+      decoded = decoded.slice(1);
+    }
+
+    // Normalize drive letter to uppercase on Windows
+    if (/^[a-zA-Z]:/.test(decoded)) {
+      return decoded.charAt(0).toUpperCase() + decoded.slice(1);
+    }
+
+    return decoded;
   }
-
-  // Normalize drive letter to uppercase on Windows
-  if (/^[a-zA-Z]:/.test(decoded)) {
-    return decoded.charAt(0).toUpperCase() + decoded.slice(1);
-  }
-
-  // Unix file URIs look like /home/runner/file.lua
-  return decoded;
 }
+
 
 

@@ -196,6 +196,10 @@ export function formatGitHubAnnotations(result: CheckResult, cwd: string = proce
       ? path.relative(cwd, filePath).replace(/\\/g, "/")
       : filePath.replace(/\\/g, "/");
 
+    const escapedFile = relPath
+      .replace(/%/g, "%25")
+      .replace(/,/g, "%2C");
+
     for (const d of diags) {
       const line = d.range.start.line + 1;
       const col = d.range.start.character + 1;
@@ -210,7 +214,7 @@ export function formatGitHubAnnotations(result: CheckResult, cwd: string = proce
         .replace(/\n/g, "%0A");
 
       commands.push(
-        `::${level} file=${relPath},line=${line},col=${col},endLine=${endLine},endColumn=${endCol},title=nanos-lint::${escapedMessage}${codeSuffix}`
+        `::${level} file=${escapedFile},line=${line},col=${col},endLine=${endLine},endColumn=${endCol},title=nanos-lint::${escapedMessage}${codeSuffix}`
       );
     }
   }

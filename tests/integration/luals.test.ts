@@ -133,19 +133,35 @@ describe("LuaLS live integration tests", () => {
     }
   });
 
-  it("respects workspace .luarc.json diagnostic overrides", async () => {
+  it("respects workspace .luarc.json diagnostic overrides with negative control and BOM support", async () => {
     const tempWorkspace = path.join(os.tmpdir(), `nanos-override-test-${Date.now()}`);
     fs.mkdirSync(tempWorkspace, { recursive: true });
 
     try {
-      // Create a test file that would normally trigger undefined-field
+      // Create a test file that triggers undefined-field
       const script = `
         local char = Character(Vector(0,0,0), Rotator(0,0,0), "nanos-world::SK_Mannequin")
         char:SomeNonExistentMethod()
       `;
       fs.writeFileSync(path.join(tempWorkspace, "override_test.lua"), script, "utf-8");
 
-      // Create a workspace .luarc.json disabling undefined-field
+      // Negative control: without .luarc.json override, undefined-field must be reported
+      const baseResolved = resolveWorkspaceConfig(tempWorkspace);
+      try {
+        const baseResult = await runLuaLSCheck(tempWorkspace, baseResolved.configPath, {
+          path: tempWorkspace,
+          checklevel: "Warning",
+        });
+        expect(baseResult.passed).toBe(false);
+        const diags = Object.values(baseResult.diagnostics).flat();
+        expect(diags.some((d) => d.code === "undefined-field")).toBe(true);
+      } finally {
+        if (baseResolved.isTemp && fs.existsSync(baseResolved.configPath)) {
+          fs.unlinkSync(baseResolved.configPath);
+        }
+      }
+
+      // Create a workspace .luarc.json disabling undefined-field (with leading UTF-8 BOM)
       const workspaceConfig = {
         diagnostics: {
           disable: ["undefined-field"],
@@ -153,22 +169,24 @@ describe("LuaLS live integration tests", () => {
       };
       fs.writeFileSync(
         path.join(tempWorkspace, ".luarc.json"),
-        JSON.stringify(workspaceConfig),
+        "\uFEFF" + JSON.stringify(workspaceConfig),
         "utf-8"
       );
 
       const resolved = resolveWorkspaceConfig(tempWorkspace);
-      const result = await runLuaLSCheck(tempWorkspace, resolved.configPath, {
-        path: tempWorkspace,
-        checklevel: "Warning",
-      });
+      try {
+        const result = await runLuaLSCheck(tempWorkspace, resolved.configPath, {
+          path: tempWorkspace,
+          checklevel: "Warning",
+        });
 
-      // undefined-field should be disabled, so totalProblems should be 0
-      expect(result.passed).toBe(true);
-      expect(result.totalProblems).toBe(0);
-
-      if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
-        fs.unlinkSync(resolved.configPath);
+        // undefined-field should be disabled, so totalProblems should be 0
+        expect(result.passed).toBe(true);
+        expect(result.totalProblems).toBe(0);
+      } finally {
+        if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+          fs.unlinkSync(resolved.configPath);
+        }
       }
     } finally {
       fs.rmSync(tempWorkspace, { recursive: true, force: true });

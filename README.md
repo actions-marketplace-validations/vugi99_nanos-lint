@@ -111,20 +111,30 @@ nanos-lint [command] [options] [path]
 
 COMMANDS:
   check [path]             Check a workspace or Lua file (default)
-  init [path]              Scaffold a .luarc.json configuration in the workspace
+  init [path]              Scaffold a .luarc.json configuration in the workspace (copies definitions to .nanos-lint/)
   download-luals [version] Download and cache the LuaLS binary
   help, --help, -h         Show help message
   version, --version, -v   Show version information
 
 OPTIONS:
-  -i, --ignore <patterns...> Files or directories to ignore (supports glob patterns, e.g. myfolder/hello-*.lua)
+  -i, --ignore <pattern>   Files or directories to ignore (supports globs, repeatable, comma/newline-separated)
   --checklevel=<level>     Minimum diagnostic level: Error, Warning, Information, Hint (default: Warning)
   --config=<path>          Path to custom .luarc.json configuration file
   --format=<format>        Output format: pretty, json, github (default: pretty)
+  --github                 Output in GitHub Actions format (shortcut for --format=github)
   --luals-version=<ver>    Version of LuaLS to use (default: latest)
   --no-fail                Do not exit with code 1 if diagnostics are found
   --quiet                  Suppress progress output
+  -f, --force              (init command only) Overwrite existing .luarc.json
 ```
+
+### Environment Variables
+
+| Variable | Description |
+| :--- | :--- |
+| `LUALS_BIN` | Explicit path to a pre-installed `lua-language-server` binary |
+| `NO_COLOR` | Disables ANSI color output when set to any non-empty value |
+| `FORCE_COLOR` | Forces ANSI color output even in non-TTY environments |
 
 ---
 
@@ -144,6 +154,13 @@ If your project already has a `.luarc.json`, `nanos-lint` automatically merges i
     ]
   }
 }
+```
+
+To scaffold a portable `.luarc.json` with vendored type annotations in your project, run:
+```bash
+npx nanos-lint init
+# Or overwrite an existing configuration:
+npx nanos-lint init --force
 ```
 
 ---

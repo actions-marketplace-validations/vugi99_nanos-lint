@@ -150,6 +150,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Update floating major version tag
+        if: steps.tag.outputs.is_release == 'true'
+        run: |
+          TAG="${{ steps.tag.outputs.tag_name }}"
+          MAJOR=$(echo "$TAG" | grep -oE '^v?[0-9]+' || true)
+          if [ -n "$MAJOR" ]; then
+            echo "Updating floating major tag $MAJOR to point to $TAG"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -fa "$MAJOR" -m "Release $TAG"
+            git push origin "$MAJOR" --force
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Publish to npm
         if: steps.tag.outputs.is_release == 'true' && env.NPM_TOKEN != ''
         run: npm publish --access public

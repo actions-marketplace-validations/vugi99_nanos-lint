@@ -44,14 +44,12 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {
-    "commander": "^15.0.0"
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.6.2",
     "@typescript-eslint/eslint-plugin": "^8.70.1",
     "@typescript-eslint/parser": "^8.70.1",
+    "commander": "^15.0.0",
     "eslint": "^10.11.0",
     "tsdown": "^0.23.0",
     "tsx": "^4.23.15",

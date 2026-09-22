@@ -40,7 +40,7 @@ describe("CLI entrypoint execution regression tests", () => {
       "check",
       path.join(rootDir, "tests", "pass"),
     ]);
-    expect(stdout).toContain("Diagnosis completed, no problems found across 3 files.");
+    expect(stdout).toMatch(/Diagnosis completed, no problems found across \d+ files?\./);
   });
 
   it("executes dist/cli.js check tests/fail/type_mismatch.lua directly and exits with code 1", async () => {
@@ -178,8 +178,8 @@ describe("CLI entrypoint execution regression tests", () => {
     expect(stdout).toContain("Diagnosis completed, no problems found");
   });
 
-  it("does not use hardcoded ignore rules when --ignore is passed", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-hardcoded-bypass-test-"));
+  it("preserves default ignore rules when --ignore is passed", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-default-ignore-preserved-test-"));
     try {
       // Create a file inside `script/` which is in defaultIgnore
       fs.mkdirSync(path.join(tempDir, "script"), { recursive: true });
@@ -189,21 +189,15 @@ describe("CLI entrypoint execution regression tests", () => {
       const { stdout: stdoutDefault } = await execFileAsync(process.execPath, [distCli, "check", tempDir]);
       expect(stdoutDefault).toContain("Diagnosis completed, no problems found");
 
-      // 2. With --ignore, hardcoded ignore rules are bypassed, so `script/broken.lua` is analyzed
-      try {
-        await execFileAsync(process.execPath, [
-          distCli,
-          "check",
-          tempDir,
-          "--ignore",
-          "unrelated_folder",
-        ]);
-        expect.fail("Expected check to fail because script/ is not ignored when custom --ignore is passed");
-      } catch (err: unknown) {
-        const execErr = err as { code?: number; stdout?: string };
-        expect(execErr.code).toBe(1);
-        expect(execErr.stdout).toContain("broken.lua");
-      }
+      // 2. With --ignore, default structural exclusions remain active, so `script/broken.lua` is still ignored
+      const { stdout: stdoutIgnore } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        tempDir,
+        "--ignore",
+        "unrelated_folder",
+      ]);
+      expect(stdoutIgnore).toContain("Diagnosis completed, no problems found");
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

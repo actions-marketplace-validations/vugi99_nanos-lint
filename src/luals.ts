@@ -122,9 +122,14 @@ export function getCacheDir(version: string = FALLBACK_LUALS_VERSION): string {
   return path.join(base, "nanos-lint", "luals", version);
 }
 
+export interface DownloadOptions {
+  quiet?: boolean;
+}
+
 export async function downloadAndExtractLuaLS(
   version: string = DEFAULT_LUALS_VERSION,
-  targetDir?: string
+  targetDir?: string,
+  options?: DownloadOptions
 ): Promise<string> {
   const resolvedVersion = await resolveLuaLSVersion(version);
   const info = getPlatformInfo(resolvedVersion);
@@ -140,16 +145,38 @@ export async function downloadAndExtractLuaLS(
   const url = `https://github.com/LuaLS/lua-language-server/releases/download/${resolvedVersion}/${info.assetName}`;
   const archivePath = path.join(destDir, info.assetName);
 
-  console.log(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
-  const response = await fetch(url);
-  if (!response.ok || !response.body) {
-    throw new Error(`Failed to download ${url}: ${response.status} ${response.statusText}`);
+  if (!options?.quiet) {
+    console.log(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
+  }
+
+  let response: Response | null = null;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url);
+      if (res.ok && res.body) {
+        response = res;
+        break;
+      }
+      lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
+    } catch (err) {
+      lastErr = err;
+    }
+    if (attempt < 3) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+
+  if (!response || !response.body) {
+    throw lastErr || new Error(`Failed to download ${url}`);
   }
 
   const arrayBuffer = await response.arrayBuffer();
   fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
 
-  console.log(`[luals] Extracting to ${destDir}...`);
+  if (!options?.quiet) {
+    console.log(`[luals] Extracting to ${destDir}...`);
+  }
   try {
     // Both Windows 10+ and UNIX systems have tar built in
     await execFileAsync("tar", ["-xf", archivePath, "-C", destDir]);
@@ -186,11 +213,20 @@ export async function downloadAndExtractLuaLS(
     throw new Error(`Failed to extract LuaLS binary to expected path: ${binaryPath}`);
   }
 
-  console.log(`[luals] Ready: ${binaryPath}`);
+  if (!options?.quiet) {
+    console.log(`[luals] Ready: ${binaryPath}`);
+  }
   return binaryPath;
 }
 
-export async function resolveLuaLSBinary(version: string = DEFAULT_LUALS_VERSION): Promise<string> {
+export interface ResolveLuaLSOptions {
+  quiet?: boolean;
+}
+
+export async function resolveLuaLSBinary(
+  version: string = DEFAULT_LUALS_VERSION,
+  options?: ResolveLuaLSOptions
+): Promise<string> {
   // 1. Explicit env var
   if (process.env.LUALS_BIN && fs.existsSync(process.env.LUALS_BIN)) {
     return process.env.LUALS_BIN;
@@ -224,7 +260,7 @@ export async function resolveLuaLSBinary(version: string = DEFAULT_LUALS_VERSION
   }
 
   // 5. Download and cache
-  return await downloadAndExtractLuaLS(resolvedVersion);
+  return await downloadAndExtractLuaLS(resolvedVersion, undefined, options);
 }
 
 export async function runLuaLSCheck(
@@ -232,13 +268,19 @@ export async function runLuaLSCheck(
   configPath: string,
   options: CheckOptions
 ): Promise<CheckResult> {
-  const binary = options.lualsBin || (await resolveLuaLSBinary(options.lualsVersion));
-
   const absoluteTarget = path.resolve(targetPath);
+  if (!fs.existsSync(absoluteTarget)) {
+    throw new Error(`Target path does not exist: ${targetPath}`);
+  }
+
+  const binary =
+    options.lualsBin ||
+    (await resolveLuaLSBinary(options.lualsVersion, { quiet: options.quiet }));
+
   let checkDir = absoluteTarget;
   let targetFileOnly: string | null = null;
 
-  if (fs.existsSync(absoluteTarget) && fs.statSync(absoluteTarget).isFile()) {
+  if (fs.statSync(absoluteTarget).isFile()) {
     checkDir = path.dirname(absoluteTarget);
     targetFileOnly = absoluteTarget;
   }
@@ -261,19 +303,24 @@ export async function runLuaLSCheck(
     args.push(`--checklevel=${options.checklevel}`);
   }
 
+  let execError: unknown = null;
   try {
     await execFileAsync(binary, args, {
       maxBuffer: 100 * 1024 * 1024,
+      timeout: 120_000,
     });
-  } catch {
+  } catch (err) {
+    execError = err;
     // Process may exit with non-zero when diagnostics are found
   }
 
   let diagnostics: DiagnosticReport = {};
+  let parseSucceeded = false;
   if (fs.existsSync(checkOutPath)) {
     try {
       const content = fs.readFileSync(checkOutPath, "utf-8");
       diagnostics = JSON.parse(content) as DiagnosticReport;
+      parseSucceeded = true;
     } catch {
       // Failed to parse json
     } finally {
@@ -283,6 +330,17 @@ export async function runLuaLSCheck(
         // Ignore unlink error
       }
     }
+  }
+
+  if (!parseSucceeded) {
+    if (execError) {
+      throw new Error(
+        `LuaLS check failed to execute or produce diagnostic output: ${execError instanceof Error ? execError.message : String(execError)}`
+      );
+    }
+    throw new Error(
+      `LuaLS check failed to produce diagnostic output at: ${checkOutPath}`
+    );
   }
 
   // If a single file was requested, filter diagnostics to only that file
@@ -329,7 +387,6 @@ export async function runLuaLSCheck(
     totalFiles,
     totalFilesChecked: filesChecked,
     diagnostics,
-    outputPath: checkOutPath,
   };
 }
 
@@ -367,25 +424,61 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
 
   function isExcluded(relPath: string): boolean {
     const norm = relPath.replace(/\\/g, "/");
+    const baseName = path.posix.basename(norm);
+
     for (const pat of excludePatterns) {
       const normPat = pat.replace(/\\/g, "/");
-      if (norm === normPat) return true;
+      if (norm === normPat || baseName === normPat) return true;
       if (normPat.endsWith("/**")) {
         const dir = normPat.slice(0, -3);
         if (norm === dir || norm.startsWith(`${dir}/`)) return true;
       }
-      if (norm === normPat || norm.startsWith(`${normPat}/`)) return true;
+      if (norm.startsWith(`${normPat}/`)) return true;
+
       if (normPat.includes("*") || normPat.includes("?")) {
-        const regexStr =
-          "^" +
-          normPat
-            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-            .replace(/\*\*/g, ".*")
-            .replace(/(?<!\.)\*/g, "[^/]*")
-            .replace(/\?/g, "[^/]") +
-          "$";
+        // If pattern has no slash, it matches basename anywhere
+        if (!normPat.includes("/")) {
+          const baseRegexStr =
+            "^" +
+            normPat
+              .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+              .replace(/\*/g, ".*")
+              .replace(/\?/g, ".") +
+            "$";
+          try {
+            if (new RegExp(baseRegexStr, "i").test(baseName)) return true;
+          } catch {
+            // Ignore
+          }
+        }
+
+        // Convert glob with ** and * to regex matching full relPath
+        let regexStr = normPat;
+        const hasLeadingDoubleStar = regexStr.startsWith("**/");
+        if (hasLeadingDoubleStar) {
+          regexStr = regexStr.slice(3);
+        }
+        const hasTrailingDoubleStar = regexStr.endsWith("/**");
+        if (hasTrailingDoubleStar) {
+          regexStr = regexStr.slice(0, -3);
+        }
+
+        let escaped = regexStr
+          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+          .replace(/\/\*\*\//g, "/(?:.*/)?")
+          .replace(/\*\*/g, ".*")
+          .replace(/(?<!\.)\*/g, "[^/]*")
+          .replace(/\?/g, "[^/]");
+
+        if (hasLeadingDoubleStar) {
+          escaped = `(?:^|.*/)${escaped}`;
+        }
+        if (hasTrailingDoubleStar) {
+          escaped = `${escaped}(?:/.*)?`;
+        }
+
         try {
-          if (new RegExp(regexStr, "i").test(norm)) return true;
+          if (new RegExp(`^${escaped}$`, "i").test(norm)) return true;
         } catch {
           // Ignore regex syntax error
         }
@@ -409,7 +502,18 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
       const relPath = relDir ? `${relDir}/${name}` : name;
       const fullPath = path.join(currentDir, name);
 
-      if (entry.isDirectory()) {
+      const isDirectory =
+        entry.isDirectory() ||
+        (entry.isSymbolicLink() &&
+          (() => {
+            try {
+              return fs.statSync(fullPath).isDirectory();
+            } catch {
+              return false;
+            }
+          })());
+
+      if (isDirectory) {
         const lowerName = name.toLowerCase();
         if (normIgnoreDirs.has(lowerName) || normIgnoreDirs.has(relPath.toLowerCase())) {
           continue;
@@ -429,3 +533,4 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
   walk(absPath);
   return count;
 }
+

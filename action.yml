@@ -45,29 +45,43 @@ runs:
 
     - name: Run nanos-lint
       shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_CHECKLEVEL: ${{ inputs.checklevel }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_LUALS_VERSION: ${{ inputs.luals-version }}
+        INPUT_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        INPUT_QUIET: ${{ inputs.quiet }}
+        INPUT_IGNORE: ${{ inputs.ignore }}
+        ACTION_PATH: ${{ github.action_path }}
       run: |
-        ARGS=("check" "${{ inputs.path }}" "--checklevel=${{ inputs.checklevel }}" "--luals-version=${{ inputs.luals-version }}" "--format=github")
+        ARGS=("check" "$INPUT_PATH" "--checklevel=$INPUT_CHECKLEVEL" "--luals-version=$INPUT_LUALS_VERSION" "--format=github")
 
-        if [ -n "${{ inputs.config }}" ]; then
-          ARGS+=("--config=${{ inputs.config }}")
+        if [ -n "$INPUT_CONFIG" ]; then
+          ARGS+=("--config=$INPUT_CONFIG")
         fi
 
-        if [ -n "${{ inputs.ignore }}" ]; then
+        if [ -n "$INPUT_IGNORE" ]; then
           while IFS= read -r line || [ -n "$line" ]; do
             trimmed=$(echo "$line" | xargs)
             if [ -n "$trimmed" ]; then
               ARGS+=("--ignore=$trimmed")
             fi
-          done <<< "${{ inputs.ignore }}"
+          done <<< "$INPUT_IGNORE"
         fi
 
-        if [ "${{ inputs.fail-on-error }}" = "false" ]; then
+        if [ "$INPUT_FAIL_ON_ERROR" = "false" ]; then
           ARGS+=("--no-fail")
         fi
 
-        if [ "${{ inputs.quiet }}" = "true" ]; then
+        if [ "$INPUT_QUIET" = "true" ]; then
           ARGS+=("--quiet")
         fi
 
-        node "${{ github.action_path }}/dist/cli.js" "${ARGS[@]}"
+        if [ -f "$ACTION_PATH/dist/cli.js" ]; then
+          node "$ACTION_PATH/dist/cli.js" "${ARGS[@]}"
+        else
+          npx --yes nanos-lint@^2.1.0 "${ARGS[@]}"
+        fi
+
 

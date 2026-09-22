@@ -36,24 +36,25 @@ export function getDefaultTemplatePath(): string {
  * and trailing commas before '}' or ']' from JSONC text while preserving string literals.
  */
 export function stripJsonComments(text: string): string {
+  const cleanText = text.replace(/^\uFEFF/, "");
   let result = "";
   let i = 0;
-  const len = text.length;
+  const len = cleanText.length;
 
   while (i < len) {
-    const ch = text[i];
+    const ch = cleanText[i];
 
     // String literal: preserve entirely, including escaped characters
     if (ch === '"') {
       result += ch;
       i++;
       while (i < len) {
-        const c = text[i];
+        const c = cleanText[i];
         result += c;
         if (c === "\\") {
           i++;
           if (i < len) {
-            result += text[i];
+            result += cleanText[i];
           }
         } else if (c === '"') {
           break;
@@ -65,49 +66,50 @@ export function stripJsonComments(text: string): string {
     }
 
     // Single-line comment: // ...
-    if (ch === "/" && i + 1 < len && text[i + 1] === "/") {
+    if (ch === "/" && i + 1 < len && cleanText[i + 1] === "/") {
       i += 2;
-      while (i < len && text[i] !== "\n" && text[i] !== "\r") {
+      while (i < len && cleanText[i] !== "\n" && cleanText[i] !== "\r") {
         i++;
       }
       continue;
     }
 
     // Multi-line comment: /* ... */
-    if (ch === "/" && i + 1 < len && text[i + 1] === "*") {
+    if (ch === "/" && i + 1 < len && cleanText[i + 1] === "*") {
       i += 2;
-      while (i + 1 < len && !(text[i] === "*" && text[i + 1] === "/")) {
-        if (text[i] === "\n" || text[i] === "\r") {
-          result += text[i];
-        } else {
-          result += " ";
-        }
+      while (i + 1 < len && !(cleanText[i] === "*" && cleanText[i + 1] === "/")) {
         i++;
       }
-      i += 2; // skip */
+      i += 2;
       continue;
     }
 
-    // Comma: check if it is a trailing comma before '}' or ']'
+    // Trailing comma check before '}' or ']'
     if (ch === ",") {
       let j = i + 1;
       let isTrailing = false;
+
       while (j < len) {
-        const nextChar = text[j];
-        if (nextChar === " " || nextChar === "\t" || nextChar === "\n" || nextChar === "\r") {
+        const nextChar = cleanText[j];
+        if (
+          nextChar === " " ||
+          nextChar === "\t" ||
+          nextChar === "\n" ||
+          nextChar === "\r"
+        ) {
           j++;
           continue;
         }
-        if (nextChar === "/" && j + 1 < len && text[j + 1] === "/") {
+        if (nextChar === "/" && j + 1 < len && cleanText[j + 1] === "/") {
           j += 2;
-          while (j < len && text[j] !== "\n" && text[j] !== "\r") {
+          while (j < len && cleanText[j] !== "\n" && cleanText[j] !== "\r") {
             j++;
           }
           continue;
         }
-        if (nextChar === "/" && j + 1 < len && text[j + 1] === "*") {
+        if (nextChar === "/" && j + 1 < len && cleanText[j + 1] === "*") {
           j += 2;
-          while (j + 1 < len && !(text[j] === "*" && text[j + 1] === "/")) {
+          while (j + 1 < len && !(cleanText[j] === "*" && cleanText[j + 1] === "/")) {
             j++;
           }
           j += 2;
@@ -187,13 +189,27 @@ export function mergeConfigs(
   const baseFilesExclude = base.files?.exclude ?? [];
   const overrideFilesExclude = override.files?.exclude ?? [];
 
+  const defaultIgnore = [
+    ".git",
+    ".vscode",
+    "node_modules",
+    "dist",
+    "bin",
+    "vendor",
+    "script",
+    "meta",
+    "locale",
+    "log",
+  ];
+  const baseIgnore = base.workspace?.ignoreDir ?? defaultIgnore;
+  const overrideIgnore = override.workspace?.ignoreDir ?? [];
+
   if (hasCliIgnore) {
-    // When CLI ignore rules are passed, DO NOT use the hardcoded default ignore rules
     const normalizedCliIgnore = (options?.cliIgnore ?? [])
       .map((p) => p.replace(/\\/g, "/").trim())
       .filter(Boolean);
 
-    const excludePatterns = new Set<string>(overrideFilesExclude);
+    const excludePatterns = new Set<string>([...baseFilesExclude, ...overrideFilesExclude]);
     for (const pat of normalizedCliIgnore) {
       excludePatterns.add(pat);
       if (!pat.includes("*") && !pat.includes("?") && !pat.endsWith(".lua")) {
@@ -203,29 +219,13 @@ export function mergeConfigs(
     }
     mergedFilesExclude = Array.from(excludePatterns);
 
-    // For workspace.ignoreDir, only use what the user configured in override,
-    // plus any directory-only patterns from cliIgnore (without globs)
+    // For workspace.ignoreDir, keep default structural exclusions plus any CLI ignore dirs
     const cliDirs = normalizedCliIgnore
       .filter((p) => !p.includes("*") && !p.includes("?") && !p.endsWith(".lua"))
       .map((p) => p.replace(/\/+$/, ""));
-    const overrideIgnore = override.workspace?.ignoreDir ?? [];
-    mergedIgnoreDir = Array.from(new Set([...overrideIgnore, ...cliDirs]));
+    mergedIgnoreDir = Array.from(new Set([...defaultIgnore, ...baseIgnore, ...overrideIgnore, ...cliDirs]));
   } else {
     // Merge ignoreDir using default rules
-    const defaultIgnore = [
-      ".git",
-      ".vscode",
-      "node_modules",
-      "dist",
-      "bin",
-      "vendor",
-      "script",
-      "meta",
-      "locale",
-      "log",
-    ];
-    const baseIgnore = base.workspace?.ignoreDir ?? defaultIgnore;
-    const overrideIgnore = override.workspace?.ignoreDir ?? [];
     mergedIgnoreDir = Array.from(new Set([...defaultIgnore, ...baseIgnore, ...overrideIgnore]));
     mergedFilesExclude = Array.from(new Set([...baseFilesExclude, ...overrideFilesExclude]));
   }
@@ -289,7 +289,10 @@ export function resolveWorkspaceConfig(
       try {
         userConfig = loadConfigFile(candidate);
       } catch (err) {
-        console.warn(`[config] Warning: Failed to parse workspace .luarc.json: ${err}`);
+        throw new Error(
+          `Failed to parse workspace configuration file (${candidate}): ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err }
+        );
       }
     }
   }
@@ -347,18 +350,34 @@ export function resolveWorkspaceConfig(
   return { configPath: tempConfigFile, isTemp: true };
 }
 
+export interface InitWorkspaceOptions {
+  force?: boolean;
+}
+
 /**
  * Initializes a new .luarc.json in a workspace.
  */
-export function initWorkspace(workspacePath: string): string {
+export function initWorkspace(workspacePath: string, options?: InitWorkspaceOptions): string {
   const targetFile = path.join(workspacePath, ".luarc.json");
+  if (fs.existsSync(targetFile) && !options?.force) {
+    throw new Error(`.luarc.json already exists at ${targetFile}. Use --force to overwrite.`);
+  }
+
   const template = loadConfigFile(getDefaultTemplatePath());
-  const definitionsDir = getDefinitionsDir().split(path.sep).join("/");
+  const definitionsDir = getDefinitionsDir();
+  const sourceAnnotations = path.join(definitionsDir, "annotations.lua");
+
+  // Copy annotations to .nanos-lint/annotations.lua inside workspace for portability
+  const targetNanosDir = path.join(workspacePath, ".nanos-lint");
+  fs.mkdirSync(targetNanosDir, { recursive: true });
+  const targetAnnotations = path.join(targetNanosDir, "annotations.lua");
+  if (fs.existsSync(sourceAnnotations)) {
+    fs.copyFileSync(sourceAnnotations, targetAnnotations);
+  }
 
   template.workspace = template.workspace ?? {};
-  template.workspace.library = [definitionsDir];
+  template.workspace.library = [".nanos-lint/annotations.lua"];
 
   fs.writeFileSync(targetFile, JSON.stringify(template, null, 2), "utf-8");
   return targetFile;
 }
-

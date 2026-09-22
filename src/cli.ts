@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Command, CommanderError } from "commander";
+import { Command, CommanderError, Option } from "commander";
 import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { formatReport } from "./reporter.js";
@@ -56,11 +56,23 @@ export function createProgram(options?: CreateProgramOptions): Command {
   program
     .command("check [path]", { isDefault: true })
     .description("Check a workspace or Lua file (default command)")
-    .option("--checklevel <level>", "Minimum diagnostic level: Error, Warning, Information, Hint", "Warning")
+    .addOption(
+      new Option(
+        "--checklevel <level>",
+        "Minimum diagnostic level: Error, Warning, Information, Hint"
+      )
+        .choices(["Error", "Warning", "Information", "Hint"])
+        .default("Warning")
+    )
     .option("--config <path>", "Path to custom .luarc.json configuration file")
-    .option("--format <format>", "Output format: pretty, json, github (default: pretty, auto-detects GitHub Actions)")
+    .addOption(
+      new Option(
+        "--format <format>",
+        "Output format: pretty, json, github (default: pretty, auto-detects GitHub Actions)"
+      ).choices(["pretty", "json", "github"])
+    )
     .option(
-      "-i, --ignore <patterns...>",
+      "-i, --ignore <pattern>",
       "Files or directories to ignore (supports glob patterns, repeatable)",
       collectIgnorePatterns
     )
@@ -115,8 +127,9 @@ export function createProgram(options?: CreateProgramOptions): Command {
   program
     .command("init [path]")
     .description("Scaffold a .luarc.json configuration in the workspace")
-    .action((targetPath: string = ".") => {
-      const created = initWorkspace(path.resolve(targetPath));
+    .option("-f, --force", "Overwrite existing .luarc.json configuration")
+    .action((targetPath: string = ".", opts: { force?: boolean }) => {
+      const created = initWorkspace(path.resolve(targetPath), { force: opts.force });
       console.log(`[init] Initialized nanos world LuaLS configuration: ${created}`);
       setExitCode(0);
     });
@@ -173,7 +186,12 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
     if (err instanceof CommanderError) {
       return err.exitCode;
     }
-    throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`error: ${message}`);
+    if (process.env.DEBUG && err instanceof Error && err.stack) {
+      console.error(err.stack);
+    }
+    return 1;
   }
 }
 
