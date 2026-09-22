@@ -106,8 +106,8 @@ export function formatPretty(
   useColor: boolean = shouldEnableColor()
 ): string {
   const c = getColors(useColor);
-  const symCross = process.platform === "win32" ? "✖  " : "✖ ";
-  const symCheck = process.platform === "win32" ? "✔  " : "✔ ";
+  const symCross = "✖  ";
+  const symCheck = "✔  ";
 
   if (result.passed) {
     const files = result.totalFilesChecked ?? result.totalFiles;

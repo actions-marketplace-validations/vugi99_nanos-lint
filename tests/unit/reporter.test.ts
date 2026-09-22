@@ -198,17 +198,12 @@ describe("reporter module", () => {
   });
 
   describe("terminal symbol spacing", () => {
-    it("formats check and cross symbols with trailing space", () => {
+    it("formats check and cross symbols with trailing space across all platforms", () => {
       const pass = formatPretty(mockPassingResult, mockCwd, false);
       const fail = formatPretty(mockFailingResult, mockCwd, false);
 
-      if (process.platform === "win32") {
-        expect(pass).toContain("✔  Diagnosis completed");
-        expect(fail).toContain("✖  Diagnosis complete:");
-      } else {
-        expect(pass).toContain("✔ Diagnosis completed");
-        expect(fail).toContain("✖ Diagnosis complete:");
-      }
+      expect(pass).toContain("✔  Diagnosis completed");
+      expect(fail).toContain("✖  Diagnosis complete:");
     });
   });
 });
