@@ -77,8 +77,10 @@ describe("annotations management and date-based caching", () => {
 
   it("successfully downloads and writes annotations and metadata", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes("raw.githubusercontent.com")) {
+    globalThis.fetch = vi.fn().mockImplementation((url: string | URL | Request) => {
+      const urlStr = typeof url === "string" ? url : url.toString();
+      const parsed = new URL(urlStr);
+      if (parsed.hostname === "raw.githubusercontent.com") {
         return Promise.resolve({
           ok: true,
           status: 200,
