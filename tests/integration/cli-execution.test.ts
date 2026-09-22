@@ -1,16 +1,23 @@
-import { describe, it, expect } from "vitest";
-import { execFile } from "node:child_process";
+import { describe, it, expect, beforeAll } from "vitest";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
+const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const rootDir = path.resolve(__dirname, "../..");
 const distCli = path.join(rootDir, "dist", "cli.js");
 const binCli = path.join(rootDir, "bin", "nanos-lint.js");
 
 describe("CLI entrypoint execution regression tests", () => {
+  beforeAll(async () => {
+    if (!fs.existsSync(distCli)) {
+      await execAsync("npm run build", { cwd: rootDir });
+    }
+  }, 30000);
+
   it("executes dist/cli.js --help directly and outputs non-empty help text", async () => {
     expect(fs.existsSync(distCli), "dist/cli.js must be built").toBe(true);
 
