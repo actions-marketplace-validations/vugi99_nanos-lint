@@ -124,7 +124,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
       setExitCode(0);
     });
 
-  program.addHelpCommand("help [command]", "Show this help message");
+  program.helpCommand("help [command]", "Show this help message");
 
   program.addHelpText(
     "after",
