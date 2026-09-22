@@ -1,6 +1,7 @@
 # nanos-lint
 
 [![CI](https://github.com/vugi99/nanos-lint/actions/workflows/ci.yml/badge.svg)](https://github.com/vugi99/nanos-lint/actions/workflows/ci.yml)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org/)
 [![Lua Version](https://img.shields.io/badge/Lua-5.4.9-blue.svg)](https://www.lua.org/manual/5.4/)
 [![LuaLS Version](https://img.shields.io/badge/LuaLS-3.19.1-brightgreen.svg)](https://github.com/LuaLS/lua-language-server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -16,6 +17,13 @@ A dedicated, fast linter and type-checker for **[nanos world](https://nanos.worl
 - **Native GitHub Action**: Use `vugi99/nanos-lint` directly in CI workflows with inline GitHub PR annotations.
 - **Workspace Config Merging**: Fully respects local `.luarc.json` files, merging your project globals and disabled diagnostics on top of the nanos API.
 - **Cross-Platform**: Works on **Windows x64** and **Linux amd64** (plus macOS). Automatically downloads and caches platform LuaLS binaries.
+- **Modern Node.js Runtime**: Built targeting Node.js (>= 24) with zero runtime dependencies.
+
+---
+
+## Requirements
+
+- **Node.js**: `>= 24.0.0` (required for npm/npx CLI usage; standalone release bundles include all dependencies)
 
 ---
 

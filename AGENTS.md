@@ -8,7 +8,7 @@ This document outlines the architectural principles, codebase structure, develop
 
 `nanos-lint` is a dedicated linter and type-checker for **nanos world** Lua scripts (Lua 5.4.9), powered by the **Lua Language Server (LuaLS)**.
 
-- **Runtime**: Node.js (>=20)
+- **Runtime**: Node.js (>=24)
 - **Language**: TypeScript 6 (ES2022 / NodeNext modules)
 - **Bundler**: `tsdown` 0.23 (powered by Rolldown, compiles `src/` to a standalone `dist/` targeting Node.js 24 with zero runtime dependencies)
 - **Testing**: `vitest` 5 (unit tests and live LuaLS integration tests)
