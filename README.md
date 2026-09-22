@@ -82,7 +82,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Lint nanos world Lua scripts
-        uses: vugi99/nanos-lint@v1
+        uses: vugi99/nanos-lint@v2
         with:
           path: '.'
           checklevel: 'Warning'
