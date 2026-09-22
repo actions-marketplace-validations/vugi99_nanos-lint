@@ -13,8 +13,8 @@ export default defineConfig({
     "jsonc-parser": "jsonc-parser/lib/esm/main.js",
   },
   deps: {
-    alwaysBundle: ["commander", "jsonc-parser"],
-    onlyBundle: ["commander", "jsonc-parser"],
+    alwaysBundle: ["commander", "jsonc-parser", "env-paths", "is-safe-filename"],
+    onlyBundle: ["commander", "jsonc-parser", "env-paths", "is-safe-filename"],
   },
 });
 

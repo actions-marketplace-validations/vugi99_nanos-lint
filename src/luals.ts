@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { getPackageRoot } from "./config.js";
+import { systemPaths } from "./paths.js";
 import { fileUriToPath } from "./types.js";
 import type { CheckOptions, CheckResult, DiagnosticReport, LuaRCConfig } from "./types.js";
 
@@ -179,12 +179,7 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
 }
 
 export function getCacheDir(version: string = FALLBACK_LUALS_VERSION): string {
-  const base =
-    process.platform === "win32"
-      ? process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local")
-      : process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
-
-  return path.join(base, "nanos-lint", "luals", version);
+  return path.join(systemPaths.cache, "luals", version);
 }
 
 export interface DownloadOptions {
@@ -470,7 +465,7 @@ export async function runLuaLSCheck(
     targetFileOnly = absoluteTarget;
   }
 
-  const tempOutputDir = path.join(os.tmpdir(), "nanos-lint");
+  const tempOutputDir = systemPaths.temp;
   fs.mkdirSync(tempOutputDir, { recursive: true });
   const checkOutPath = path.join(
     tempOutputDir,

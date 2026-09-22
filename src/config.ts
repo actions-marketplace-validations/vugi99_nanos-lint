@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { parse, stripComments, type ParseError, printParseErrorCode } from "jsonc-parser";
+import { systemPaths } from "./paths.js";
 import type { LuaRCConfig } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -274,7 +274,7 @@ export function resolveWorkspaceConfig(
   }
 
   // Write to a temporary configuration file for LuaLS execution
-  const tempDir = path.join(os.tmpdir(), "nanos-lint");
+  const tempDir = systemPaths.temp;
   fs.mkdirSync(tempDir, { recursive: true });
   const tempConfigFile = path.join(tempDir, `luarc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
   fs.writeFileSync(tempConfigFile, JSON.stringify(merged, null, 2), "utf-8");
