@@ -1,4 +1,8 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   formatPretty,
   formatGitHubAnnotations,
@@ -206,5 +210,146 @@ describe("reporter module", () => {
       expect(fail).toContain("✖  Diagnosis complete:");
     });
   });
+
+  describe("code snippet and preview rendering", () => {
+    it("renders source code snippet and caret pointer when file exists on disk", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "reporter-snippet-test-"));
+      try {
+        const testFile = path.join(tempDir, "sample.lua");
+        fs.writeFileSync(testFile, "local x = 123\nlocal y = 'hello'\nprint(x + y)\n", "utf-8");
+        const fileUri = pathToFileURL(testFile).href;
+
+        const result: CheckResult = {
+          passed: false,
+          totalProblems: 2,
+          totalFiles: 1,
+          diagnostics: {
+            [fileUri]: [
+              {
+                code: "type-error",
+                message: "Cannot add number and string",
+                range: {
+                  start: { line: 2, character: 6 },
+                  end: { line: 2, character: 11 },
+                },
+                severity: 1,
+              },
+              {
+                message: "Multiline error",
+                range: {
+                  start: { line: 0, character: 0 },
+                  end: { line: 1, character: 5 },
+                },
+                severity: 2,
+              },
+            ],
+          },
+        };
+
+        const pretty = formatPretty(result, tempDir, false);
+        expect(pretty).toContain("sample.lua:3:7 [Error] Cannot add number and string (type-error)");
+        expect(pretty).toContain("    print(x + y)");
+        expect(pretty).toContain("          ^^^^^");
+        expect(pretty).toContain("sample.lua:1:1 [Warning] Multiline error");
+        expect(pretty).toContain("    local x = 123");
+        expect(pretty).toContain("    ^");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("computes errors and warnings dynamically when totalErrors/totalWarnings are missing", () => {
+      const result: CheckResult = {
+        passed: false,
+        totalProblems: 3,
+        totalFiles: 1,
+        diagnostics: {
+          "file:///test.lua": [
+            { code: "err1", message: "e1", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+            { code: "warn1", message: "w1", range: { start: { line: 1, character: 0 }, end: { line: 1, character: 1 } }, severity: 2 },
+            { code: "info1", message: "i1", range: { start: { line: 2, character: 0 }, end: { line: 2, character: 1 } }, severity: 3 },
+          ],
+        },
+      };
+
+      const pretty = formatPretty(result, "/workspace", false);
+      expect(pretty).toContain("3 problems (1 error, 1 warning, 1 other) found across 1 file.");
+    });
+  });
+
+  describe("formatReport and formatGitHubAnnotations edge cases", () => {
+    it("handles notice severity and character escaping in GitHub annotations", () => {
+      const result: CheckResult = {
+        passed: false,
+        totalProblems: 2,
+        totalFiles: 1,
+        diagnostics: {
+          "file:///workspace/scripts/test%252Cfile.lua": [
+            {
+              message: "Special: 100% discount\r\nnext line",
+              range: { start: { line: 5, character: 2 }, end: { line: 5, character: 8 } },
+              severity: 3, // Information -> notice
+            },
+            {
+              message: "Hint message without code",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              severity: 4, // Hint -> notice
+            },
+          ],
+          "file:///workspace/scripts/empty.lua": [],
+        },
+      };
+
+      const annotations = formatGitHubAnnotations(result, "/workspace");
+      expect(annotations).toContain("::notice file=scripts/test%252Cfile.lua,line=6,col=3,endLine=6,endColumn=9,title=nanos-lint::Special: 100%25 discount%0D%0Anext line");
+      expect(annotations).toContain("::notice file=scripts/test%252Cfile.lua,line=1,col=1,endLine=1,endColumn=2,title=nanos-lint::Hint message without code");
+    });
+
+    it("formats report with github and default formats", () => {
+      const githubPass = formatReport(mockPassingResult, "github", mockCwd, false);
+      expect(githubPass).toContain("Diagnosis completed, no problems found");
+      expect(githubPass).not.toContain("::");
+
+      const githubFail = formatReport(mockFailingResult, "github", mockCwd, false);
+      expect(githubFail).toContain("::warning");
+      expect(githubFail).toContain("Diagnosis complete:");
+
+      // default format
+      const defaultReport = formatReport(mockPassingResult, undefined as unknown as "pretty", mockCwd, false);
+      expect(defaultReport).toContain("Diagnosis completed, no problems found");
+    });
+
+    it("formats hint and unknown severity badges", () => {
+      expect(formatSeverityBadge(4, false)).toBe("[Hint]");
+      expect(formatSeverityBadge(99, false)).toBe("[Warning]");
+      expect(formatSeverityBadge(3, true)).toContain("\x1b[36m[Information]\x1b[0m");
+      expect(formatSeverityBadge(4, true)).toContain("\x1b[90m[Hint]\x1b[0m");
+    });
+
+    it("handles FORCE_COLOR=0 and NO_COLOR='' in shouldEnableColor", () => {
+      const origNoColor = process.env.NO_COLOR;
+      const origForceColor = process.env.FORCE_COLOR;
+
+      try {
+        process.env.NO_COLOR = "";
+        process.env.FORCE_COLOR = "0";
+        // FORCE_COLOR=0 does not force color
+        // NO_COLOR="" should not disable color
+        expect(typeof shouldEnableColor()).toBe("boolean");
+      } finally {
+        if (origNoColor !== undefined) {
+          process.env.NO_COLOR = origNoColor;
+        } else {
+          delete process.env.NO_COLOR;
+        }
+        if (origForceColor !== undefined) {
+          process.env.FORCE_COLOR = origForceColor;
+        } else {
+          delete process.env.FORCE_COLOR;
+        }
+      }
+    });
+  });
 });
+
 

@@ -12,6 +12,8 @@ import {
   parseJsonc,
   stripJsonComments,
   stripTrailingSlashes,
+  resolveWorkspaceConfig,
+  initWorkspace,
 } from "../../src/config.js";
 import type { LuaRCConfig } from "../../src/types.js";
 
@@ -220,5 +222,98 @@ describe("config module", () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
     });
+
+    it("automatically excludes tool files when checking a tool directory without cliIgnore", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-tool-dir-"));
+      try {
+        fs.writeFileSync(path.join(tempDir, "main.lua"), "-- tool entry");
+        fs.mkdirSync(path.join(tempDir, "bin"), { recursive: true });
+        const binName = process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
+        fs.writeFileSync(path.join(tempDir, "bin", binName), "fake binary");
+
+        const dummyAnnotations = path.join(tempDir, "annotations.lua");
+        fs.writeFileSync(dummyAnnotations, "-- dummy annotations");
+
+        const resolved = resolveWorkspaceConfig(tempDir, undefined, {
+          annotationsPath: dummyAnnotations,
+        });
+
+        expect(resolved.isTemp).toBe(true);
+        const writtenConfig = JSON.parse(fs.readFileSync(resolved.configPath, "utf-8")) as LuaRCConfig;
+        expect(writtenConfig.files?.exclude).toContain("main.lua");
+        expect(writtenConfig.files?.exclude).toContain("**/main.lua");
+        expect(writtenConfig.files?.exclude).toContain("debugger.lua");
+
+        fs.unlinkSync(resolved.configPath);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("throws a descriptive error when candidate workspace .luarc.json has invalid JSON", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-invalid-cfg-"));
+      try {
+        fs.writeFileSync(path.join(tempDir, ".luarc.json"), "{ invalid json: }");
+        expect(() => {
+          resolveWorkspaceConfig(tempDir);
+        }).toThrow(/Failed to parse workspace configuration file/);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("expands cliIgnore patterns when prefixed with workspace path", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-expand-ignore-"));
+      try {
+        const dummyAnnotations = path.join(tempDir, "annotations.lua");
+        fs.writeFileSync(dummyAnnotations, "-- dummy");
+
+        const resolved = resolveWorkspaceConfig("packages/my-pkg", undefined, {
+          annotationsPath: dummyAnnotations,
+          ignore: ["packages/my-pkg/subfolder/**", "other/**"],
+        });
+
+        const writtenConfig = JSON.parse(fs.readFileSync(resolved.configPath, "utf-8")) as LuaRCConfig;
+        expect(writtenConfig.files?.exclude).toContain("packages/my-pkg/subfolder/**");
+        expect(writtenConfig.files?.exclude).toContain("subfolder/**");
+        expect(writtenConfig.files?.exclude).toContain("other/**");
+
+        fs.unlinkSync(resolved.configPath);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("handles initWorkspace error cases and options", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-init-options-"));
+      try {
+        const dummyAnnotations = path.join(tempDir, "annotations.lua");
+        fs.writeFileSync(dummyAnnotations, "-- dummy");
+
+        // Fails when annotationsPath does not exist
+        expect(() => {
+          initWorkspace(tempDir, { annotationsPath: "/nonexistent/annotations.lua" });
+        }).toThrow(/Definitions file not found/);
+
+        // First initialization succeeds
+        const created = initWorkspace(tempDir, { annotationsPath: dummyAnnotations });
+        expect(fs.existsSync(created)).toBe(true);
+
+        // Fails when .luarc.json already exists without force
+        expect(() => {
+          initWorkspace(tempDir, { annotationsPath: dummyAnnotations });
+        }).toThrow(/\.luarc\.json already exists/);
+
+        // Succeeds with force: true
+        const overwritten = initWorkspace(tempDir, {
+          force: true,
+          annotationsPath: dummyAnnotations,
+        });
+        expect(overwritten).toBe(created);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 });
+

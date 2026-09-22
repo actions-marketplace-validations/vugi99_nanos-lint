@@ -201,8 +201,8 @@ npm run typecheck
 # Build distribution bundle
 npm run build
 
-# Run Vitest test suite (unit + live LuaLS integration tests)
-npm test
+# Run Vitest test suite with coverage (unit + live LuaLS integration tests)
+npm run test:coverage
 ```
 
 See [AGENTS.md](AGENTS.md) for development philosophy and quality gate requirements.

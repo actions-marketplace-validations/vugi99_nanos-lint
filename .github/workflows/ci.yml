@@ -63,8 +63,8 @@ jobs:
       - name: Build distribution package
         run: npm run build
 
-      - name: Run Vitest tests (Unit & LuaLS Integration)
-        run: npm test
+      - name: Run Vitest tests with coverage (Unit & LuaLS Integration)
+        run: npm run test:coverage
 
       - name: Test CLI directly on passing fixtures (via bin/nanos-lint.js and dist/cli.js)
         run: |

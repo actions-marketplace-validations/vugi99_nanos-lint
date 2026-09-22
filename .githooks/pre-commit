@@ -28,8 +28,8 @@ $NPM_CMD run typecheck
 echo "[pre-commit] 3/4: Building distribution bundle ($NPM_CMD run build)..."
 $NPM_CMD run build
 
-echo "[pre-commit] 4/4: Running Vitest test suite ($NPM_CMD test)..."
-$NPM_CMD test
+echo "[pre-commit] 4/4: Running Vitest test suite with coverage ($NPM_CMD run test:coverage)..."
+$NPM_CMD run test:coverage
 
 echo "[pre-commit] All project quality gates passed successfully!"
 

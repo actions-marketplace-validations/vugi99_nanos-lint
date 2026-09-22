@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 import { describe, it, expect, vi } from "vitest";
 import { runCLI, isDirectExecution, collectIgnorePatterns } from "../../src/cli.js";
 import * as pathsModule from "../../src/paths.js";
+import * as lualsModule from "../../src/luals.js";
+import * as annotationsModule from "../../src/annotations.js";
 
 describe("cli module flag and command parsing", () => {
   it("prints help and returns 0 on --help and -h", async () => {
@@ -163,9 +165,134 @@ describe("cli module flag and command parsing", () => {
       const chunkUrl = pathToFileURL(chunkFile).href;
       const binArgv = path.resolve("/workspace/bin/nanos-lint.js");
       const userScript = path.resolve("/workspace/my-app/index.js");
+      expect(binArgv).toBeDefined();
       expect(isDirectExecution(chunkUrl, binArgv)).toBe(false);
       expect(isDirectExecution(chunkUrl, userScript)).toBe(false);
     });
+
+    it("handles non-file url and malformed url in toPath", () => {
+      expect(isDirectExecution("http://localhost:8080/cli.js", "/some/file.js")).toBe(false);
+      expect(isDirectExecution("file://%ZZ/cli.js", "/nonexistent/file.js")).toBe(false);
+    });
+
+    it("falls back to string path comparison when realpathSync throws", () => {
+      const fakeUrl = pathToFileURL(path.resolve("/nonexistent/dist/cli.js")).href;
+      expect(isDirectExecution(fakeUrl, path.resolve("/nonexistent/dist/cli.js"))).toBe(true);
+
+      const chunkUrl = pathToFileURL(path.resolve("/nonexistent/dist/cli-chunk.js")).href;
+      expect(isDirectExecution(chunkUrl, path.resolve("/nonexistent/dist/cli.js"))).toBe(true);
+      expect(isDirectExecution(chunkUrl, path.resolve("/nonexistent/dist/cli.ts"))).toBe(true);
+      expect(isDirectExecution(chunkUrl, path.resolve("/nonexistent/other/app.js"))).toBe(false);
+    });
+  });
+
+  describe("additional cli command coverage", () => {
+    it("handles download-luals subcommand with default and explicit versions", async () => {
+      const lualsSpy = vi.spyOn(lualsModule, "resolveLuaLSBinary").mockResolvedValue("/mock/bin/luals");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const codeDefault = await runCLI(["download-luals"]);
+      expect(codeDefault).toBe(0);
+      expect(lualsSpy).toHaveBeenCalledWith("latest");
+
+      const codePositional = await runCLI(["download-luals", "3.13.5"]);
+      expect(codePositional).toBe(0);
+      expect(lualsSpy).toHaveBeenCalledWith("3.13.5");
+
+      const codeFlag = await runCLI(["download-luals", "--luals-version", "3.13.4"]);
+      expect(codeFlag).toBe(0);
+      expect(lualsSpy).toHaveBeenCalledWith("3.13.4");
+
+      lualsSpy.mockRestore();
+      logSpy.mockRestore();
+    });
+
+    it("handles errors during clean-cache execution", async () => {
+      const cleanSpy = vi.spyOn(pathsModule, "cleanCache").mockImplementation(() => {
+        throw new Error("EACCES: permission denied");
+      });
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const codeError = await runCLI(["clean-cache"]);
+      expect(codeError).toBe(1);
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to clear cache: EACCES: permission denied"));
+
+      cleanSpy.mockImplementation(() => {
+        throw "String error";
+      });
+      const codeStringError = await runCLI(["clean-cache"]);
+      expect(codeStringError).toBe(1);
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to clear cache: String error"));
+
+      cleanSpy.mockRestore();
+      errSpy.mockRestore();
+    });
+
+    it("prints stack trace when DEBUG environment variable is set and an error occurs", async () => {
+      const origDebug = process.env.DEBUG;
+      process.env.DEBUG = "1";
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const code = await runCLI(["check", "--config", "/nonexistent/path/config.json"]);
+      expect(code).toBe(1);
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Configuration file not found"));
+
+      if (origDebug !== undefined) {
+        process.env.DEBUG = origDebug;
+      } else {
+        delete process.env.DEBUG;
+      }
+      errSpy.mockRestore();
+    });
+
+    it("handles check command with options and exit codes", async () => {
+      const annotSpy = vi.spyOn(annotationsModule, "resolveAnnotations").mockResolvedValue("/mock/annotations.lua");
+      const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck");
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      // Success passing check
+      checkSpy.mockResolvedValueOnce({
+        passed: true,
+        totalProblems: 0,
+        totalFiles: 1,
+        diagnostics: {},
+      });
+      const codePass = await runCLI(["check", ".", "--github", "--quiet"]);
+      expect(codePass).toBe(0);
+
+      // Failing check with --no-fail should return 0
+      checkSpy.mockResolvedValueOnce({
+        passed: false,
+        totalProblems: 1,
+        totalFiles: 1,
+        diagnostics: {
+          "file:///test.lua": [
+            { code: "err", message: "m", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+          ],
+        },
+      });
+      const codeNoFail = await runCLI(["check", ".", "--format", "json", "--no-fail"]);
+      expect(codeNoFail).toBe(0);
+
+      // Failing check without --no-fail should return 1
+      checkSpy.mockResolvedValueOnce({
+        passed: false,
+        totalProblems: 1,
+        totalFiles: 1,
+        diagnostics: {
+          "file:///test.lua": [
+            { code: "err", message: "m", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+          ],
+        },
+      });
+      const codeFail = await runCLI(["check", "."]);
+      expect(codeFail).toBe(1);
+
+      annotSpy.mockRestore();
+      checkSpy.mockRestore();
+      logSpy.mockRestore();
+    });
   });
 });
+
 

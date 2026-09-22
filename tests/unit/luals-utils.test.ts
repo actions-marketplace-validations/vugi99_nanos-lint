@@ -6,8 +6,12 @@ import {
   sanitizeLuaLSVersion,
   FALLBACK_LUALS_VERSION,
   countCheckedFiles,
+  getPlatformInfo,
+  resolveLuaLSBinary,
 } from "../../src/luals.js";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 
 describe("luals utilities", () => {
   it("escapes single quotes correctly for PowerShell single-quoted commands", () => {
@@ -116,5 +120,101 @@ describe("luals utilities", () => {
       expect(countCheckedFiles("non_existent_path_xyz")).toBe(0);
     });
   });
+
+  describe("getPlatformInfo and resolveLuaLSBinary overrides", () => {
+    it("respects process.env.LUALS_BIN override when file exists", async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "luals-override-"));
+      try {
+        const dummyBin = path.join(tempDir, "fake-luals");
+        fs.writeFileSync(dummyBin, "mock binary");
+        process.env.LUALS_BIN = dummyBin;
+
+        const resolved = await resolveLuaLSBinary("3.13.6");
+        expect(resolved).toBe(dummyBin);
+      } finally {
+        delete process.env.LUALS_BIN;
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("evaluates platform and architecture combinations in getPlatformInfo", () => {
+      const origPlatform = process.platform;
+      const origArch = process.arch;
+
+      try {
+        // Darwin arm64 and x64
+        Object.defineProperty(process, "platform", { value: "darwin" });
+        Object.defineProperty(process, "arch", { value: "arm64" });
+        expect(getPlatformInfo("3.13.6").assetName).toContain("darwin-arm64");
+
+        Object.defineProperty(process, "arch", { value: "x64" });
+        expect(getPlatformInfo("3.13.6").assetName).toContain("darwin-x64");
+
+        // Linux arm64, x64, unsupported
+        Object.defineProperty(process, "platform", { value: "linux" });
+        Object.defineProperty(process, "arch", { value: "arm64" });
+        expect(getPlatformInfo("3.13.6").assetName).toContain("linux-arm64");
+
+        Object.defineProperty(process, "arch", { value: "x64" });
+        expect(getPlatformInfo("3.13.6").assetName).toContain("linux-x64");
+
+        Object.defineProperty(process, "arch", { value: "ia32" });
+        expect(() => getPlatformInfo("3.13.6")).toThrow(/Unsupported Linux architecture/);
+
+        // Windows x64 vs unsupported
+        Object.defineProperty(process, "platform", { value: "win32" });
+        Object.defineProperty(process, "arch", { value: "x64" });
+        expect(getPlatformInfo("3.13.6").assetName).toContain("win32-x64");
+
+        Object.defineProperty(process, "arch", { value: "arm" });
+        expect(() => getPlatformInfo("3.13.6")).toThrow(/Unsupported Windows architecture/);
+
+        // Unsupported OS
+        Object.defineProperty(process, "platform", { value: "sunos" });
+        expect(() => getPlatformInfo("3.13.6")).toThrow(/Unsupported platform: sunos/);
+      } finally {
+        Object.defineProperty(process, "platform", { value: origPlatform });
+        Object.defineProperty(process, "arch", { value: origArch });
+      }
+    });
+
+    it("handles resolveLatestLuaLSVersion with GITHUB_TOKEN and invalid status", async () => {
+      const origToken = process.env.GITHUB_TOKEN;
+      process.env.GITHUB_TOKEN = "ghp_luals_token";
+      const originalFetch = globalThis.fetch;
+
+      let capturedHeaders: Record<string, string> | undefined;
+      globalThis.fetch = vi.fn().mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
+        capturedHeaders = init?.headers as Record<string, string>;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ tag_name: "v3.13.6" }),
+        } as unknown as Response);
+      });
+
+      try {
+        const ver = await resolveLatestLuaLSVersion();
+        expect(ver).toBe("3.13.6");
+        expect(capturedHeaders?.["Authorization"]).toBe("token ghp_luals_token");
+
+        // When res.ok is false
+        globalThis.fetch = vi.fn().mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+        } as unknown as Response);
+        const fallback = await resolveLatestLuaLSVersion();
+        expect(fallback).toBe(FALLBACK_LUALS_VERSION);
+      } finally {
+        if (origToken !== undefined) {
+          process.env.GITHUB_TOKEN = origToken;
+        } else {
+          delete process.env.GITHUB_TOKEN;
+        }
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
 });
+
 

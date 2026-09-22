@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `npm run test:coverage` script using `@vitest/coverage-v8` to enforce strict test coverage thresholds across the codebase without autoUpdate.
+- Vitest global coverage thresholds: statements (85%), functions (88%), lines (85%), branches (75%).
+- Comprehensive unit tests across all modules targeting previously uncovered branches in URI resolution (`types.test.ts`), CLI options & commands (`cli.test.ts`), report snippet and annotation formatting (`reporter.test.ts`), config discovery & workspace init (`config.test.ts`), platform & binary resolution (`luals-utils.test.ts`), and commit/content fetching (`annotations.test.ts`).
 - `clean-cache` (and `clean` alias) CLI command to safely purge cached LuaLS binaries and annotations (`nanos-lint clean-cache`).
 - Dynamic downloading and date-based cache validation for `annotations.lua` from repository `nanos-world/vscode-extension` (`docgen-output` branch), eliminating the upstream Git submodule.
 - `--annotations <path>` CLI option for `check` and `init` commands to supply a custom annotations file.
@@ -20,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - npm version badge in `README.md`.
 
 ### Changed
+- Standardized project quality gates (`.githooks/pre-commit`, `.git/hooks/pre-commit`, `AGENTS.md`, `README.md`) and CI workflows (`.github/workflows/ci.yml`) to enforce `npm run test:coverage`.
 - Standardized cross-platform application cache, config, data, and temp path resolution using `env-paths` in `src/paths.ts`.
 - **Cache relocation migration note**: System cache paths now resolve to `%LOCALAPPDATA%\nanos-lint\Cache` on Windows and `~/Library/Caches/nanos-lint` on macOS (standard platform cache paths). Existing cache directories from <= 2.2.1 are automatically probed and migrated.
 - `mergeConfigs()` now accepts either an `annotations.lua` file path or a directory containing `annotations.lua` for seamless backwards compatibility.

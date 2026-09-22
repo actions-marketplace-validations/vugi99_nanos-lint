@@ -8,6 +8,8 @@ import {
   updateLastCheckedDate,
   downloadAndCacheAnnotations,
   resolveAnnotations,
+  fetchLatestCommitId,
+  fetchRawAnnotationsContent,
   type AnnotationsMetadata,
 } from "../../src/annotations.js";
 
@@ -286,5 +288,59 @@ describe("annotations management and date-based caching", () => {
         globalThis.fetch = originalFetch;
       }
     });
+
+    it("sends GITHUB_TOKEN Authorization header in fetchLatestCommitId when available", async () => {
+      const origToken = process.env.GITHUB_TOKEN;
+      process.env.GITHUB_TOKEN = "ghp_mock_token_12345";
+      const originalFetch = globalThis.fetch;
+
+      let capturedHeaders: Record<string, string> | undefined;
+      globalThis.fetch = vi.fn().mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
+        capturedHeaders = init?.headers as Record<string, string>;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ sha: "0123456789abcdef0123456789abcdef01234567" }),
+        } as unknown as Response);
+      });
+
+      try {
+        const commitId = await fetchLatestCommitId();
+        expect(commitId).toBe("0123456789abcdef0123456789abcdef01234567");
+        expect(capturedHeaders?.["Authorization"]).toBe("token ghp_mock_token_12345");
+      } finally {
+        if (origToken !== undefined) {
+          process.env.GITHUB_TOKEN = origToken;
+        } else {
+          delete process.env.GITHUB_TOKEN;
+        }
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("handles fetchRawAnnotationsContent HTTP errors and truncated payloads", async () => {
+      const originalFetch = globalThis.fetch;
+
+      // 404 response
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+      } as unknown as Response);
+
+      await expect(fetchRawAnnotationsContent()).rejects.toThrow(/Failed to download annotations\.lua: 404 Not Found/);
+
+      // Truncated payload (< 1000 characters)
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve("-- short content"),
+      } as unknown as Response);
+
+      await expect(fetchRawAnnotationsContent()).rejects.toThrow(/Downloaded annotations\.lua appears truncated or invalid/);
+
+      globalThis.fetch = originalFetch;
+    });
   });
 });
+

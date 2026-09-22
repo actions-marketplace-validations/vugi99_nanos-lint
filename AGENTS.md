@@ -74,8 +74,8 @@ npm run typecheck
 # 3. Build distribution bundle
 npm run build
 
-# 4. Run all Vitest unit and live LuaLS integration tests (must be 100% passing)
-npm test
+# 4. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
+npm run test:coverage
 ```
 
 These quality gates are automated in `.githooks/pre-commit` (configured via `git config core.hooksPath .githooks`), running on every `git commit`.
