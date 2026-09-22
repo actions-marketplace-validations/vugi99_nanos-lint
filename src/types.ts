@@ -40,6 +40,7 @@ export interface CheckResult {
   totalErrors?: number;
   totalWarnings?: number;
   totalFiles: number;
+  totalFilesChecked?: number;
   diagnostics: DiagnosticReport;
   outputPath?: string;
 }

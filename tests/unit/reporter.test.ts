@@ -51,9 +51,21 @@ describe("reporter module", () => {
     },
   };
 
-  it("formats passing result cleanly", () => {
+  it("formats passing result cleanly with file count", () => {
     const pretty = formatPretty(mockPassingResult);
-    expect(pretty).toContain("Diagnosis completed, no problems found");
+    expect(pretty).toContain("Diagnosis completed, no problems found across 0 files.");
+
+    const singlePass = formatPretty({
+      ...mockPassingResult,
+      totalFiles: 1,
+    });
+    expect(singlePass).toContain("Diagnosis completed, no problems found across 1 file.");
+
+    const multiPass = formatPretty({
+      ...mockPassingResult,
+      totalFiles: 5,
+    });
+    expect(multiPass).toContain("Diagnosis completed, no problems found across 5 files.");
   });
 
   it("formats failing result with problem count and diagnostic codes", () => {

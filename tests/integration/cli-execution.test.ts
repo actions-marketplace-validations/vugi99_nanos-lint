@@ -40,7 +40,7 @@ describe("CLI entrypoint execution regression tests", () => {
       "check",
       path.join(rootDir, "tests", "pass"),
     ]);
-    expect(stdout).toContain("Diagnosis completed, no problems found");
+    expect(stdout).toContain("Diagnosis completed, no problems found across 3 files.");
   });
 
   it("executes dist/cli.js check tests/fail/type_mismatch.lua directly and exits with code 1", async () => {

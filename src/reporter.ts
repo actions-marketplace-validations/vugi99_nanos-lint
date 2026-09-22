@@ -110,7 +110,9 @@ export function formatPretty(
   const symCheck = process.platform === "win32" ? "✔  " : "✔ ";
 
   if (result.passed) {
-    return `${c.green}${c.bold}${symCheck}Diagnosis completed, no problems found.${c.reset}`;
+    const files = result.totalFilesChecked ?? result.totalFiles;
+    const fileStr = pluralize(files, "file");
+    return `${c.green}${c.bold}${symCheck}Diagnosis completed, no problems found across ${fileStr}.${c.reset}`;
   }
 
   const lines: string[] = [];

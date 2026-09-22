@@ -3,7 +3,9 @@ import {
   escapePowerShellSingleQuote,
   resolveLatestLuaLSVersion,
   FALLBACK_LUALS_VERSION,
+  countCheckedFiles,
 } from "../../src/luals.js";
+import path from "node:path";
 
 describe("luals utilities", () => {
   it("escapes single quotes correctly for PowerShell single-quoted commands", () => {
@@ -27,6 +29,22 @@ describe("luals utilities", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  describe("countCheckedFiles helper", () => {
+    it("counts single lua file correctly", () => {
+      const singleFile = path.resolve(__dirname, "../../tests/pass/character.lua");
+      expect(countCheckedFiles(singleFile)).toBe(1);
+    });
+
+    it("counts lua files in directory correctly", () => {
+      const passDir = path.resolve(__dirname, "../../tests/pass");
+      expect(countCheckedFiles(passDir)).toBe(3);
+    });
+
+    it("returns 0 for non-existent path", () => {
+      expect(countCheckedFiles("non_existent_path_xyz")).toBe(0);
+    });
   });
 });
 

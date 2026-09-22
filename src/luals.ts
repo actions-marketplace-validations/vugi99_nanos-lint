@@ -5,7 +5,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { getPackageRoot } from "./config.js";
 import { fileUriToPath } from "./types.js";
-import type { CheckOptions, CheckResult, DiagnosticReport } from "./types.js";
+import type { CheckOptions, CheckResult, DiagnosticReport, LuaRCConfig } from "./types.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -301,11 +301,11 @@ export async function runLuaLSCheck(
   let totalProblems = 0;
   let totalErrors = 0;
   let totalWarnings = 0;
-  let totalFiles = 0;
+  let problemFiles = 0;
 
   for (const [_, diags] of Object.entries(diagnostics)) {
     if (diags.length > 0) {
-      totalFiles += 1;
+      problemFiles += 1;
       totalProblems += diags.length;
       for (const d of diags) {
         if (d.severity === 1) {
@@ -318,6 +318,8 @@ export async function runLuaLSCheck(
   }
 
   const passed = totalProblems === 0;
+  const filesChecked = countCheckedFiles(targetPath, configPath);
+  const totalFiles = passed ? filesChecked : problemFiles;
 
   return {
     passed,
@@ -325,7 +327,105 @@ export async function runLuaLSCheck(
     totalErrors,
     totalWarnings,
     totalFiles,
+    totalFilesChecked: filesChecked,
     diagnostics,
     outputPath: checkOutPath,
   };
+}
+
+/**
+ * Counts candidate Lua files within targetPath, taking ignoreDir and files.exclude into account.
+ */
+export function countCheckedFiles(targetPath: string, configPath?: string): number {
+  const absPath = path.resolve(targetPath);
+  if (!fs.existsSync(absPath)) {
+    return 0;
+  }
+
+  if (fs.statSync(absPath).isFile()) {
+    return absPath.toLowerCase().endsWith(".lua") ? 1 : 0;
+  }
+
+  let ignoreDirs: string[] = [".git", ".vscode", "node_modules"];
+  let excludePatterns: string[] = [];
+
+  if (configPath && fs.existsSync(configPath)) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8")) as LuaRCConfig;
+      if (cfg.workspace?.ignoreDir) {
+        ignoreDirs = cfg.workspace.ignoreDir;
+      }
+      if (cfg.files?.exclude) {
+        excludePatterns = cfg.files.exclude;
+      }
+    } catch {
+      // Ignore config parse error
+    }
+  }
+
+  const normIgnoreDirs = new Set(ignoreDirs.map((d) => d.replace(/\\/g, "/").toLowerCase()));
+
+  function isExcluded(relPath: string): boolean {
+    const norm = relPath.replace(/\\/g, "/");
+    for (const pat of excludePatterns) {
+      const normPat = pat.replace(/\\/g, "/");
+      if (norm === normPat) return true;
+      if (normPat.endsWith("/**")) {
+        const dir = normPat.slice(0, -3);
+        if (norm === dir || norm.startsWith(`${dir}/`)) return true;
+      }
+      if (norm === normPat || norm.startsWith(`${normPat}/`)) return true;
+      if (normPat.includes("*") || normPat.includes("?")) {
+        const regexStr =
+          "^" +
+          normPat
+            .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+            .replace(/\*\*/g, ".*")
+            .replace(/(?<!\.)\*/g, "[^/]*")
+            .replace(/\?/g, "[^/]") +
+          "$";
+        try {
+          if (new RegExp(regexStr, "i").test(norm)) return true;
+        } catch {
+          // Ignore regex syntax error
+        }
+      }
+    }
+    return false;
+  }
+
+  let count = 0;
+
+  function walk(currentDir: string, relDir: string = "") {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const name = entry.name;
+      const relPath = relDir ? `${relDir}/${name}` : name;
+      const fullPath = path.join(currentDir, name);
+
+      if (entry.isDirectory()) {
+        const lowerName = name.toLowerCase();
+        if (normIgnoreDirs.has(lowerName) || normIgnoreDirs.has(relPath.toLowerCase())) {
+          continue;
+        }
+        if (isExcluded(relPath) || isExcluded(`${relPath}/**`)) {
+          continue;
+        }
+        walk(fullPath, relPath);
+      } else if (entry.isFile() && name.toLowerCase().endsWith(".lua")) {
+        if (!isExcluded(relPath)) {
+          count++;
+        }
+      }
+    }
+  }
+
+  walk(absPath);
+  return count;
 }
