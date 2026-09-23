@@ -13,6 +13,7 @@ import {
   FALLBACK_LUALS_VERSION,
   resolveLuaLSVersion,
   fetchLatestLuaLSVersionFromGitHub,
+  sanitizeLuaLSVersion,
 } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import {
@@ -25,7 +26,7 @@ import {
   cleanupOldCachedLuaLSVersions,
   getIsoWeek,
 } from "./cache.js";
-import { isBinaryValid } from "./validation.js";
+import { isBinaryValid, assertValidLuaLSBinary } from "./validation.js";
 import { downloadAndExtractLuaLS } from "./download.js";
 import { countCheckedFiles } from "./files.js";
 
@@ -52,8 +53,8 @@ export async function resolveLuaLSBinary(
   options?: ResolveLuaLSOptions
 ): Promise<string> {
   // 1. Environment variable override
-  if (process.env.LUALS_BIN && fs.existsSync(process.env.LUALS_BIN)) {
-    return process.env.LUALS_BIN;
+  if (process.env.LUALS_BIN) {
+    return assertValidLuaLSBinary(process.env.LUALS_BIN, "LUALS_BIN");
   }
 
   // 2. Bundled with package (release distribution) - check early for default version to avoid network delay
@@ -205,14 +206,16 @@ export async function resolveLuaLSBinary(
   const metadata = readLuaLSMetadata(baseCacheDir);
 
   // Fast path first: enumerating the cache would spawn every cached binary.
-  if (options?.reuseExisting !== false && metadata && metadata.lastCheckedWeek === currentWeek && metadata.latestVersion) {
-    const info = getPlatformInfo(metadata.latestVersion);
-    const cachedPath = path.join(
-      getCacheDir(metadata.latestVersion, baseCacheDir),
-      info.binaryRelativePath
-    );
-    if (isBinaryValid(cachedPath)) {
-      return cachedPath;
+  const safeLatest = metadata?.latestVersion ? sanitizeLuaLSVersion(metadata.latestVersion) : null;
+  if (options?.reuseExisting !== false && metadata && metadata.lastCheckedWeek === currentWeek && safeLatest) {
+    const info = getPlatformInfo(safeLatest);
+    const targetDir = path.resolve(getCacheDir(safeLatest, baseCacheDir));
+    const resolvedBase = path.resolve(baseCacheDir);
+    if (targetDir.startsWith(resolvedBase + path.sep) || targetDir === resolvedBase) {
+      const cachedPath = path.join(targetDir, info.binaryRelativePath);
+      if (isBinaryValid(cachedPath)) {
+        return cachedPath;
+      }
     }
   }
 
@@ -330,9 +333,9 @@ export async function runLuaLSCheck(
     );
   }
 
-  const binary =
-    options.lualsBin ||
-    (await resolveLuaLSBinary(options.lualsVersion, { quiet: options.quiet }));
+  const binary = options.lualsBin
+    ? assertValidLuaLSBinary(options.lualsBin, "--luals-bin")
+    : await resolveLuaLSBinary(options.lualsVersion, { quiet: options.quiet });
 
   let checkDir = absoluteTarget;
   let targetFileOnly: string | null = null;

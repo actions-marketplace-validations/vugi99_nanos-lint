@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Security vulnerability reporting guidelines and working `gh api` CLI examples in `AGENTS.md` specifying private GitHub Security Advisories for responsible disclosure.
+- Bundled `glob@13` together with its `minimatch`, `path-scurry`, `lru-cache`, `minipass`, and `brace-expansion` dependency tree, inlined through `tsdown` so the published package keeps zero runtime dependencies while `countCheckedFiles()` gains full glob support (#27).
+- Regression tests for `LUALS_BIN` / `--luals-bin` validation (#26) and for glob-based file counting, covering brace expansion, character classes, adversarial pattern budgets, unusable patterns, and symlink handling (#27).
+- Differential parity test (`tests/unit/glob-parity.test.ts`) that runs the pre-#27 `countCheckedFiles()` implementation against the bundled-glob one on the same fixture tree, pinning the configs where behaviour must stay identical and documenting each intended difference (#27).
+
+### Changed
+- `countCheckedFiles()` (`src/luals/files.ts`) now walks the tree and matches `files.exclude` / `workspace.ignoreDir` patterns with the bundled `globSync()` instead of a hand-rolled recursive walk plus glob-to-regex translation: brace expansion (`{a,b}`), character classes (`[0-9]`), `?` and `**` follow standard glob semantics, patterns without a slash keep matching at any depth, and a trailing slash (`vendor/`) is treated like `vendor` (#27).
+- Glob wildcards now apply to `workspace.ignoreDir` entries as well (`deep/*` previously matched nothing), and unusable pattern values (`""`, `"."`, NUL bytes, oversized strings, absolute paths, non-string JSON values) are skipped instead of throwing out of `countCheckedFiles()`. Absolute patterns are rejected everywhere on purpose: `glob` anchors them on some platforms but not others, so skipping them keeps one `.luarc.json` behaving identically on Linux, macOS and Windows (#27).
+- `LUALS_BIN` and `--luals-bin` are validated instead of trusted: a path that is missing, is a directory, or is not a runnable LuaLS binary now fails with `ERR_LUALS_BIN_INVALID` naming the setting, instead of being silently ignored or failing deep inside the check run (#26). Thin wrapper scripts that report a version stay supported — the 100 KB floor for downloaded archives is not applied to user-supplied binaries.
+
+### Fixed
+- Validate `LUALS_BIN` / `options.lualsBin` by requiring a regular file whose `--version` reports a LuaLS release, with actionable remediation hints naming `LUALS_BIN` / `--luals-bin` (#26).
+- Repaired the Issue #20 archive-planted symlink regression test, which aborted while extracting an intentionally fake archive before reaching the symlink guard it asserts on.
+- Repaired the Issue #17 traversal regression test, which a discoverable valid LuaLS installation (such as the shared live-test fixture) could legitimately satisfy, so the poisoned `metadata.json` path was never exercised deterministically.
+- Sanitize `metadata.json` `latestVersion` with `sanitizeLuaLSVersion()` and enforce cache boundary checks before resolving cached binary paths, preventing path traversal and arbitrary binary execution outside the cache tree (#17).
+- Canonicalize both the extracted binary and the extraction directory before the directory-escape check, so a cache path reached through symlinks (such as macOS `os.tmpdir()` under `/var` -> `/private/var`) no longer rejects every download (#20).
+- Enforce 120s timeout and stream LuaLS archive downloads directly to disk with a 150 MB upper bound, preventing indefinite process hangs and out-of-memory exhaustion; the SHA-256 audit hash reads the archive in 1 MiB chunks so the memory bound holds after the download too (#18).
+- Enforce HTTPS GitHub host allowlisting on download URLs and redirects, log the downloaded archive SHA-256 digest (at `info` level, for out-of-band comparison against a locally pinned value), and document the binary verification model in `SECURITY.md` (#19).
+- Harden tar extraction with `--no-same-owner --no-same-permissions` on POSIX and validate extracted binary path against symlinks and directory escapes before chmod or execution (#20).
+- Prevent symlink loops and directory escapes in `countCheckedFiles` by resolving the checked root to its canonical path and never traversing symlinked directories or counting symlinked files (#21).
+- Pin annotations downloads to resolved upstream commit SHAs, enforce named constant `MIN_ANNOTATIONS_SIZE_BYTES` with strict header validation against generic comments, and validate custom/env annotation paths against directories, empty files, and binary files (#24).
+
+### Security
+- Bound glob pattern complexity in `countCheckedFiles()` (#27): patterns that exceed the per-segment wildcard (max 2), total wildcard (max 12) or brace-expansion (max 256) budget are skipped with a warning, keeping the walk bounded against catastrophic regex backtracking and combinatorial brace expansion from a hostile `.luarc.json`. The budgets are conservative on purpose — matching cost grows like `C(segment length, wildcards per segment)` — and a skipped pattern only over-counts the reported file total, never under-counts it.
+
 ## [2.8.0] - 2026-09-23
 
 ### Added

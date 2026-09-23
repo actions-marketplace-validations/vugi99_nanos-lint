@@ -15,11 +15,26 @@ export default defineConfig({
   deps: {
     // "nanos-lint" produces a standalone distribution with zero runtime dependencies.
     // "is-safe-filename" is an internal transitive runtime dependency of "env-paths@4.0.0".
-    // When using "onlyBundle", tsdown / Rolldown requires transitive sub-dependencies
-    // to be explicitly declared so they are inlined into the bundle rather than left
-    // as external module imports.
-    alwaysBundle: ["commander", "jsonc-parser", "env-paths", "is-safe-filename"],
-    onlyBundle: ["commander", "jsonc-parser", "env-paths", "is-safe-filename"],
+    // "glob" powers the glob matching in "countCheckedFiles()" (#27). Its own dependency
+    // tree ("minimatch", "path-scurry", "lru-cache", "minipass" and "brace-expansion") is
+    // inlined automatically while bundling "glob", but the packages stay listed here so a
+    // future direct import cannot silently become an external runtime dependency.
+    // "onlyBundle" is the whitelist of dependencies allowed to be bundled: it only needs
+    // the packages imported by the entry graph, because listing the already-inlined
+    // transitive dependencies makes tsdown report them as unused.
+    alwaysBundle: [
+      "commander",
+      "jsonc-parser",
+      "env-paths",
+      "is-safe-filename",
+      "glob",
+      "minimatch",
+      "path-scurry",
+      "lru-cache",
+      "minipass",
+      "brace-expansion",
+    ],
+    onlyBundle: ["commander", "jsonc-parser", "env-paths", "is-safe-filename", "glob"],
   },
 });
 

@@ -10,8 +10,12 @@ import {
   resolveLuaLSBinary,
   findExistingLuaLSDir,
   isBinaryValid,
+  isBinaryRunnable,
   runLuaLSCheck,
   downloadAndExtractLuaLS,
+  limitDownloadStream,
+  isAllowedDownloadUrl,
+  computeFileSha256,
   getLegacyCacheDir,
 } from "../../src/luals.js";
 import { resolveWorkspaceConfig } from "../../src/config.js";
@@ -25,6 +29,9 @@ import {
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import crypto from "node:crypto";
+import { Readable } from "node:stream";
+import { gzipSync } from "node:zlib";
 
 const liveTestsEnabled = isLiveTestsEnabled();
 
@@ -138,18 +145,19 @@ describe("luals utilities", () => {
   });
 
   describe("getPlatformInfo and resolveLuaLSBinary overrides", () => {
-    it("respects process.env.LUALS_BIN override when file exists", async () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "luals-override-"));
+    it.skipIf(!liveTestsEnabled)("returns a valid process.env.LUALS_BIN override without resolving a version", async () => {
+      const origBin = process.env.LUALS_BIN;
+      const realBinary = await getSharedLuaLSBinary();
       try {
-        const dummyBin = path.join(tempDir, "fake-luals");
-        fs.writeFileSync(dummyBin, "mock binary");
-        process.env.LUALS_BIN = dummyBin;
+        process.env.LUALS_BIN = realBinary;
 
-        const resolved = await resolveLuaLSBinary("3.13.6");
-        expect(resolved).toBe(dummyBin);
+        await expect(resolveLuaLSBinary("3.13.6")).resolves.toBe(realBinary);
       } finally {
-        delete process.env.LUALS_BIN;
-        fs.rmSync(tempDir, { recursive: true, force: true });
+        if (origBin !== undefined) {
+          process.env.LUALS_BIN = origBin;
+        } else {
+          delete process.env.LUALS_BIN;
+        }
       }
     });
 
@@ -323,6 +331,39 @@ describe("luals utilities", () => {
         fs.unlinkSync(tempFakeBin);
       }
     });
+
+    it("returns false instead of throwing when the path cannot be inspected", () => {
+      const tempBin = path.join(os.tmpdir(), `test-stat-fail-${Date.now()}.bin`);
+      fs.writeFileSync(tempBin, Buffer.alloc(100_005));
+      const statSpy = vi.spyOn(fs, "statSync").mockImplementation(() => {
+        throw new Error("EIO: i/o error");
+      });
+      try {
+        expect(isBinaryValid(tempBin)).toBe(false);
+      } finally {
+        statSpy.mockRestore();
+        fs.unlinkSync(tempBin);
+      }
+    });
+  });
+
+  describe("isBinaryRunnable", () => {
+    it("returns false for a non-existent path or a directory", () => {
+      expect(isBinaryRunnable("/path/to/nonexistent/bin")).toBe(false);
+      expect(isBinaryRunnable(os.tmpdir())).toBe(false);
+    });
+
+    it("returns false for a file that does not run or reports no version", () => {
+      const tempFile = path.join(os.tmpdir(), `test-runnable-${Date.now()}.bin`);
+      // Deliberately below the downloaded-archive size floor: the size heuristic
+      // must not decide the outcome here.
+      fs.writeFileSync(tempFile, "not a lua-language-server");
+      try {
+        expect(isBinaryRunnable(tempFile)).toBe(false);
+      } finally {
+        fs.unlinkSync(tempFile);
+      }
+    });
   });
 
   describe("countCheckedFiles", () => {
@@ -387,17 +428,39 @@ describe("luals utilities", () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
     });
+
+    it("does not loop infinitely or inflate count on circular symlinks (Issue #21)", () => {
+      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-symlink-loop-"));
+      try {
+        const packDir = path.join(tempRoot, "pack");
+        fs.mkdirSync(packDir, { recursive: true });
+        fs.writeFileSync(path.join(packDir, "a.lua"), "print('hi')");
+
+        try {
+          const linkPath = path.join(packDir, "self");
+          fs.symlinkSync(packDir, linkPath, process.platform === "win32" ? "junction" : "dir");
+        } catch (err) {
+          void err;
+        }
+
+        const count = countCheckedFiles(tempRoot);
+        expect(count).toBe(1);
+      } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("resolveLuaLSBinary", () => {
-    it("respects LUALS_BIN environment variable when pointing to valid file", async () => {
+    it("rejects a LUALS_BIN environment variable pointing to a non-runnable file (Issue #26)", async () => {
       const origBin = process.env.LUALS_BIN;
       const tempBin = path.join(os.tmpdir(), `fake-luals-${Date.now()}.exe`);
       fs.writeFileSync(tempBin, "binary");
       process.env.LUALS_BIN = tempBin;
       try {
-        const resolved = await resolveLuaLSBinary();
-        expect(resolved).toBe(tempBin);
+        await expect(resolveLuaLSBinary()).rejects.toThrow(
+          /LUALS_BIN.*not a runnable LuaLS binary/
+        );
       } finally {
         if (origBin !== undefined) {
           process.env.LUALS_BIN = origBin;
@@ -407,6 +470,50 @@ describe("luals utilities", () => {
         fs.unlinkSync(tempBin);
       }
     });
+
+    it("rejects a LUALS_BIN pointing at an unrelated executable (Issue #26)", async () => {
+      const origBin = process.env.LUALS_BIN;
+      process.env.LUALS_BIN = process.execPath;
+      try {
+        // The Node.js binary runs fine but reports "v24.x.y", not a LuaLS release.
+        await expect(resolveLuaLSBinary()).rejects.toThrow(
+          /LUALS_BIN.*not a runnable LuaLS binary/
+        );
+      } finally {
+        if (origBin !== undefined) {
+          process.env.LUALS_BIN = origBin;
+        } else {
+          delete process.env.LUALS_BIN;
+        }
+      }
+    });
+
+    it.skipIf(process.platform === "win32")(
+      "accepts a thin wrapper script for LUALS_BIN when it reports a version (Issue #26)",
+      async () => {
+        const origBin = process.env.LUALS_BIN;
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-wrapper-"));
+        const wrapper = path.join(tempDir, "lua-language-server");
+        try {
+          // Deliberately far below the 100 KB floor applied to downloaded
+          // archives: Homebrew/mason-style installations are wrapper scripts.
+          fs.writeFileSync(wrapper, "#!/bin/sh\necho 3.19.1\n", { mode: 0o755 });
+
+          expect(isBinaryRunnable(wrapper)).toBe(true);
+          expect(isBinaryValid(wrapper)).toBe(false);
+
+          process.env.LUALS_BIN = wrapper;
+          await expect(resolveLuaLSBinary()).resolves.toBe(wrapper);
+        } finally {
+          if (origBin !== undefined) {
+            process.env.LUALS_BIN = origBin;
+          } else {
+            delete process.env.LUALS_BIN;
+          }
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      }
+    );
   });
 
   describe("runLuaLSCheck", () => {
@@ -561,6 +668,238 @@ describe("luals utilities", () => {
         fs.rmSync(tempTarget, { recursive: true, force: true });
       }
     });
+
+    it("enforces Content-Length upper bound on archive download (Issue #18)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-bound-"));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "content-length": "200000000" }),
+        body: {
+          cancel: vi.fn(),
+        },
+      } as unknown as Response);
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/exceeds maximum limit/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("passes AbortSignal timeout to fetch during archive download (Issue #18)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-sig-"));
+      const originalFetch = globalThis.fetch;
+      let capturedSignal: AbortSignal | undefined;
+      globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        capturedSignal = init?.signal as AbortSignal;
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: "Internal Error",
+          body: { cancel: vi.fn() },
+        } as unknown as Response);
+      });
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow();
+        expect(capturedSignal).toBeDefined();
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects download when stream chunks exceed maximum size limit (Issue #18)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-stream-limit-"));
+      const originalFetch = globalThis.fetch;
+      const bigChunk = Buffer.alloc(1024 * 1024); // 1 MB
+      let count = 0;
+      const stream = new Readable({
+        read() {
+          if (count++ < 160) {
+            this.push(bigChunk);
+          } else {
+            this.push(null);
+          }
+        },
+      });
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        body: stream,
+      } as unknown as Response);
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/exceeded maximum allowed size/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("limitDownloadStream yields chunks when under size limit (Issue #18)", async () => {
+      async function* generate() {
+        yield Buffer.from("chunk1");
+        yield Buffer.from("chunk2");
+      }
+      const collected: Buffer[] = [];
+      for await (const chunk of limitDownloadStream(generate())) {
+        collected.push(Buffer.from(chunk));
+      }
+      expect(Buffer.concat(collected).toString()).toBe("chunk1chunk2");
+    });
+
+    it("isAllowedDownloadUrl validates HTTPS GitHub domains correctly (Issue #19)", () => {
+      expect(isAllowedDownloadUrl("https://github.com/LuaLS/releases")).toBe(true);
+      expect(isAllowedDownloadUrl("https://objects.githubusercontent.com/asset.tar.gz")).toBe(true);
+      expect(isAllowedDownloadUrl("https://release-assets.githubusercontent.com/asset.zip")).toBe(true);
+      expect(isAllowedDownloadUrl("https://raw.githubusercontent.com/file")).toBe(true);
+      expect(isAllowedDownloadUrl("http://github.com/insecure")).toBe(false);
+      expect(isAllowedDownloadUrl("https://evil.com/fake.tar.gz")).toBe(false);
+      expect(isAllowedDownloadUrl("not-a-url")).toBe(false);
+    });
+
+    it("computeFileSha256 produces valid hex digest (Issue #19)", () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-hash-test-"));
+      try {
+        const filePath = path.join(tempTarget, "test.txt");
+        fs.writeFileSync(filePath, "nanos-lint-test");
+        const hash = computeFileSha256(filePath);
+        expect(hash).toMatch(/^[a-f0-9]{64}$/);
+      } finally {
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("computeFileSha256 hashes empty and multi-chunk files in bounded memory (Issue #18/#19)", () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-hash-chunks-"));
+      try {
+        const emptyFile = path.join(tempTarget, "empty.bin");
+        fs.writeFileSync(emptyFile, "");
+        expect(computeFileSha256(emptyFile)).toBe(
+          crypto.createHash("sha256").digest("hex")
+        );
+
+        // ~3 MiB of non-repeating bytes plus a partial final chunk, so a read
+        // that re-hashes the same buffer or drops a chunk changes the digest.
+        const payload = Buffer.alloc(3 * 1024 * 1024 + 12_345);
+        for (let i = 0; i < payload.length; i++) {
+          payload[i] = (i * 31 + 7) % 256;
+        }
+        const chunkedFile = path.join(tempTarget, "chunked.bin");
+        fs.writeFileSync(chunkedFile, payload);
+
+        expect(computeFileSha256(chunkedFile)).toBe(
+          crypto.createHash("sha256").update(payload).digest("hex")
+        );
+      } finally {
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("downloadAndExtractLuaLS rejects untrusted redirect URLs (Issue #19)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-redirect-test-"));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        url: "https://evil-mirror.com/asset.tar.gz",
+        body: { cancel: vi.fn() },
+      } as unknown as Response);
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/Redirect to untrusted URL blocked/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("downloadAndExtractLuaLS refuses to chmod or execute archive-planted symlink (Issue #20)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-symlink-extract-"));
+      const origLstat = fs.lstatSync;
+      const lstatSpy = vi.spyOn(fs, "lstatSync").mockImplementation((filePath, options) => {
+        const str = String(filePath);
+        if (str.includes("lua-language-server")) {
+          return {
+            isSymbolicLink: () => true,
+            isFile: () => false,
+            size: 200_000,
+          } as unknown as fs.Stats;
+        }
+        return origLstat(filePath, options);
+      });
+
+      const originalFetch = globalThis.fetch;
+      // A real (empty) gzip-compressed tar archive: extraction must succeed so
+      // the test reaches the archive-planted symlink guard it asserts on.
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        body: Readable.from([gzipSync(Buffer.alloc(1024))]),
+      } as unknown as Response);
+
+      const origExists = fs.existsSync;
+      const existsSpy = vi.spyOn(fs, "existsSync").mockImplementation((p) => {
+        if (String(p).includes("lua-language-server")) return true;
+        return origExists(p);
+      });
+
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/symbolic link/);
+      } finally {
+        lstatSpy.mockRestore();
+        existsSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it.skipIf(!liveTestsEnabled)(
+      "extracts into a destination reached through a symlinked directory",
+      async () => {
+        // `os.tmpdir()` is reached through a symlink on macOS (`/var` ->
+        // `/private/var`), so the extraction directory must be canonicalized on
+        // both sides of the escape check or every download is rejected.
+        const realBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-linked-dest-"));
+        const linkBase = `${realBase}-link`;
+        const seedBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-linked-seed-"));
+        try {
+          try {
+            fs.symlinkSync(realBase, linkBase, process.platform === "win32" ? "junction" : "dir");
+          } catch (err) {
+            // Creating links can require elevated privileges on some Windows setups.
+            void err;
+          }
+
+          await seedCachedLuaLS(seedBase, FALLBACK_LUALS_VERSION);
+          const targetDir = path.join(linkBase, FALLBACK_LUALS_VERSION);
+
+          const bin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, {
+            quiet: true,
+            cacheDir: seedBase,
+          });
+
+          expect(bin.startsWith(linkBase)).toBe(true);
+          expect(fs.existsSync(bin)).toBe(true);
+        } finally {
+          try {
+            fs.unlinkSync(linkBase);
+          } catch (err) {
+            void err;
+          }
+          fs.rmSync(realBase, { recursive: true, force: true });
+          fs.rmSync(seedBase, { recursive: true, force: true });
+        }
+      }
+    );
   });
 
   describe("getLegacyCacheDir", () => {

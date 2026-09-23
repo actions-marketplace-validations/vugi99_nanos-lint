@@ -122,5 +122,78 @@ Whenever preparing or publishing a new tagged release or cutting a new version:
 - **Pull Requests and Merges**: Do not open a PR or merge `dev` to `master` until explicitly instructed by the user.
 - **Commit and Push Per Issue**: Commit and push to `dev` between handling each issue and at the end of the tasks.
 
+---
+
+## 7. Security Vulnerability Reporting (Private GitHub Advisories)
+
+In accordance with [SECURITY.md](SECURITY.md), **agents and contributors must NEVER open public GitHub issues for security vulnerabilities, exploits, or sensitive security gaps**.
+
+Public issues expose vulnerabilities before a patch is available. Instead, all security issues must be reported privately as **draft GitHub Security Advisories** using GitHub CLI (`gh api`).
+
+### Requirements for Security Advisories
+
+The GitHub Security Advisories API requires:
+- `summary`: A short, descriptive summary.
+- `description`: Detailed description including impact, reproduction steps, and suggested fix.
+- `severity`: One of `"critical"`, `"high"`, `"medium"`, `"low"`.
+- `vulnerabilities`: An array of affected package objects, with `package.ecosystem` (e.g. `"npm"`), `package.name` (`"nanos-lint"`), and `vulnerable_version_range` (e.g. `"< 2.8.1"`).
+
+### Working Example: Create a Private Draft Advisory
+
+Create a new draft security advisory via `gh api` by passing the JSON payload:
+
+```bash
+gh api -X POST repos/:owner/:repo/security-advisories --input - << 'EOF'
+{
+  "summary": "Sanitize metadata.json latestVersion before building binary path",
+  "description": "The weekly-cache fast path uses unsanitized latestVersion string from metadata.json leading to path traversal / arbitrary binary execution.",
+  "severity": "medium",
+  "vulnerabilities": [
+    {
+      "package": {
+        "ecosystem": "npm",
+        "name": "nanos-lint"
+      },
+      "vulnerable_version_range": "< 2.8.1"
+    }
+  ]
+}
+EOF
+```
+
+On Windows PowerShell:
+```powershell
+@'
+{
+  "summary": "Sanitize metadata.json latestVersion before building binary path",
+  "description": "The weekly-cache fast path uses unsanitized latestVersion string from metadata.json leading to path traversal / arbitrary binary execution.",
+  "severity": "medium",
+  "vulnerabilities": [
+    {
+      "package": {
+        "ecosystem": "npm",
+        "name": "nanos-lint"
+      },
+      "vulnerable_version_range": "< 2.8.1"
+    }
+  ]
+}
+'@ | gh api -X POST repos/:owner/:repo/security-advisories --input -
+```
+
+### Working Example: List Private Advisories
+
+List existing draft and published security advisories:
+
+```bash
+gh api repos/:owner/:repo/security-advisories --jq '.[] | {ghsa_id, summary, state, severity, html_url}'
+```
+
+### Working Example: View a Specific Advisory
+
+```bash
+gh api repos/:owner/:repo/security-advisories/GHSA-xxxx-xxxx-xxxx
+```
+
 
 

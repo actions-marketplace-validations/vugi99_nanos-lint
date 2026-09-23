@@ -20,9 +20,29 @@ import {
 import { runCLI } from "../../src/cli.js";
 import * as lualsModule from "../../src/luals.js";
 import * as annotationsModule from "../../src/annotations.js";
+import { logger } from "../../src/logger.js";
 import { getSharedLuaLSBinary, isLiveTestsEnabled, seedCachedLuaLS } from "../helpers/live.js";
 
 const liveTestsEnabled = isLiveTestsEnabled();
+
+/**
+ * `runLuaLSCheck()` validates `options.lualsBin` before executing it (#26), but
+ * the regression tests below intentionally inject a fake binary that runs and
+ * produces no check output. Registered binaries are treated as valid; every
+ * other path still goes through the real size + `--version` validation.
+ */
+const mockBinaries = vi.hoisted(() => ({ allowed: new Set<string>() }));
+
+vi.mock("../../src/luals/validation.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/luals/validation.js")>();
+  return {
+    ...actual,
+    assertValidLuaLSBinary: (binaryPath: string, source: string) =>
+      mockBinaries.allowed.has(binaryPath)
+        ? binaryPath
+        : actual.assertValidLuaLSBinary(binaryPath, source),
+  };
+});
 
 describe("Regression tests for audit review issues", () => {
   describe("Issue 1: Hard failure on missing target or failed LuaLS check", () => {
@@ -56,6 +76,7 @@ describe("Regression tests for audit review issues", () => {
           fs.chmodSync(fakeBin, 0o755);
         }
 
+        mockBinaries.allowed.add(fakeBin);
         await expect(
           runLuaLSCheck(tempDir, templatePath, {
             path: tempDir,
@@ -302,6 +323,237 @@ describe("Regression tests for audit review issues", () => {
     });
   });
 
+  describe("Issue 26: LUALS_BIN and --luals-bin binary validation", () => {
+    it("rejects a LUALS_BIN override that points to a directory", async () => {
+      const origBin = process.env.LUALS_BIN;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-bin-dir-"));
+      try {
+        process.env.LUALS_BIN = tempDir;
+
+        await expect(resolveLuaLSBinary()).rejects.toMatchObject({
+          name: "LuaLSError",
+          code: "ERR_LUALS_BIN_INVALID",
+        });
+        await expect(resolveLuaLSBinary()).rejects.toThrow(/LUALS_BIN.*not a regular file/);
+      } finally {
+        if (origBin !== undefined) {
+          process.env.LUALS_BIN = origBin;
+        } else {
+          delete process.env.LUALS_BIN;
+        }
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects a LUALS_BIN override that does not exist", async () => {
+      const origBin = process.env.LUALS_BIN;
+      const missingBin = path.join(os.tmpdir(), `nanos-missing-luals-${Date.now()}`);
+      try {
+        process.env.LUALS_BIN = missingBin;
+
+        await expect(resolveLuaLSBinary()).rejects.toThrow(
+          /LUALS_BIN.*does not exist or cannot be read/
+        );
+      } finally {
+        if (origBin !== undefined) {
+          process.env.LUALS_BIN = origBin;
+        } else {
+          delete process.env.LUALS_BIN;
+        }
+      }
+    });
+
+    it("rejects an invalid --luals-bin before executing the check", async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-option-bin-"));
+      try {
+        fs.writeFileSync(path.join(tempDir, "script.lua"), "local a = 1");
+
+        await expect(
+          runLuaLSCheck(tempDir, getDefaultTemplatePath(), {
+            path: tempDir,
+            checklevel: "Warning",
+            lualsBin: tempDir,
+          })
+        ).rejects.toThrow(/--luals-bin.*not a regular file/);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("Issue 27: countCheckedFiles glob engine", () => {
+    it("supports brace expansion, character classes and single-character wildcards", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-glob-syntax-"));
+      try {
+        const configPath = path.join(tempDir, ".luarc.json");
+        fs.writeFileSync(
+          configPath,
+          JSON.stringify({
+            files: {
+              exclude: [
+                "**/*.{bak,tmp}",
+                "**/drop-{1,2}.lua",
+                "**/item-[0-9].lua",
+                "**/temp-?.lua",
+                "**/nested/**",
+              ],
+            },
+          }),
+          "utf-8"
+        );
+        for (const file of [
+          "keep.lua",
+          "notes.bak",
+          "cache.tmp",
+          "drop-1.lua",
+          "drop-2.lua",
+          "item-1.lua",
+          "item-a.lua",
+          "item-10.lua",
+          "temp-a.lua",
+          "temp-aa.lua",
+        ]) {
+          fs.writeFileSync(path.join(tempDir, file), "-- fixture");
+        }
+        fs.mkdirSync(path.join(tempDir, "deep", "nested"), { recursive: true });
+        fs.writeFileSync(path.join(tempDir, "deep", "nested", "deep.lua"), "-- fixture");
+
+        // The brace case has to target `.lua` files to affect the total: brace
+        // expansion of non-Lua extensions (`**/*.{bak,tmp}`) can only match files
+        // that are not counted anyway. Removed here: `drop-1.lua` and
+        // `drop-2.lua` (braces), `item-1.lua` (character class), `temp-a.lua`
+        // (`?`) and `deep/nested/deep.lua`, leaving `keep.lua`, `item-a.lua`
+        // (not a digit), `item-10.lua` (two digits) and `temp-aa.lua` (two
+        // characters after `temp-`).
+        expect(countCheckedFiles(tempDir, configPath)).toBe(4);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("stays fast on adversarial wildcard and brace patterns (ReDoS regression)", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-glob-redos-"));
+      try {
+        // A long run of "a" segments plus a file name made only of "a" characters
+        // is the classic backtracking bait for glob matching, and repeated brace
+        // groups expand combinatorially.
+        const deepDir = path.join(tempDir, "a".repeat(24), "a".repeat(24), "a".repeat(24));
+        fs.mkdirSync(deepDir, { recursive: true });
+        for (let i = 0; i < 40; i++) {
+          fs.writeFileSync(path.join(deepDir, `file${i}.lua`), "-- fixture");
+        }
+        fs.writeFileSync(path.join(deepDir, `${"a".repeat(60)}.lua`), "-- fixture");
+        fs.writeFileSync(path.join(tempDir, "keep.lua"), "-- fixture");
+
+        const configPath = path.join(tempDir, ".luarc.json");
+        fs.writeFileSync(
+          configPath,
+          JSON.stringify({
+            files: {
+              exclude: [
+                `**/${"*a".repeat(24)}z.lua`,
+                `**/${"{a,b}".repeat(16)}p.lua`,
+                `**/${"*".repeat(60)}b.lua`,
+                // Complex but affordable: nested braces and globstars stay supported.
+                "**/{nested,{vendor,build}}/**",
+              ],
+            },
+          }),
+          "utf-8"
+        );
+
+        const started = Date.now();
+        const count = countCheckedFiles(tempDir, configPath);
+        const elapsed = Date.now() - started;
+
+        expect(count).toBe(42);
+        // Generous budget: the AST-based matcher needs milliseconds, while a
+        // backtracking regex translation of these patterns would not finish.
+        expect(elapsed).toBeLessThan(5000);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("warns and skips patterns beyond the matching complexity budget", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-glob-budget-"));
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        fs.writeFileSync(path.join(tempDir, "a.lua"), "-- fixture");
+        const configPath = path.join(tempDir, ".luarc.json");
+        fs.writeFileSync(
+          configPath,
+          // Five ambiguous wildcards in a single segment are enough to skip it.
+          JSON.stringify({ files: { exclude: ["**/*a*a*a*a*z.lua"] } }),
+          "utf-8"
+        );
+
+        expect(countCheckedFiles(tempDir, configPath)).toBe(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("too complex"));
+      } finally {
+        warnSpy.mockRestore();
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("skips unusable exclude patterns instead of under-counting files", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-glob-unusable-"));
+      try {
+        fs.writeFileSync(path.join(tempDir, "a.lua"), "-- fixture");
+        fs.writeFileSync(path.join(tempDir, "b.lua"), "-- fixture");
+        const configPath = path.join(tempDir, ".luarc.json");
+        fs.writeFileSync(
+          configPath,
+          JSON.stringify({
+            files: { exclude: ["", ".", "x".repeat(70_000), "bad\u0000pattern", 42, null] },
+          }),
+          "utf-8"
+        );
+
+        expect(countCheckedFiles(tempDir, configPath)).toBe(2);
+
+        // Non-array JSON values are user input too: fall back to the defaults.
+        fs.writeFileSync(
+          configPath,
+          JSON.stringify({ files: { exclude: "*.lua" }, workspace: { ignoreDir: 7 } }),
+          "utf-8"
+        );
+        expect(countCheckedFiles(tempDir, configPath)).toBe(2);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("does not count symlinks or traverse symlinked directories (#21)", () => {
+      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-glob-symlink-"));
+      try {
+        const projectDir = path.join(tempRoot, "project");
+        const outsideDir = path.join(tempRoot, "outside");
+        fs.mkdirSync(projectDir, { recursive: true });
+        fs.mkdirSync(outsideDir, { recursive: true });
+        fs.writeFileSync(path.join(projectDir, "real.lua"), "-- fixture");
+        fs.writeFileSync(path.join(outsideDir, "outside.lua"), "-- fixture");
+
+        const linkType = process.platform === "win32" ? "junction" : "dir";
+        try {
+          fs.symlinkSync(outsideDir, path.join(projectDir, "escape"), linkType);
+          fs.symlinkSync(
+            path.join(projectDir, "real.lua"),
+            path.join(projectDir, "linked.lua"),
+            "file"
+          );
+        } catch (err) {
+          // Symlink creation can require elevated privileges on Windows.
+          void err;
+        }
+
+        expect(countCheckedFiles(projectDir)).toBe(1);
+      } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe("Issue 17: fileUriToPath edge cases", () => {
     it("handles UNC file URIs correctly", () => {
       const uncUri = "file://server/share/folder/script.lua";
@@ -478,6 +730,7 @@ describe("Regression tests for audit review issues", () => {
           fs.chmodSync(fakeBin, 0o755);
         }
 
+        mockBinaries.allowed.add(fakeBin);
         await expect(
           runLuaLSCheck(tempDir, templatePath, {
             path: tempDir,

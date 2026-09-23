@@ -1,7 +1,10 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { logger } from "../logger.js";
 import { DEFAULT_LUALS_VERSION, resolveLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
@@ -11,6 +14,56 @@ import { LuaLSError } from "../errors.js";
 
 export { isBinaryValid } from "./validation.js";
 
+export const DOWNLOAD_TIMEOUT_MS = 120_000;
+export const MAX_ARCHIVE_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB
+
+export const ALLOWED_DOWNLOAD_DOMAINS: readonly string[] = [
+  "github.com",
+  "githubusercontent.com",
+];
+
+/**
+ * Validates that a download URL uses HTTPS and targets an allowlisted host.
+ */
+export function isAllowedDownloadUrl(urlString: string): boolean {
+  try {
+    const parsed = new URL(urlString);
+    if (parsed.protocol !== "https:") {
+      return false;
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    return ALLOWED_DOWNLOAD_DOMAINS.some(
+      (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Chunk size used when hashing an archive, so a 150 MB asset is never buffered whole. */
+const HASH_CHUNK_SIZE_BYTES = 1024 * 1024;
+
+/**
+ * Calculates the SHA-256 hash of a file on disk in bounded memory.
+ */
+export function computeFileSha256(filePath: string): string {
+  const hash = crypto.createHash("sha256");
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(HASH_CHUNK_SIZE_BYTES);
+    let position = 0;
+    let bytesRead = fs.readSync(fd, buffer, 0, buffer.length, position);
+    while (bytesRead > 0) {
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, position);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest("hex");
+}
+
 const execFileAsync = promisify(execFile);
 
 /**
@@ -18,6 +71,26 @@ const execFileAsync = promisify(execFile);
  */
 export function escapePowerShellSingleQuote(str: string): string {
   return str.replace(/'/g, "''");
+}
+
+/**
+ * Enforces a maximum byte count on an asynchronous download stream.
+ */
+export async function* limitDownloadStream(
+  source: AsyncIterable<Uint8Array | Buffer>
+): AsyncGenerator<Uint8Array | Buffer, void, unknown> {
+  let total = 0;
+  for await (const chunk of source) {
+    total += chunk.length;
+    if (total > MAX_ARCHIVE_SIZE_BYTES) {
+      throw new LuaLSError(
+        `Download exceeded maximum allowed size of ${MAX_ARCHIVE_SIZE_BYTES} bytes`,
+        "ERR_LUALS_DOWNLOAD",
+        "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN."
+      );
+    }
+    yield chunk;
+  }
 }
 
 export interface DownloadOptions {
@@ -91,6 +164,14 @@ export async function downloadAndExtractLuaLS(
       }
       fs.cpSync(existingSourceDir, tempDir, { recursive: true });
     } else {
+      if (!isAllowedDownloadUrl(url)) {
+        throw new LuaLSError(
+          `Refusing to download LuaLS from untrusted URL: ${url}`,
+          "ERR_LUALS_DOWNLOAD",
+          "Download URLs must use HTTPS and target an allowlisted GitHub host."
+        );
+      }
+
       if (!options?.quiet) {
         logger.info(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
       }
@@ -99,7 +180,17 @@ export async function downloadAndExtractLuaLS(
       let lastErr: unknown = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const res = await fetch(url);
+          const res = await fetch(url, {
+            signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+          });
+          if (res.url && !isAllowedDownloadUrl(res.url)) {
+            await res.body?.cancel();
+            throw new LuaLSError(
+              `Redirect to untrusted URL blocked: ${res.url}`,
+              "ERR_LUALS_DOWNLOAD",
+              "Download redirects must stay on allowlisted HTTPS GitHub hosts."
+            );
+          }
           if (res.ok && res.body) {
             response = res;
             break;
@@ -126,8 +217,52 @@ export async function downloadAndExtractLuaLS(
         );
       }
 
-      const arrayBuffer = await response.arrayBuffer();
-      fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
+      const contentLengthHeader = response.headers?.get?.("content-length");
+      if (contentLengthHeader) {
+        const contentLength = parseInt(contentLengthHeader, 10);
+        if (!isNaN(contentLength) && contentLength > MAX_ARCHIVE_SIZE_BYTES) {
+          await response.body.cancel();
+          throw new LuaLSError(
+            `Archive size (${contentLength} bytes) exceeds maximum limit (${MAX_ARCHIVE_SIZE_BYTES} bytes)`,
+            "ERR_LUALS_DOWNLOAD",
+            "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN."
+          );
+        }
+      }
+
+      const fileStream = fs.createWriteStream(archivePath);
+      try {
+        const streamSource =
+          typeof (Readable as unknown as { fromWeb?: (stream: unknown) => Readable }).fromWeb === "function" &&
+          !("pipe" in response.body)
+            ? Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
+            : (response.body as unknown as Readable);
+
+        await pipeline(streamSource, limitDownloadStream, fileStream);
+      } catch (streamErr) {
+        try {
+          if (fs.existsSync(archivePath)) {
+            fs.unlinkSync(archivePath);
+          }
+        } catch (unlinkErr) {
+          void unlinkErr;
+        }
+        if (streamErr instanceof LuaLSError) {
+          throw streamErr;
+        }
+        throw new LuaLSError(
+          `Failed to download LuaLS from ${url}: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`,
+          "ERR_LUALS_DOWNLOAD",
+          "Check your network connection or specify a custom binary with LUALS_BIN.",
+          { cause: streamErr }
+        );
+      }
+
+      // Audit trail only: the digest is recorded so a downloaded asset can be
+      // compared out of band. It is not checked against a pinned value, because
+      // upstream publishes no signed checksums (see SECURITY.md).
+      const archiveSha256 = computeFileSha256(archivePath);
+      logger.info(`[luals] Downloaded ${info.assetName} (SHA-256 ${archiveSha256})`);
 
       if (!options?.quiet) {
         logger.info(`[luals] Extracting to ${destDir}...`);
@@ -135,7 +270,11 @@ export async function downloadAndExtractLuaLS(
 
       try {
         // Both Windows 10+ and UNIX systems have tar built in
-        await execFileAsync("tar", ["-xf", archivePath, "-C", tempDir]);
+        const tarArgs =
+          process.platform === "win32"
+            ? ["-xf", archivePath, "-C", tempDir]
+            : ["-xf", archivePath, "--no-same-owner", "--no-same-permissions", "-C", tempDir];
+        await execFileAsync("tar", tarArgs);
       } catch (tarErr) {
         // Fallback for PowerShell Expand-Archive on Windows if tar fails
         if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
@@ -161,6 +300,46 @@ export async function downloadAndExtractLuaLS(
 
     const tempBinaryPath = path.join(tempDir, info.binaryRelativePath);
 
+    // Verify file exists before checking attributes
+    if (!fs.existsSync(tempBinaryPath)) {
+      throw new LuaLSError(
+        `Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space."
+      );
+    }
+
+    // Verify binary is a regular file and not a symlink to prevent chmod following archive-planted symlinks
+    const lstat = fs.lstatSync(tempBinaryPath);
+    if (lstat.isSymbolicLink()) {
+      throw new LuaLSError(
+        `Extracted binary at '${tempBinaryPath}' is a symbolic link. Refusing to chmod or execute archive-planted symlinks.`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+      );
+    }
+    if (!lstat.isFile()) {
+      throw new LuaLSError(
+        `Extracted binary at '${tempBinaryPath}' is not a regular file.`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+      );
+    }
+
+    // Verify that the real path does not escape the extraction directory. Both
+    // sides are canonicalized, because the extraction directory itself can be
+    // reached through symlinks (for example `/var` -> `/private/var` on macOS,
+    // where `os.tmpdir()` lives), which would otherwise reject every download.
+    const realBinaryPath = fs.realpathSync(tempBinaryPath);
+    const resolvedTemp = fs.realpathSync(tempDir);
+    if (!realBinaryPath.startsWith(resolvedTemp + path.sep) && realBinaryPath !== resolvedTemp) {
+      throw new LuaLSError(
+        `Extracted binary path escapes extraction directory: ${realBinaryPath}`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+      );
+    }
+
     // Make executable on unix
     if (process.platform !== "win32") {
       try {
@@ -172,8 +351,7 @@ export async function downloadAndExtractLuaLS(
       }
     }
 
-    // Verify file exists, has non-trivial size, and is valid executable before promotion
-    if (!fs.existsSync(tempBinaryPath) || fs.statSync(tempBinaryPath).size < 100_000) {
+    if (lstat.size < 100_000) {
       throw new LuaLSError(
         `Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`,
         "ERR_LUALS_EXTRACT",

@@ -10,6 +10,9 @@ import {
   resolveAnnotations,
   fetchLatestCommitId,
   fetchRawAnnotationsContent,
+  getRawAnnotationsUrl,
+  RAW_ANNOTATIONS_URL,
+  MIN_ANNOTATIONS_SIZE_BYTES,
   getCachedAnnotationsFilePath,
   getAnnotationsMetadataFilePath,
   type AnnotationsMetadata,
@@ -163,7 +166,7 @@ describe("annotations management and date-based caching", () => {
       fs.mkdirSync(cacheSubdir, { recursive: true });
 
       const cachedLua = path.join(cacheSubdir, "annotations.lua");
-      fs.writeFileSync(cachedLua, "-- today cached\n" + " ".repeat(1200));
+      fs.writeFileSync(cachedLua, "---@meta\n-- nanos world annotations\n" + " ".repeat(1200));
 
       const { dateStr, dateObj } = getTodayDateString();
       const meta: AnnotationsMetadata = {
@@ -234,7 +237,7 @@ describe("annotations management and date-based caching", () => {
       fs.mkdirSync(cacheSubdir, { recursive: true });
 
       const cachedLua = path.join(cacheSubdir, "annotations.lua");
-      fs.writeFileSync(cachedLua, "-- old cached annotations\n" + " ".repeat(1200));
+      fs.writeFileSync(cachedLua, "---@meta\n-- nanos world annotations\n" + " ".repeat(1200));
 
       // Yesterday's metadata
       const oldMeta: AnnotationsMetadata = {
@@ -275,7 +278,7 @@ describe("annotations management and date-based caching", () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          text: () => Promise.resolve("-- annotations\n" + " ".repeat(1200)),
+          text: () => Promise.resolve("---@meta\n-- nanos world annotations\n" + " ".repeat(1200)),
         } as unknown as Response);
       });
 
@@ -297,7 +300,7 @@ describe("annotations management and date-based caching", () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          text: () => Promise.resolve("-- annotations\n" + " ".repeat(1200)),
+          text: () => Promise.resolve("---@meta\n-- nanos world annotations\n" + " ".repeat(1200)),
         } as unknown as Response);
       });
 
@@ -313,7 +316,7 @@ describe("annotations management and date-based caching", () => {
       const cacheSubdir = path.join(tempBaseDir, "no-meta-cache");
       fs.mkdirSync(cacheSubdir, { recursive: true });
       const cachedLua = path.join(cacheSubdir, "annotations.lua");
-      fs.writeFileSync(cachedLua, "-- valid annotations\n" + " ".repeat(1200));
+      fs.writeFileSync(cachedLua, "---@meta\n-- nanos world annotations\n" + " ".repeat(1200));
 
       const originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockRejectedValue(new Error("Offline"));
@@ -385,7 +388,7 @@ describe("annotations management and date-based caching", () => {
       const cacheSubdir = path.join(tempBaseDir, "commit-match-cache");
       fs.mkdirSync(cacheSubdir, { recursive: true });
       const cachedLua = path.join(cacheSubdir, "annotations.lua");
-      fs.writeFileSync(cachedLua, "-- valid annotations\n" + " ".repeat(1200));
+      fs.writeFileSync(cachedLua, "---@meta\n-- nanos world annotations\n" + " ".repeat(1200));
 
       const meta: AnnotationsMetadata = {
         commitId: "matching123456",
@@ -444,6 +447,26 @@ describe("annotations management and date-based caching", () => {
       );
     });
 
+    it("validates customPath: rejects directories, empty files, and binary files (Issue #24)", async () => {
+      const dirPath = path.join(tempBaseDir, "custom-dir");
+      fs.mkdirSync(dirPath);
+      await expect(resolveAnnotations({ customPath: dirPath })).rejects.toThrow(
+        /Custom annotations path is not a file/
+      );
+
+      const emptyFile = path.join(tempBaseDir, "empty-custom.lua");
+      fs.writeFileSync(emptyFile, "");
+      await expect(resolveAnnotations({ customPath: emptyFile })).rejects.toThrow(
+        /Custom annotations file is empty/
+      );
+
+      const binFile = path.join(tempBaseDir, "binary-custom.lua");
+      fs.writeFileSync(binFile, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01]));
+      await expect(resolveAnnotations({ customPath: binFile })).rejects.toThrow(
+        /appears to be a binary file/
+      );
+    });
+
     it("resolves annotations from NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS environment variable", async () => {
       const customEnvFile = path.join(tempBaseDir, "env-custom.lua");
       fs.writeFileSync(customEnvFile, "-- env custom");
@@ -462,11 +485,34 @@ describe("annotations management and date-based caching", () => {
       );
     });
 
+    it("validates env annotations: rejects directories, empty files, and binary files (Issue #24)", async () => {
+      const dirPath = path.join(tempBaseDir, "env-dir");
+      fs.mkdirSync(dirPath);
+      process.env.NANOS_ANNOTATIONS_PATH = dirPath;
+      await expect(resolveAnnotations()).rejects.toThrow(
+        /Annotations path specified in environment is not a file/
+      );
+
+      const emptyFile = path.join(tempBaseDir, "env-empty.lua");
+      fs.writeFileSync(emptyFile, "");
+      process.env.NANOS_ANNOTATIONS_PATH = emptyFile;
+      await expect(resolveAnnotations()).rejects.toThrow(
+        /Annotations file specified in environment is empty/
+      );
+
+      const binFile = path.join(tempBaseDir, "env-bin.lua");
+      fs.writeFileSync(binFile, Buffer.from([0x00, 0x01, 0x02]));
+      process.env.NANOS_ANNOTATIONS_PATH = binFile;
+      await expect(resolveAnnotations()).rejects.toThrow(
+        /appears to be a binary file/
+      );
+    });
+
     it("downloads and updates annotations when upstream commit changes", async () => {
       const cacheSubdir = path.join(tempBaseDir, "commit-changed-cache");
       fs.mkdirSync(cacheSubdir, { recursive: true });
       const cachedLua = path.join(cacheSubdir, "annotations.lua");
-      fs.writeFileSync(cachedLua, "-- old annotations\n" + " ".repeat(1200));
+      fs.writeFileSync(cachedLua, "---@meta\n-- nanos world annotations\n" + " ".repeat(1200));
 
       const oldMeta: AnnotationsMetadata = {
         commitId: "old123456",
@@ -488,7 +534,7 @@ describe("annotations management and date-based caching", () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          text: () => Promise.resolve("-- updated annotations\n" + " ".repeat(1200)),
+          text: () => Promise.resolve("---@meta\n-- nanos world annotations\n" + " ".repeat(1200)),
         } as unknown as Response);
       });
 
@@ -502,11 +548,38 @@ describe("annotations management and date-based caching", () => {
       }
     });
 
+    it("pins raw annotations download URL to resolved commit SHA (Issue #24)", async () => {
+      expect(MIN_ANNOTATIONS_SIZE_BYTES).toBe(1000);
+      expect(getRawAnnotationsUrl("abcdef0123456789")).toBe(
+        "https://raw.githubusercontent.com/nanos-world/vscode-extension/abcdef0123456789/annotations.lua"
+      );
+      expect(getRawAnnotationsUrl("unknown")).toBe(RAW_ANNOTATIONS_URL);
+      expect(getRawAnnotationsUrl(undefined)).toBe(RAW_ANNOTATIONS_URL);
+
+      const originalFetch = globalThis.fetch;
+      let fetchedUrl: string | undefined;
+      globalThis.fetch = vi.fn().mockImplementation((url: string | URL | Request) => {
+        fetchedUrl = String(url);
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("---@meta\n-- nanos world annotations\n" + " ".repeat(1200)),
+        } as unknown as Response);
+      });
+
+      try {
+        await fetchRawAnnotationsContent("abcdef0123456789");
+        expect(fetchedUrl).toContain("abcdef0123456789");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it("returns bundled annotations when annotations.lua exists in package root", async () => {
       const root = path.join(tempBaseDir, "mock-root");
       fs.mkdirSync(root, { recursive: true });
       const fakeBundled = path.join(root, "annotations.lua");
-      fs.writeFileSync(fakeBundled, "-- bundled annotations\n" + " ".repeat(1200));
+      fs.writeFileSync(fakeBundled, "---@meta\n-- nanos world annotations\n" + " ".repeat(1200));
 
       const configModule = await import("../../src/config.js");
       const rootSpy = vi.spyOn(configModule, "getPackageRoot").mockReturnValue(root);
