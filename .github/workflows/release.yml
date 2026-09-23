@@ -389,4 +389,12 @@ jobs:
             echo "nanos-lint@${VERSION} is already published; skipping."
             exit 0
           fi
-          npm publish --access public
+          if npm publish --access public; then
+            exit 0
+          fi
+          # Staged and awaiting approval is a human step, not a publish failure.
+          if npm stage list 2>/dev/null | grep -q "${VERSION}"; then
+            echo "::notice::nanos-lint@${VERSION} is already staged; approve it with 'npm stage approve <stage-id>'."
+            exit 0
+          fi
+          exit 1
