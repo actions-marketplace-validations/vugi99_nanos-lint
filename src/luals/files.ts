@@ -1,10 +1,151 @@
 import fs from "node:fs";
 import path from "node:path";
+import { globSync } from "glob";
 import { logger } from "../logger.js";
 import type { LuaRCConfig } from "../types.js";
 
+/** Directories skipped unless the workspace config overrides `workspace.ignoreDir`. */
+const DEFAULT_IGNORE_DIRS = [".git", ".vscode", ".nanos-lint", "node_modules"];
+
+/** Candidate Lua files: LuaLS checks every `*.lua` file in the tree. */
+const LUA_FILE_PATTERN = "**/*.lua";
+
+/** `glob` rejects patterns longer than this, so they are dropped before matching. */
+const MAX_PATTERN_LENGTH = 65536;
+
 /**
- * Counts candidate Lua files within targetPath, taking ignoreDir and files.exclude into account.
+ * Complexity budget per pattern. `minimatch` evaluates patterns through an AST
+ * but still compiles them to regular expressions, so ambiguous wildcards inside
+ * one path segment can backtrack catastrophically, and brace groups expand
+ * combinatorially (`{a,b}` repeated 16 times is 65 536 alternatives). A hostile
+ * or accidental `.luarc.json` could otherwise freeze the file walk, so patterns
+ * beyond the budget are skipped with a warning instead of being matched.
+ */
+const MAX_WILDCARDS_PER_SEGMENT = 4;
+const MAX_TOTAL_WILDCARDS = 24;
+const MAX_BRACE_ALTERNATIVES = 256;
+
+/** Counts wildcard tokens (`*`, `?`, character classes and brace groups). */
+function countWildcards(value: string): number {
+  let count = 0;
+  for (const char of value) {
+    if (char === "*" || char === "?" || char === "[" || char === "{") {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * Upper bound of the alternatives brace expansion would produce; `1` when the
+ * pattern has no brace groups. Nested groups count towards their parent, which
+ * over-estimates on purpose so the bound stays safe.
+ */
+function estimateBraceAlternatives(pattern: string): number {
+  const pending: number[] = [];
+  let estimate = 1;
+  for (const char of pattern) {
+    if (char === "{") {
+      pending.push(0);
+    } else if (char === "}" && pending.length > 0) {
+      const alternatives = (pending.pop() ?? 0) + 1;
+      estimate *= alternatives;
+      if (pending.length > 0) {
+        pending[pending.length - 1] = (pending[pending.length - 1] ?? 0) + alternatives - 1;
+      }
+    } else if (char === "," && pending.length > 0) {
+      pending[pending.length - 1] = (pending[pending.length - 1] ?? 0) + 1;
+    }
+  }
+  return estimate;
+}
+
+/** Returns `false` when matching the pattern could become pathologically slow. */
+function isPatternWithinBudget(pattern: string): boolean {
+  if (estimateBraceAlternatives(pattern) > MAX_BRACE_ALTERNATIVES) {
+    return false;
+  }
+  if (countWildcards(pattern) > MAX_TOTAL_WILDCARDS) {
+    return false;
+  }
+  return pattern
+    .split("/")
+    .every((segment) => countWildcards(segment) <= MAX_WILDCARDS_PER_SEGMENT);
+}
+
+/**
+ * Normalizes one user-supplied pattern (`workspace.ignoreDir`, `files.exclude`
+ * or a built-in default) into the slash-separated form `glob` expects.
+ * Backslashes are accepted as separators so Windows-authored `.luarc.json`
+ * files keep working, and trailing slashes are dropped so `vendor/` behaves
+ * exactly like `vendor`. Patterns that cannot be matched (`""`, `"."`, NUL
+ * bytes, oversized input, or non-string JSON values) are rejected instead of
+ * being handed to `glob`.
+ */
+function normalizePattern(pattern: unknown): string | null {
+  if (typeof pattern !== "string") {
+    return null;
+  }
+  const normalized = pattern.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (
+    !normalized ||
+    normalized === "." ||
+    normalized.length > MAX_PATTERN_LENGTH ||
+    normalized.includes("\0")
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+/**
+ * Expands one LuaLS pattern into the equivalent `glob` ignore patterns:
+ *
+ * - basename-only patterns (`*.lua`, `vendor`) match at any depth, so the
+ *   `**\/`-prefixed variants are added (mirrors LuaLS `matchBase` semantics);
+ * - a pattern also excludes everything below a matching directory, which is
+ *   what the trailing `/**` variant expresses;
+ * - the pattern itself is always kept so an exact file or directory match
+ *   works as written.
+ */
+function expandIgnorePattern(pattern: string): string[] {
+  return pattern.includes("/")
+    ? [pattern, `${pattern}/**`]
+    : [`**/${pattern}`, `**/${pattern}/**`];
+}
+
+/** Normalizes and expands a list of LuaLS patterns into `glob` ignore patterns. */
+function toIgnorePatterns(patterns: readonly unknown[]): string[] {
+  const ignore: string[] = [];
+  for (const raw of patterns) {
+    const normalized = normalizePattern(raw);
+    if (!normalized) {
+      logger.debug(
+        `[luals] Skipping unusable glob pattern "${String(raw)}" while counting checked files.`
+      );
+      continue;
+    }
+    if (!isPatternWithinBudget(normalized)) {
+      logger.warn(
+        `[luals] Skipping glob pattern "${raw}": it is too complex to match safely and would slow down file counting.`
+      );
+      continue;
+    }
+    ignore.push(...expandIgnorePattern(normalized));
+  }
+  return ignore;
+}
+
+/**
+ * Counts candidate Lua files within targetPath, taking `workspace.ignoreDir`
+ * and `files.exclude` into account.
+ *
+ * Traversal and matching are delegated to the bundled `glob` package, whose
+ * `minimatch` matcher understands the full glob syntax LuaLS accepts (brace
+ * expansion, character classes, `**`, `?`) instead of the hand-rolled
+ * glob-to-regex translation used before. Combined with the pattern budgets
+ * above, this keeps the count predictable for adversarial configurations
+ * while remaining consistent with LuaLS exclude semantics (#27).
  */
 export function countCheckedFiles(targetPath: string, configPath?: string): number {
   let absPath = path.resolve(targetPath);
@@ -26,16 +167,17 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
     return absPath.toLowerCase().endsWith(".lua") ? 1 : 0;
   }
 
-  let ignoreDirs: string[] = [".git", ".vscode", ".nanos-lint", "node_modules"];
-  let excludePatterns: string[] = [];
+  let ignoreDirs: readonly unknown[] = DEFAULT_IGNORE_DIRS;
+  let excludePatterns: readonly unknown[] = [];
 
   if (configPath && fs.existsSync(configPath)) {
     try {
       const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8")) as LuaRCConfig;
-      if (cfg.workspace?.ignoreDir) {
+      // `.luarc.json` is user input, so the declared types are not guaranteed.
+      if (Array.isArray(cfg.workspace?.ignoreDir)) {
         ignoreDirs = cfg.workspace.ignoreDir;
       }
-      if (cfg.files?.exclude) {
+      if (Array.isArray(cfg.files?.exclude)) {
         excludePatterns = cfg.files.exclude;
       }
     } catch (err) {
@@ -45,152 +187,30 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
     }
   }
 
-  const normIgnoreDirs = new Set(ignoreDirs.map((d) => d.replace(/\\/g, "/").toLowerCase()));
+  const ignore = [
+    ...toIgnorePatterns(ignoreDirs),
+    ...toIgnorePatterns(excludePatterns),
+  ];
 
-  function isExcluded(relPath: string): boolean {
-    const norm = relPath.replace(/\\/g, "/");
-    const baseName = path.posix.basename(norm);
-
-    for (const pat of excludePatterns) {
-      const normPat = pat.replace(/\\/g, "/");
-      if (norm === normPat || baseName === normPat) return true;
-      if (normPat.endsWith("/**")) {
-        const dir = normPat.slice(0, -3);
-        if (norm === dir || norm.startsWith(`${dir}/`)) return true;
-      }
-      if (norm.startsWith(`${normPat}/`)) return true;
-
-      if (normPat.includes("*") || normPat.includes("?")) {
-        // If pattern has no slash, it matches basename anywhere
-        if (!normPat.includes("/")) {
-          const baseRegexStr =
-            "^" +
-            normPat
-              .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-              .replace(/\*/g, ".*")
-              .replace(/\?/g, ".") +
-            "$";
-          try {
-            if (new RegExp(baseRegexStr, "i").test(baseName)) return true;
-          } catch (err) {
-            logger.debug(
-              `[luals] Invalid regex for pattern "${normPat}": ${err instanceof Error ? err.message : String(err)}`
-            );
-          }
-        }
-
-        // Convert glob with ** and * to regex matching full relPath
-        let regexStr = normPat;
-        const hasLeadingDoubleStar = regexStr.startsWith("**/");
-        if (hasLeadingDoubleStar) {
-          regexStr = regexStr.slice(3);
-        }
-        const hasTrailingDoubleStar = regexStr.endsWith("/**");
-        if (hasTrailingDoubleStar) {
-          regexStr = regexStr.slice(0, -3);
-        }
-
-        let escaped = regexStr
-          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-          .replace(/\/\*\*\//g, "/(?:.*/)?")
-          .replace(/\*\*/g, ".*")
-          .replace(/(?<!\.)\*/g, "[^/]*")
-          .replace(/\?/g, "[^/]");
-
-        if (hasLeadingDoubleStar) {
-          escaped = `(?:^|.*/)${escaped}`;
-        }
-        if (hasTrailingDoubleStar) {
-          escaped = `${escaped}(?:/.*)?`;
-        }
-
-        try {
-          if (new RegExp(`^${escaped}$`, "i").test(norm)) return true;
-        } catch (err) {
-          logger.debug(
-            `[luals] Invalid glob regex for pattern "${normPat}": ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-    }
-    return false;
+  try {
+    const entries = globSync(LUA_FILE_PATTERN, {
+      cwd: absPath,
+      ignore,
+      // LuaLS counts dotfiles, and nanos-lint matching stays case-insensitive
+      // on every platform so the reported totals do not vary by filesystem.
+      dot: true,
+      nocase: true,
+      // Symlinked directories are never traversed: this prevents both symlink
+      // loops and escaping the checked tree (#21).
+      follow: false,
+      withFileTypes: true,
+    });
+    // Symbolic links are not followed, so they are not counted either (#21).
+    return entries.filter((entry) => entry.isFile()).length;
+  } catch (err) {
+    logger.warn(
+      `[luals] Failed to walk ${absPath} while counting checked files: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return 0;
   }
-
-  let count = 0;
-  const visitedRealDirs = new Set<string>();
-  visitedRealDirs.add(absPath);
-
-  function walk(currentDir: string, relDir: string = "") {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    } catch (err) {
-      logger.debug(
-        `[luals] Failed to read directory ${currentDir}: ${err instanceof Error ? err.message : String(err)}`
-      );
-      return;
-    }
-
-    for (const entry of entries) {
-      const name = entry.name;
-      const relPath = relDir ? `${relDir}/${name}` : name;
-      const fullPath = path.join(currentDir, name);
-
-      const isDirectory =
-        entry.isDirectory() ||
-        (entry.isSymbolicLink() &&
-          (() => {
-            try {
-              return fs.statSync(fullPath).isDirectory();
-            } catch (err) {
-              logger.debug(
-                `[luals] Failed to stat symlink target ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
-              );
-              return false;
-            }
-          })());
-
-      if (isDirectory) {
-        const lowerName = name.toLowerCase();
-        if (normIgnoreDirs.has(lowerName) || normIgnoreDirs.has(relPath.toLowerCase())) {
-          continue;
-        }
-        if (isExcluded(relPath) || isExcluded(`${relPath}/**`)) {
-          continue;
-        }
-
-        let realDir: string;
-        try {
-          realDir = fs.realpathSync.native(fullPath);
-        } catch {
-          try {
-            realDir = fs.realpathSync(fullPath);
-          } catch {
-            realDir = fullPath;
-          }
-        }
-
-        // Prevent following symlinks outside the checked tree
-        const isSymlink = entry.isSymbolicLink();
-        if (isSymlink && !realDir.startsWith(absPath + path.sep) && realDir !== absPath) {
-          continue;
-        }
-
-        if (visitedRealDirs.has(realDir)) {
-          continue;
-        }
-        visitedRealDirs.add(realDir);
-
-        walk(fullPath, relPath);
-      } else if (entry.isFile() && name.toLowerCase().endsWith(".lua")) {
-        if (!isExcluded(relPath)) {
-          count++;
-        }
-      }
-    }
-  }
-
-  walk(absPath);
-  return count;
 }
-

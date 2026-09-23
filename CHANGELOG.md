@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Security vulnerability reporting guidelines and working `gh api` CLI examples in `AGENTS.md` specifying private GitHub Security Advisories for responsible disclosure.
-- Regression tests for `LUALS_BIN` / `--luals-bin` validation (#26).
+- Bundled `glob@13` together with its `minimatch`, `path-scurry`, `lru-cache`, `minipass`, and `brace-expansion` dependency tree, inlined through `tsdown` so the published package keeps zero runtime dependencies while `countCheckedFiles()` gains full glob support (#27).
+- Regression tests for `LUALS_BIN` / `--luals-bin` validation (#26) and for glob-based file counting, covering brace expansion, character classes, adversarial pattern budgets, unusable patterns, and symlink handling (#27).
 
 ### Changed
+- `countCheckedFiles()` (`src/luals/files.ts`) now walks the tree and matches `files.exclude` / `workspace.ignoreDir` patterns with the bundled `globSync()` instead of a hand-rolled recursive walk plus glob-to-regex translation: brace expansion (`{a,b}`), character classes (`[0-9]`), `?` and `**` follow standard glob semantics, patterns without a slash keep matching at any depth, and a trailing slash (`vendor/`) is treated like `vendor` (#27).
 - `LUALS_BIN` and `--luals-bin` are validated instead of trusted: a path that is missing, is a directory, or is not a runnable LuaLS binary now fails with `ERR_LUALS_BIN_INVALID` naming the setting, instead of being silently ignored or failing deep inside the check run (#26).
 
 ### Fixed
@@ -24,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Harden tar extraction with `--no-same-owner --no-same-permissions` on POSIX and validate extracted binary path against symlinks and directory escapes before chmod or execution (#20).
 - Prevent symlink loops and directory escapes in `countCheckedFiles` by resolving canonical directory paths and restricting symlink traversal within the workspace root (#21).
 - Pin annotations downloads to resolved upstream commit SHAs, enforce named constant `MIN_ANNOTATIONS_SIZE_BYTES` with strict header validation against generic comments, and validate custom/env annotation paths against directories, empty files, and binary files (#24).
+
+### Security
+- Bound glob pattern complexity in `countCheckedFiles()` (#27): patterns that exceed the wildcard, per-segment wildcard, or brace-expansion budget are skipped with a warning, so a hostile `.luarc.json` can no longer freeze the file walk through catastrophic regex backtracking or combinatorial brace expansion.
 
 ## [2.8.0] - 2026-09-23
 
