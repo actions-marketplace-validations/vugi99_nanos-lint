@@ -29,6 +29,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { Readable } from "node:stream";
+import { gzipSync } from "node:zlib";
 
 const liveTestsEnabled = isLiveTestsEnabled();
 
@@ -142,18 +143,19 @@ describe("luals utilities", () => {
   });
 
   describe("getPlatformInfo and resolveLuaLSBinary overrides", () => {
-    it("respects process.env.LUALS_BIN override when file exists", async () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "luals-override-"));
+    it.skipIf(!liveTestsEnabled)("returns a valid process.env.LUALS_BIN override without resolving a version", async () => {
+      const origBin = process.env.LUALS_BIN;
+      const realBinary = await getSharedLuaLSBinary();
       try {
-        const dummyBin = path.join(tempDir, "fake-luals");
-        fs.writeFileSync(dummyBin, "mock binary");
-        process.env.LUALS_BIN = dummyBin;
+        process.env.LUALS_BIN = realBinary;
 
-        const resolved = await resolveLuaLSBinary("3.13.6");
-        expect(resolved).toBe(dummyBin);
+        await expect(resolveLuaLSBinary("3.13.6")).resolves.toBe(realBinary);
       } finally {
-        delete process.env.LUALS_BIN;
-        fs.rmSync(tempDir, { recursive: true, force: true });
+        if (origBin !== undefined) {
+          process.env.LUALS_BIN = origBin;
+        } else {
+          delete process.env.LUALS_BIN;
+        }
       }
     });
 
@@ -415,14 +417,15 @@ describe("luals utilities", () => {
   });
 
   describe("resolveLuaLSBinary", () => {
-    it("respects LUALS_BIN environment variable when pointing to valid file", async () => {
+    it("rejects a LUALS_BIN environment variable pointing to a non-runnable file (Issue #26)", async () => {
       const origBin = process.env.LUALS_BIN;
       const tempBin = path.join(os.tmpdir(), `fake-luals-${Date.now()}.exe`);
       fs.writeFileSync(tempBin, "binary");
       process.env.LUALS_BIN = tempBin;
       try {
-        const resolved = await resolveLuaLSBinary();
-        expect(resolved).toBe(tempBin);
+        await expect(resolveLuaLSBinary()).rejects.toThrow(
+          /LUALS_BIN.*not a runnable LuaLS binary/
+        );
       } finally {
         if (origBin !== undefined) {
           process.env.LUALS_BIN = origBin;
@@ -728,10 +731,12 @@ describe("luals utilities", () => {
       });
 
       const originalFetch = globalThis.fetch;
+      // A real (empty) gzip-compressed tar archive: extraction must succeed so
+      // the test reaches the archive-planted symlink guard it asserts on.
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         headers: new Headers(),
-        body: Readable.from([Buffer.from("archive-content")]),
+        body: Readable.from([gzipSync(Buffer.alloc(1024))]),
       } as unknown as Response);
 
       const origExists = fs.existsSync;

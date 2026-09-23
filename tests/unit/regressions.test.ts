@@ -24,6 +24,25 @@ import { getSharedLuaLSBinary, isLiveTestsEnabled, seedCachedLuaLS } from "../he
 
 const liveTestsEnabled = isLiveTestsEnabled();
 
+/**
+ * `runLuaLSCheck()` validates `options.lualsBin` before executing it (#26), but
+ * the regression tests below intentionally inject a fake binary that runs and
+ * produces no check output. Registered binaries are treated as valid; every
+ * other path still goes through the real size + `--version` validation.
+ */
+const mockBinaries = vi.hoisted(() => ({ allowed: new Set<string>() }));
+
+vi.mock("../../src/luals/validation.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/luals/validation.js")>();
+  return {
+    ...actual,
+    assertValidLuaLSBinary: (binaryPath: string, source: string) =>
+      mockBinaries.allowed.has(binaryPath)
+        ? binaryPath
+        : actual.assertValidLuaLSBinary(binaryPath, source),
+  };
+});
+
 describe("Regression tests for audit review issues", () => {
   describe("Issue 1: Hard failure on missing target or failed LuaLS check", () => {
     it("throws an error when targetPath does not exist", async () => {
@@ -56,6 +75,7 @@ describe("Regression tests for audit review issues", () => {
           fs.chmodSync(fakeBin, 0o755);
         }
 
+        mockBinaries.allowed.add(fakeBin);
         await expect(
           runLuaLSCheck(tempDir, templatePath, {
             path: tempDir,
@@ -302,6 +322,64 @@ describe("Regression tests for audit review issues", () => {
     });
   });
 
+  describe("Issue 26: LUALS_BIN and --luals-bin binary validation", () => {
+    it("rejects a LUALS_BIN override that points to a directory", async () => {
+      const origBin = process.env.LUALS_BIN;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-bin-dir-"));
+      try {
+        process.env.LUALS_BIN = tempDir;
+
+        await expect(resolveLuaLSBinary()).rejects.toMatchObject({
+          name: "LuaLSError",
+          code: "ERR_LUALS_BIN_INVALID",
+        });
+        await expect(resolveLuaLSBinary()).rejects.toThrow(/LUALS_BIN.*not a regular file/);
+      } finally {
+        if (origBin !== undefined) {
+          process.env.LUALS_BIN = origBin;
+        } else {
+          delete process.env.LUALS_BIN;
+        }
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects a LUALS_BIN override that does not exist", async () => {
+      const origBin = process.env.LUALS_BIN;
+      const missingBin = path.join(os.tmpdir(), `nanos-missing-luals-${Date.now()}`);
+      try {
+        process.env.LUALS_BIN = missingBin;
+
+        await expect(resolveLuaLSBinary()).rejects.toThrow(
+          /LUALS_BIN.*does not exist or cannot be read/
+        );
+      } finally {
+        if (origBin !== undefined) {
+          process.env.LUALS_BIN = origBin;
+        } else {
+          delete process.env.LUALS_BIN;
+        }
+      }
+    });
+
+    it("rejects an invalid --luals-bin before executing the check", async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-option-bin-"));
+      try {
+        fs.writeFileSync(path.join(tempDir, "script.lua"), "local a = 1");
+
+        await expect(
+          runLuaLSCheck(tempDir, getDefaultTemplatePath(), {
+            path: tempDir,
+            checklevel: "Warning",
+            lualsBin: tempDir,
+          })
+        ).rejects.toThrow(/--luals-bin.*not a regular file/);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe("Issue 17: fileUriToPath edge cases", () => {
     it("handles UNC file URIs correctly", () => {
       const uncUri = "file://server/share/folder/script.lua";
@@ -478,6 +556,7 @@ describe("Regression tests for audit review issues", () => {
           fs.chmodSync(fakeBin, 0o755);
         }
 
+        mockBinaries.allowed.add(fakeBin);
         await expect(
           runLuaLSCheck(tempDir, templatePath, {
             path: tempDir,

@@ -14,6 +14,7 @@ import {
   resolveLuaLSBinary,
   getPlatformInfo,
   getIsoWeek,
+  FALLBACK_LUALS_VERSION,
 } from "../../src/luals/index.js";
 
 describe("Cache Corruption Detection and Self-Healing", () => {
@@ -317,12 +318,36 @@ describe("Cache Corruption Detection and Self-Healing", () => {
       const origFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockRejectedValue(new Error("network disabled"));
 
+      // Point the legacy cache location at an empty directory: otherwise a valid
+      // LuaLS installation (such as the shared live-test fixture) can legitimately
+      // satisfy the request and the traversal path is never exercised.
+      const emptyCacheBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-empty-legacy-"));
+      const origLocal = process.env.LOCALAPPDATA;
+      const origXdg = process.env.XDG_CACHE_HOME;
+      const origHome = process.env.HOME;
+      if (process.platform === "win32") {
+        process.env.LOCALAPPDATA = emptyCacheBase;
+      } else if (process.platform === "darwin") {
+        process.env.HOME = emptyCacheBase;
+      } else {
+        process.env.XDG_CACHE_HOME = emptyCacheBase;
+      }
+
       try {
         await expect(
           resolveLuaLSBinary("latest", { cacheDir: lualsDir, quiet: true, reuseExisting: true })
         ).rejects.toThrow();
+        // The traversing version was dropped and replaced by the safe fallback.
+        expect(readLuaLSMetadata(lualsDir)?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
       } finally {
         globalThis.fetch = origFetch;
+        if (origLocal !== undefined) process.env.LOCALAPPDATA = origLocal;
+        else delete process.env.LOCALAPPDATA;
+        if (origXdg !== undefined) process.env.XDG_CACHE_HOME = origXdg;
+        else delete process.env.XDG_CACHE_HOME;
+        if (origHome !== undefined) process.env.HOME = origHome;
+        else delete process.env.HOME;
+        fs.rmSync(emptyCacheBase, { recursive: true, force: true });
       }
     });
   });

@@ -9,8 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Security vulnerability reporting guidelines and working `gh api` CLI examples in `AGENTS.md` specifying private GitHub Security Advisories for responsible disclosure.
+- Regression tests for `LUALS_BIN` / `--luals-bin` validation (#26).
+
+### Changed
+- `LUALS_BIN` and `--luals-bin` are validated instead of trusted: a path that is missing, is a directory, or is not a runnable LuaLS binary now fails with `ERR_LUALS_BIN_INVALID` naming the setting, instead of being silently ignored or failing deep inside the check run (#26).
 
 ### Fixed
+- Run the same `statSync().isFile()` + `isBinaryValid()` (`--version`) validation used for every other binary source on `LUALS_BIN` and `options.lualsBin`, with actionable remediation hints naming `LUALS_BIN` / `--luals-bin` (#26).
+- Repaired the Issue #20 archive-planted symlink regression test, which aborted while extracting an intentionally fake archive before reaching the symlink guard it asserts on.
+- Repaired the Issue #17 traversal regression test, which a discoverable valid LuaLS installation (such as the shared live-test fixture) could legitimately satisfy, so the poisoned `metadata.json` path was never exercised deterministically.
 - Sanitize `metadata.json` `latestVersion` with `sanitizeLuaLSVersion()` and enforce cache boundary checks before resolving cached binary paths, preventing path traversal and arbitrary binary execution outside the cache tree (#17).
 - Enforce 120s timeout and stream LuaLS archive downloads directly to disk with a 150 MB upper bound, preventing indefinite process hangs and out-of-memory exhaustion (#18).
 - Enforce HTTPS GitHub host allowlisting on download URLs and redirects, audit-log archive SHA-256 checksums, and document the binary verification model in `SECURITY.md` (#19).

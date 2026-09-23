@@ -154,7 +154,7 @@ OPTIONS:
 
 | Variable | Description |
 | :--- | :--- |
-| `LUALS_BIN` | Explicit path to a pre-installed `lua-language-server` binary |
+| `LUALS_BIN` | Explicit path to a pre-installed `lua-language-server` binary; it must be a regular file that reports its version via `--version`, otherwise nanos-lint fails with `ERR_LUALS_BIN_INVALID` |
 | `NANOS_ANNOTATIONS_PATH`, `NANOS_ANNOTATIONS` | Explicit path to a custom `annotations.lua` file |
 | `NANOS_LOG_LEVEL` | Default logging level: `error`, `warn`, `info`, `debug`, `silent` (default: `warn`) |
 | `GITHUB_TOKEN` | GitHub personal access token used for authenticated GitHub API requests (avoids unauthenticated rate limits) |
