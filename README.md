@@ -180,6 +180,7 @@ Pre-packaged release bundles containing the platform's `lua-language-server` bin
 
 - `nanos-lint-<version>-windows-x64.zip`
 - `nanos-lint-<version>-linux-x64.tar.gz`
+- `nanos-lint-<version>-linux-arm64.tar.gz`
 - `nanos-lint-<version>-macos-arm64.tar.gz` (Apple Silicon)
 - `nanos-lint-<version>-macos-x64.tar.gz` (Intel)
 
