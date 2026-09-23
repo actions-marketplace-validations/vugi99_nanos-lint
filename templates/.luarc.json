@@ -4,8 +4,13 @@
     "version": "Lua 5.4",
     "path": [
       "?.lua",
-      "?/init.lua"
-    ]
+      "Shared/?.lua",
+      "Client/?.lua",
+      "Server/?.lua"
+    ],
+    "special": {
+      "Package.Require": "require"
+    }
   },
   "workspace": {
     "checkThirdParty": false,
@@ -31,25 +36,14 @@
   },
   "diagnostics": {
     "enable": true,
-    "globals": [
-      "Package",
-      "Server",
-      "Client",
-      "Events",
-      "Assets",
-      "Trace",
-      "Timer",
-      "HTTP",
-      "File",
-      "Database"
-    ],
+    "neededFileStatus": {
+      "unused-local": "Any",
+      "redefined-local": "Any"
+    },
     "severity": {
-      "param-type-mismatch": "Warning",
-      "cast-type-mismatch": "Warning",
-      "undefined-field": "Warning",
-      "undefined-global": "Warning",
-      "syntax-error": "Error"
+      "redefined-local": "Warning",
+      "unused-local": "Warning",
+      "unused-vararg": "Warning"
     }
   }
 }
-

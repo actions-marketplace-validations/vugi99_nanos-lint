@@ -210,6 +210,9 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
       const code = `
         local char = Character(Vector(0, 0, 0), Rotator(0, 0, 0), "nanos-world::SK_Mannequin")
         local health = char:GetHealth()
+        if health > 0 then
+          char:SetHealth(health)
+        end
       `;
       fs.writeFileSync(path.join(tempWorkspace, "Server.lua"), code, "utf-8");
 

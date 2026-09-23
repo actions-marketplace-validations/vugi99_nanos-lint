@@ -52,6 +52,7 @@ export interface LuaRCConfig {
   runtime?: {
     version?: string;
     path?: string[];
+    special?: Record<string, string>;
     [key: string]: unknown;
   };
   workspace?: {

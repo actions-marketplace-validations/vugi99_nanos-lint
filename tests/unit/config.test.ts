@@ -40,9 +40,10 @@ describe("config module", () => {
     const templatePath = getDefaultTemplatePath();
     const config = loadConfigFile(templatePath);
     expect(config.runtime?.version).toBe("Lua 5.4");
+    expect(config.runtime?.path).toContain("Shared/?.lua");
+    expect(config.runtime?.special?.["Package.Require"]).toBe("require");
     expect(config.diagnostics?.enable).toBe(true);
-    expect(config.diagnostics?.globals).toContain("Package");
-    expect(config.diagnostics?.globals).toContain("Server");
+    expect(config.diagnostics?.severity?.["unused-local"]).toBe("Warning");
     expect(config.workspace?.ignoreDir).toContain("script");
     expect(config.workspace?.ignoreDir).toContain("node_modules");
   });
