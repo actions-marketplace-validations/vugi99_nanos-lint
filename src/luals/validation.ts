@@ -27,3 +27,4 @@ export function isBinaryValid(binaryPath: string): boolean {
     return false;
   }
 }
+

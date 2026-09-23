@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refined module coverage floors in `vitest.config.ts` targeting `src/luals/runner.ts`, `src/luals/cache.ts`, and `src/luals/download.ts`, while excluding zero-logic re-export shims (`src/luals.ts`, `src/luals/index.ts`).
 - Aligned `diagnostics.neededFileStatus` in `mergeConfigs()` to key-merge overrides alongside `diagnostics.severity`.
 - Enhanced `ERR_LUALS_CORRUPTED_CACHE` error messages in `resolveLuaLSBinary()` to include actual underlying failure causes instead of unconditionally claiming offline.
-- Enabled GitHub Actions CI workflow triggers on push and pull requests targeting the `dev` branch (`.github/workflows/ci.yml`).
+- Configured GitHub Actions CI workflow triggers on pull requests targeting `dev` while constraining `push` triggers to `master` and `main` to prevent duplicate workflow runs on PRs (`.github/workflows/ci.yml`).
 - Enforced file line limits via ESLint `max-lines` (500 lines for `src/**/*.ts`, 1000 lines for `tests/**/*.ts`).
 - Modularized `src/luals.ts` into `src/luals/` submodules (`version.ts`, `platform.ts`, `cache.ts`, `download.ts`, `runner.ts`, `validation.ts`, `files.ts`, and `index.ts`), retaining 100% backward-compatible exports from `src/luals.ts`.
 - Automated self-healing for corrupted or malformed `metadata.json` files across LuaLS and annotations caches, automatically purging invalid JSON files on parse errors.
@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `AGENTS.md` guidelines noting that running checks manually before committing is unnecessary because the full quality suite runs automatically in the pre-commit hook.
 
 ### Fixed
+- Fixed single-file diagnostic filtering in `runLuaLSCheck` (`src/luals/runner.ts`) across macOS and Windows by canonicalizing paths with `fs.realpathSync.native` to handle symlinks (such as `/var` vs `/private/var` on macOS) and 8.3 short names on Windows runner environments.
 - Fixed cache status inspection in `getCacheStatus()` (`src/cache-status.ts`) by targeting `<cache>/luals` rather than `<cache>`, accurately discovering cached LuaLS copies, metadata freshness, and distinguishing valid versus corrupted binaries (#14).
 - Filtered `diagnostics.severity` and `diagnostics.neededFileStatus` keys against LuaLS's 62 valid diagnostic codes in `mergeConfigs()`, automatically dropping obsolete or unrecognized keys (such as `syntax-error`) with a warning to prevent LuaLS from silently voiding the entire severity table (#22).
 - Resolved circular import between `src/luals/cache.ts` and `src/luals/download.ts` by extracting `isBinaryValid()` to `src/luals/validation.ts`.

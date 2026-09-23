@@ -238,13 +238,14 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
   });
 
   it("reports unused-local at Warning severity through default merged config and recovers from legacy syntax-error (Issue #22)", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unused-local-"));
+    const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unused-local-"));
+    const tempDir = fs.realpathSync.native ? fs.realpathSync.native(rawTempDir) : fs.realpathSync(rawTempDir);
     try {
       const luaFile = path.join(tempDir, "unused.lua");
       fs.writeFileSync(luaFile, "local myUnused = 123\n", "utf-8");
 
       // 1. Default merged config (no workspace config)
-      const resolved = resolveWorkspaceConfig(luaFile);
+      const resolved = resolveWorkspaceConfig(tempDir);
       try {
         const result = await runLuaLSCheck(luaFile, resolved.configPath, {
           path: luaFile,
@@ -295,7 +296,14 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
         }
       }
     } finally {
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      fs.rmSync(rawTempDir, { recursive: true, force: true });
+      if (tempDir !== rawTempDir) {
+        try {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        } catch {
+          void 0;
+        }
+      }
     }
   });
 });

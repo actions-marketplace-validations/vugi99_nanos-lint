@@ -158,3 +158,4 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
   walk(absPath);
   return count;
 }
+

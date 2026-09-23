@@ -314,7 +314,14 @@ export async function runLuaLSCheck(
   configPath: string,
   options: CheckOptions
 ): Promise<CheckResult> {
-  const absoluteTarget = path.resolve(targetPath);
+  let absoluteTarget = path.resolve(targetPath);
+  try {
+    if (fs.existsSync(absoluteTarget)) {
+      absoluteTarget = fs.realpathSync.native(absoluteTarget);
+    }
+  } catch (err) {
+    logger.debug(`[luals] Failed to resolve native realpath for target: ${err instanceof Error ? err.message : String(err)}`);
+  }
   if (!fs.existsSync(absoluteTarget)) {
     throw new LuaLSError(
       `Target path does not exist: ${targetPath}`,
@@ -409,10 +416,20 @@ export async function runLuaLSCheck(
   // If a single file was requested, filter diagnostics to only that file
   if (targetFileOnly) {
     const filtered: DiagnosticReport = {};
-    const normTarget = path.resolve(targetFileOnly).toLowerCase();
+    const normalizeComparable = (p: string): string => {
+      try {
+        if (fs.existsSync(p)) {
+          return fs.realpathSync.native(p).replace(/\\/g, "/").toLowerCase();
+        }
+      } catch (err) {
+        logger.debug(`[luals] Failed to resolve native realpath for comparison: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return path.resolve(p).replace(/\\/g, "/").toLowerCase();
+    };
+    const normTarget = normalizeComparable(targetFileOnly);
     for (const [rawUri, diags] of Object.entries(diagnostics)) {
       const filePath = fileUriToPath(rawUri);
-      if (path.resolve(filePath).toLowerCase() === normTarget) {
+      if (normalizeComparable(filePath) === normTarget) {
         filtered[rawUri] = diags;
       }
     }
