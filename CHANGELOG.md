@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automated self-healing for corrupted or malformed `metadata.json` files across LuaLS and annotations caches, automatically purging invalid JSON files on parse errors.
 - Enhanced `resolveAnnotations()` to purge corrupted or 0-byte cached files and automatically fall back to bundled definitions when offline.
 - Improved offline diagnostics in `resolveLuaLSBinary()` providing clear remediation hints (`nanos-lint clean-cache`) when cached binaries fail execution checks and cannot be re-downloaded.
+- Enabled `noUncheckedIndexedAccess` and `noImplicitOverride` in `tsconfig.json` for safer array/dictionary index access and explicit inheritance semantics.
 
 ### Fixed
 - Duplicate releases: pushing a release commit to `master` and its tag produced two qualifying CI runs, so the release ran twice and the second `npm publish` failed with a 409. The release job now only runs for tag-triggered CI, skips a tag whose GitHub release already exists, and skips `npm publish` when the version is already published.

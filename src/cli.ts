@@ -261,9 +261,13 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
   // Early parse of log-level so early exits (e.g. --version, --help) configure the logger
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (!arg) {
+      continue;
+    }
     if (arg === "-l" || arg === "--log-level") {
-      if (i + 1 < args.length && isValidLogLevel(args[i + 1])) {
-        logger.setLevel(args[i + 1] as LogLevel);
+      const nextArg = args[i + 1];
+      if (nextArg && isValidLogLevel(nextArg)) {
+        logger.setLevel(nextArg as LogLevel);
       }
     } else if (arg.startsWith("--log-level=")) {
       const val = arg.split("=")[1];

@@ -192,10 +192,10 @@ export async function resolveLuaLSBinary(
   const cachedVersions = listCachedLuaLSVersions(baseCacheDir);
 
   // Same week, but the recorded version is unusable: reuse another cached one.
-  if (metadata && metadata.lastCheckedWeek === currentWeek && cachedVersions.length > 0) {
-    const fallbackVersion = cachedVersions[0];
-    const info = getPlatformInfo(fallbackVersion);
-    return path.join(getCacheDir(fallbackVersion, baseCacheDir), info.binaryRelativePath);
+  const firstCachedVersion = cachedVersions[0];
+  if (metadata && metadata.lastCheckedWeek === currentWeek && firstCachedVersion) {
+    const info = getPlatformInfo(firstCachedVersion);
+    return path.join(getCacheDir(firstCachedVersion, baseCacheDir), info.binaryRelativePath);
   }
 
   // We need to check for updates (new week, missing metadata, or no valid binary in cache)
@@ -208,9 +208,9 @@ export async function resolveLuaLSBinary(
   } else if (metadata?.latestVersion && cachedVersions.includes(metadata.latestVersion)) {
     logger.info(`[luals] Network unreachable or rate limited; using cached LuaLS ${metadata.latestVersion}.`);
     targetVersion = metadata.latestVersion;
-  } else if (cachedVersions.length > 0) {
-    logger.info(`[luals] Network unreachable or rate limited; using cached LuaLS ${cachedVersions[0]}.`);
-    targetVersion = cachedVersions[0];
+  } else if (firstCachedVersion) {
+    logger.info(`[luals] Network unreachable or rate limited; using cached LuaLS ${firstCachedVersion}.`);
+    targetVersion = firstCachedVersion;
   } else {
     targetVersion = FALLBACK_LUALS_VERSION;
   }
