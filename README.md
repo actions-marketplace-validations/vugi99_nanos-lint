@@ -122,6 +122,7 @@ COMMANDS:
 
 OPTIONS:
   -i, --ignore <pattern>   Files or directories to ignore (supports globs, repeatable, comma/newline-separated)
+  -l, --log-level <level>  Logging level: error, warn, info, debug, silent (default: warn)
   --checklevel=<level>     Minimum diagnostic level: Error, Warning, Information, Hint (default: Warning)
   --config=<path>          Path to custom .luarc.json configuration file
   --annotations=<path>     Path to custom annotations.lua file
@@ -129,7 +130,7 @@ OPTIONS:
   --github                 Output in GitHub Actions format (shortcut for --format=github)
   --luals-version=<ver>    Version of LuaLS to use (default: latest)
   --no-fail                Do not exit with code 1 if diagnostics are found
-  --quiet                  Suppress progress output
+  --quiet                  Suppress progress output (alias for --log-level=error)
   -f, --force              (init command only) Overwrite existing .luarc.json
 ```
 
@@ -139,6 +140,7 @@ OPTIONS:
 | :--- | :--- |
 | `LUALS_BIN` | Explicit path to a pre-installed `lua-language-server` binary |
 | `NANOS_ANNOTATIONS_PATH`, `NANOS_ANNOTATIONS` | Explicit path to a custom `annotations.lua` file |
+| `NANOS_LOG_LEVEL` | Default logging level: `error`, `warn`, `info`, `debug`, `silent` (default: `warn`) |
 | `GITHUB_TOKEN` | GitHub personal access token used for authenticated GitHub API requests (avoids unauthenticated rate limits) |
 | `NO_COLOR` | Disables ANSI color output when set to any non-empty value |
 | `FORCE_COLOR` | Forces ANSI color output even in non-TTY environments |

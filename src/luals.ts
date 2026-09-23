@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { getPackageRoot } from "./config.js";
 import { systemPaths } from "./paths.js";
 import { fileUriToPath } from "./types.js";
+import { logger } from "./logger.js";
 import type { CheckOptions, CheckResult, DiagnosticReport, LuaRCConfig } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -99,8 +100,10 @@ export async function resolveLatestLuaLSVersion(): Promise<string> {
         return version;
       }
     }
-  } catch {
-    // Network error or rate limit fallback
+  } catch (err) {
+    logger.debug(
+      `[luals] Failed to resolve latest LuaLS version from GitHub API: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
   return FALLBACK_LUALS_VERSION;
 }
@@ -215,8 +218,10 @@ export function findExistingLuaLSDir(version: string): string | null {
       if (fs.readFileSync(primaryMarker, "utf-8").trim() === version && isBinaryValid(primaryBin)) {
         return primaryCache;
       }
-    } catch {
-      // Ignore
+    } catch (err) {
+      logger.debug(
+        `[luals] Error checking primary LuaLS cache marker at ${primaryMarker}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
@@ -229,8 +234,10 @@ export function findExistingLuaLSDir(version: string): string | null {
       if (fs.readFileSync(legacyMarker, "utf-8").trim() === version && isBinaryValid(legacyBin)) {
         return legacyCache;
       }
-    } catch {
-      // Ignore
+    } catch (err) {
+      logger.debug(
+        `[luals] Error checking legacy LuaLS cache marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
@@ -262,7 +269,10 @@ export function isBinaryValid(binaryPath: string): boolean {
       encoding: "utf-8",
     });
     return /^\d+\.\d+\.\d+/.test(output.trim());
-  } catch {
+  } catch (err) {
+    logger.debug(
+      `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`
+    );
     return false;
   }
 }
@@ -285,15 +295,19 @@ export async function downloadAndExtractLuaLS(
         if (storedVersion === resolvedVersion && isBinaryValid(binaryPath)) {
           return binaryPath;
         }
-      } catch {
-        // Ignore marker read error
+      } catch (err) {
+        logger.debug(
+          `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
     // destDir exists but is invalid/corrupted/stale: clean it up before downloading
     try {
       fs.rmSync(destDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup error
+    } catch (err) {
+      logger.warn(
+        `[luals] Failed to remove stale or invalid cache dir ${destDir}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
@@ -318,12 +332,12 @@ export async function downloadAndExtractLuaLS(
   try {
     if (shouldCopyFromExisting) {
       if (!options?.quiet) {
-        console.log(`[luals] Reusing existing LuaLS ${resolvedVersion} installation from ${existingSourceDir}...`);
+        logger.info(`[luals] Reusing existing LuaLS ${resolvedVersion} installation from ${existingSourceDir}...`);
       }
       fs.cpSync(existingSourceDir, tempDir, { recursive: true });
     } else {
       if (!options?.quiet) {
-        console.log(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
+        logger.info(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
       }
 
       let response: Response | null = null;
@@ -353,7 +367,7 @@ export async function downloadAndExtractLuaLS(
       fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
 
       if (!options?.quiet) {
-        console.log(`[luals] Extracting to ${destDir}...`);
+        logger.info(`[luals] Extracting to ${destDir}...`);
       }
 
       try {
@@ -375,8 +389,10 @@ export async function downloadAndExtractLuaLS(
       // Cleanup archive file
       try {
         fs.unlinkSync(archivePath);
-      } catch {
-        // Ignore cleanup error
+      } catch (err) {
+        logger.debug(
+          `[luals] Failed to delete temporary archive ${archivePath}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
 
@@ -386,8 +402,10 @@ export async function downloadAndExtractLuaLS(
     if (process.platform !== "win32") {
       try {
         fs.chmodSync(tempBinaryPath, 0o755);
-      } catch {
-        // Ignore chmod error
+      } catch (err) {
+        logger.warn(
+          `[luals] Failed to chmod binary at ${tempBinaryPath}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
 
@@ -412,11 +430,13 @@ export async function downloadAndExtractLuaLS(
           // A concurrent worker already promoted destDir successfully
           try {
             fs.rmSync(tempDir, { recursive: true, force: true });
-          } catch {
-            // Ignore cleanup error
+          } catch (err) {
+            logger.debug(
+              `[luals] Failed to remove temp directory after concurrent promotion: ${err instanceof Error ? err.message : String(err)}`
+            );
           }
           if (!options?.quiet) {
-            console.log(`[luals] Ready: ${binaryPath}`);
+            logger.info(`[luals] Ready: ${binaryPath}`);
           }
           return binaryPath;
         }
@@ -427,8 +447,10 @@ export async function downloadAndExtractLuaLS(
           if (fs.existsSync(destDir) && (!fs.existsSync(binaryPath) || !fs.existsSync(completeMarker))) {
             try {
               fs.rmSync(destDir, { recursive: true, force: true });
-            } catch {
-              // Ignore cleanup error
+            } catch (err) {
+              logger.warn(
+                `[luals] Failed to clean up broken destination directory ${destDir}: ${err instanceof Error ? err.message : String(err)}`
+              );
             }
           }
           throw renameErr;
@@ -437,15 +459,17 @@ export async function downloadAndExtractLuaLS(
     }
 
     if (!options?.quiet) {
-      console.log(`[luals] Ready: ${binaryPath}`);
+      logger.info(`[luals] Ready: ${binaryPath}`);
     }
     return binaryPath;
   } finally {
     if (fs.existsSync(tempDir)) {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
-      } catch {
-        // Ignore cleanup error
+      } catch (err) {
+        logger.debug(
+          `[luals] Failed to clean up temporary directory ${tempDir}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
   }
@@ -494,18 +518,22 @@ export async function resolveLuaLSBinary(
         if (storedVersion === resolvedVersion && isBinaryValid(cachedPath)) {
           return cachedPath;
         }
-      } catch {
-        // Marker read error
+      } catch (err) {
+        logger.debug(
+          `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
     // Cached binary is corrupted/incomplete/stale - clean up and re-download
     if (!options?.quiet) {
-      console.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
+      logger.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
     }
     try {
       fs.rmSync(cachedDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup error
+    } catch (err) {
+      logger.warn(
+        `[luals] Failed to remove corrupted cache directory ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
@@ -522,8 +550,10 @@ export async function resolveLuaLSBinary(
         if (stored === resolvedVersion && isBinaryValid(legacyPath)) {
           validLegacy = true;
         }
-      } catch {
-        // Ignore marker read error
+      } catch (err) {
+        logger.debug(
+          `[luals] Failed to read legacy complete marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     } else if (isBinaryValid(legacyPath)) {
       validLegacy = true;
@@ -538,8 +568,10 @@ export async function resolveLuaLSBinary(
           if (fs.existsSync(cachedPath) && isBinaryValid(cachedPath)) {
             return cachedPath;
           }
-        } catch {
-          // If migration copy fails, use legacy binary directly
+        } catch (err) {
+          logger.warn(
+            `[luals] Failed to migrate legacy cache from ${legacyDir} to ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
       }
       return legacyPath;
@@ -554,8 +586,10 @@ export async function resolveLuaLSBinary(
     if (found && fs.existsSync(found) && isBinaryValid(found)) {
       return found;
     }
-  } catch {
-    // Not in PATH
+  } catch (err) {
+    logger.debug(
+      `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`
+    );
   }
 
   // 5. Download and cache
@@ -610,6 +644,9 @@ export async function runLuaLSCheck(
     });
   } catch (err) {
     execError = err;
+    logger.debug(
+      `[luals] LuaLS process exited with error or non-zero status: ${err instanceof Error ? err.message : String(err)}`
+    );
     // Process may exit with non-zero when diagnostics are found
   }
 
@@ -620,13 +657,17 @@ export async function runLuaLSCheck(
       const content = fs.readFileSync(checkOutPath, "utf-8");
       diagnostics = JSON.parse(content) as DiagnosticReport;
       parseSucceeded = true;
-    } catch {
-      // Failed to parse json
+    } catch (err) {
+      logger.error(
+        `[luals] Failed to read or parse diagnostic output from ${checkOutPath}: ${err instanceof Error ? err.message : String(err)}`
+      );
     } finally {
       try {
         fs.unlinkSync(checkOutPath);
-      } catch {
-        // Ignore unlink error
+      } catch (err) {
+        logger.debug(
+          `[luals] Failed to delete check output file ${checkOutPath}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
   }
@@ -715,8 +756,10 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
       if (cfg.files?.exclude) {
         excludePatterns = cfg.files.exclude;
       }
-    } catch {
-      // Ignore config parse error
+    } catch (err) {
+      logger.warn(
+        `[luals] Failed to parse config file for file counting at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 
@@ -747,8 +790,10 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
             "$";
           try {
             if (new RegExp(baseRegexStr, "i").test(baseName)) return true;
-          } catch {
-            // Ignore
+          } catch (err) {
+            logger.debug(
+              `[luals] Invalid regex for pattern "${normPat}": ${err instanceof Error ? err.message : String(err)}`
+            );
           }
         }
 
@@ -779,8 +824,10 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
 
         try {
           if (new RegExp(`^${escaped}$`, "i").test(norm)) return true;
-        } catch {
-          // Ignore regex syntax error
+        } catch (err) {
+          logger.debug(
+            `[luals] Invalid glob regex for pattern "${normPat}": ${err instanceof Error ? err.message : String(err)}`
+          );
         }
       }
     }
@@ -793,7 +840,10 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    } catch {
+    } catch (err) {
+      logger.debug(
+        `[luals] Failed to read directory ${currentDir}: ${err instanceof Error ? err.message : String(err)}`
+      );
       return;
     }
 
@@ -808,7 +858,10 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
           (() => {
             try {
               return fs.statSync(fullPath).isDirectory();
-            } catch {
+            } catch (err) {
+              logger.debug(
+                `[luals] Failed to stat symlink target ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
+              );
               return false;
             }
           })());

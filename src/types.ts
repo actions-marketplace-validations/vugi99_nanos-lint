@@ -1,4 +1,5 @@
 import { fileURLToPath as nodeFileURLToPath } from "node:url";
+import { logger } from "./logger.js";
 
 export type DiagnosticSeverity = "Error" | "Warning" | "Information" | "Hint";
 export type DiagnosticSeverityLevel = 1 | 2 | 3 | 4;
@@ -93,13 +94,14 @@ export function fileUriToPath(uri: string): string {
       res = res.charAt(0).toUpperCase() + res.slice(1);
     }
     return res;
-  } catch {
+  } catch (err) {
+    logger.debug(`fileURLToPath fallback for URI "${uri}": ${err instanceof Error ? err.message : String(err)}`);
     // Fallback if nodeFileURLToPath fails (e.g. malformed percent encoding)
     let decoded = uri.slice(7);
     try {
       decoded = decodeURIComponent(decoded);
-    } catch {
-      // Keep unescaped if malformed
+    } catch (decodeErr) {
+      logger.warn(`decodeURIComponent failed for path "${decoded}": ${decodeErr instanceof Error ? decodeErr.message : String(decodeErr)}`);
     }
 
     if (decoded.startsWith("//")) {

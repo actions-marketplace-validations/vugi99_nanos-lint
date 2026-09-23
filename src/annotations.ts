@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { systemPaths } from "./paths.js";
 import { getPackageRoot } from "./config.js";
+import { logger } from "./logger.js";
 
 export const DOCGEN_REPO = "nanos-world/vscode-extension";
 export const DOCGEN_BRANCH = "docgen-output";
@@ -60,8 +61,8 @@ export function readAnnotationsMetadata(cacheDir: string = getAnnotationsCacheDi
     if (typeof parsed?.commitId === "string" && typeof parsed?.lastChecked === "string") {
       return parsed;
     }
-  } catch {
-    // Ignore parse error
+  } catch (err) {
+    logger.debug(`Failed to parse annotations metadata: ${err instanceof Error ? err.message : String(err)}`);
   }
   return null;
 }
@@ -82,8 +83,8 @@ export async function fetchLatestCommitId(): Promise<string | null> {
         return data.sha;
       }
     }
-  } catch {
-    // Network error or rate limit
+  } catch (err) {
+    logger.warn(`Failed to resolve latest annotations commit from GitHub: ${err instanceof Error ? err.message : String(err)}`);
   }
   return null;
 }
@@ -146,8 +147,8 @@ export function updateLastCheckedDate(
       if (fs.existsSync(tempMetaPath)) {
         fs.unlinkSync(tempMetaPath);
       }
-    } catch {
-      // Ignore cleanup error
+    } catch (err) {
+      logger.warn(`Failed to clean up temporary metadata file ${tempMetaPath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
   return metadata;
@@ -183,9 +184,9 @@ export async function downloadAndCacheAnnotations(
 
     if (!options?.quiet) {
       if (commitId && commitId !== "unknown") {
-        console.log(`[annotations] Downloading nanos world API annotations (${commitId.slice(0, 7)})...`);
+        logger.info(`[annotations] Downloading nanos world API annotations (${commitId.slice(0, 7)})...`);
       } else {
-        console.log("[annotations] Downloading nanos world API annotations...");
+        logger.info("[annotations] Downloading nanos world API annotations...");
       }
     }
 
@@ -235,9 +236,9 @@ export async function downloadAndCacheAnnotations(
 
     if (!options?.quiet) {
       if (commitId && commitId !== "unknown") {
-        console.log(`[annotations] Updated annotations.lua to commit ${commitId.slice(0, 7)}.`);
+        logger.info(`[annotations] Updated annotations.lua to commit ${commitId.slice(0, 7)}.`);
       } else {
-        console.log("[annotations] Updated annotations.lua.");
+        logger.info("[annotations] Updated annotations.lua.");
       }
     }
 
@@ -254,8 +255,8 @@ export async function downloadAndCacheAnnotations(
         if (fs.existsSync(backupMeta)) {
           await copyFileWithRetry(backupMeta, finalMetaPath);
         }
-      } catch {
-        // Ignore rollback copy error
+      } catch (rollbackErr) {
+        logger.error(`Failed to restore annotations from backup during rollback: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`);
       }
     }
     throw err;
@@ -268,8 +269,8 @@ export async function downloadAndCacheAnnotations(
       if (fs.existsSync(backupDir)) {
         fs.rmSync(backupDir, { recursive: true, force: true });
       }
-    } catch {
-      // Ignore cleanup error
+    } catch (err) {
+      logger.warn(`Failed to clean up annotations temporary or backup directory: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }
@@ -343,8 +344,8 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
   if (fs.existsSync(cachedAnnotationsFile)) {
     try {
       updateLastCheckedDate(metadata?.commitId || "unknown", cacheDir);
-    } catch {
-      // Ignore write errors (e.g. read-only filesystem)
+    } catch (err) {
+      logger.warn(`Failed to update lastChecked date for cached annotations: ${err instanceof Error ? err.message : String(err)}`);
     }
     return cachedAnnotationsFile;
   }

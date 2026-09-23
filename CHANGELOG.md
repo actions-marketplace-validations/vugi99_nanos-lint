@@ -8,13 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Centralized logger module (`src/logger.ts`) providing configurable log levels (`error`, `warn`, `info`, `debug`, `silent`) with default level `"warn"`.
+- `-l, --log-level <level>` CLI parameter on root and `check` command and `NANOS_LOG_LEVEL` environment variable to configure the application log level.
+- Custom ESLint rule `local/no-empty-catch` in `eslint.config.mjs` preventing empty or silent `catch` blocks across the codebase.
+- Dedicated unit tests for the logger module (`tests/unit/logger.test.ts`) and CLI log level configuration (`tests/unit/cli.test.ts`).
 - Exported helper `findExistingLuaLSDir()` in `src/luals.ts` to discover pre-installed LuaLS directories in primary cache, legacy cache, or bundled distributions.
-- `reuseExisting` option in `DownloadOptions` for `downloadAndExtractLuaLS()`, enabling reuse of existing valid platform binaries without network download.
+- `reuseExisting` option in `DownloadOptions` for `downloadAndExtractLuaLS()`, enabling reuse of existing platform binaries without network download.
 - Pre-packaged standalone macOS release archives (`nanos-lint-<version>-macos-arm64.tar.gz` for Apple Silicon and `nanos-lint-<version>-macos-x64.tar.gz` for Intel) bundling platform LuaLS binaries, vendored annotations, and shell launchers in `.github/workflows/release.yml`.
 - `macos-latest` runner to the GitHub Actions CI test matrix in `.github/workflows/ci.yml`.
-- Documentation in `README.md` for standalone macOS release distributions and cross-platform architecture support.
+- Documentation in `README.md` for standalone macOS release distributions, `-l, --log-level` option, and `NANOS_LOG_LEVEL` environment variable.
 
 ### Changed
+- Replaced direct `console.log`, `console.warn`, and `console.error` calls across the codebase with centralized `logger` methods.
+- Updated all `catch` blocks across `src/annotations.ts`, `src/cli.ts`, `src/config.ts`, `src/luals.ts`, `src/reporter.ts`, and `src/types.ts` to log errors at appropriate log levels (`debug`, `warn`, or `error`), ensuring no errors are silently swallowed.
 - `downloadAndExtractLuaLS()` now automatically reuses existing local LuaLS installations when available instead of repeatedly re-downloading archives from GitHub, reducing test suite execution time by ~85%.
 - Updated `AGENTS.md` guidelines instructing agents to systematically update `CHANGELOG.md` under `## [Unreleased]` after making changes, and to review, verify, and promote unreleased entries when preparing and publishing releases.
 

@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, it, expect, vi } from "vitest";
-import { runCLI, isDirectExecution, collectIgnorePatterns } from "../../src/cli.js";
+import { runCLI, isDirectExecution, collectIgnorePatterns, createProgram } from "../../src/cli.js";
 import * as pathsModule from "../../src/paths.js";
 import * as lualsModule from "../../src/luals.js";
 import * as annotationsModule from "../../src/annotations.js";
+import { logger } from "../../src/logger.js";
 
 describe("cli module flag and command parsing", () => {
   it("prints help and returns 0 on --help and -h", async () => {
@@ -104,6 +105,29 @@ describe("cli module flag and command parsing", () => {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
       logSpy.mockRestore();
+    }
+  });
+
+  it("handles init subcommand overwrite rejection and force overwrite", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cli-init-force-test-"));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const code1 = await runCLI(["init", tempDir]);
+      expect(code1).toBe(0);
+
+      // Re-running without --force should fail with error code 1
+      const codeFail = await runCLI(["init", tempDir]);
+      expect(codeFail).toBe(1);
+
+      // Re-running with --force should succeed with exit code 0
+      const codeForce = await runCLI(["init", tempDir, "--force"]);
+      expect(codeForce).toBe(0);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      logSpy.mockRestore();
+      errSpy.mockRestore();
     }
   });
 
@@ -288,9 +312,88 @@ describe("cli module flag and command parsing", () => {
       const codeFail = await runCLI(["check", "."]);
       expect(codeFail).toBe(1);
 
+      // Failing check with github format
+      checkSpy.mockResolvedValueOnce({
+        passed: false,
+        totalProblems: 1,
+        totalFiles: 1,
+        diagnostics: {
+          "file:///test.lua": [
+            { code: "err", message: "m", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+          ],
+        },
+      });
+      const codeGithub = await runCLI(["check", ".", "--format", "github", "--no-fail"]);
+      expect(codeGithub).toBe(0);
+
+      // Failing check with pretty format
+      checkSpy.mockResolvedValueOnce({
+        passed: false,
+        totalProblems: 1,
+        totalFiles: 1,
+        diagnostics: {
+          "file:///test.lua": [
+            { code: "err", message: "m", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+          ],
+        },
+      });
+      const codePretty = await runCLI(["check", ".", "--format", "pretty", "--no-fail"]);
+      expect(codePretty).toBe(0);
+
+      // Check with --ignore option and --quiet
+      checkSpy.mockResolvedValueOnce({
+        passed: true,
+        totalProblems: 0,
+        totalFiles: 1,
+        diagnostics: {},
+      });
+      const codeIgnore = await runCLI(["check", ".", "--ignore", "myfolder/*.lua", "--quiet"]);
+      expect(codeIgnore).toBe(0);
+
+      // Check with -l info
+      checkSpy.mockResolvedValueOnce({
+        passed: true,
+        totalProblems: 0,
+        totalFiles: 1,
+        diagnostics: {},
+      });
+      const codeLog = await runCLI(["check", ".", "-l", "info"]);
+      expect(codeLog).toBe(0);
+      expect(logger.getLevel()).toBe("info");
+
       annotSpy.mockRestore();
       checkSpy.mockRestore();
       logSpy.mockRestore();
+    });
+
+    it("configures logger log-level when --log-level or -l is supplied", async () => {
+      logger.setLevel("warn");
+      expect(logger.getLevel()).toBe("warn");
+
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const code1 = await runCLI(["--version", "--log-level", "debug"]);
+      expect(code1).toBe(0);
+      expect(logger.getLevel()).toBe("debug");
+
+      const code2 = await runCLI(["version", "-l", "silent"]);
+      expect(code2).toBe(0);
+      expect(logger.getLevel()).toBe("silent");
+
+      logSpy.mockRestore();
+      logger.setLevel("warn");
+    });
+
+    it("can create a program without options and parse with --log-level= syntax", async () => {
+      const prog = createProgram();
+      expect(prog).toBeDefined();
+
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const code = await runCLI(["--version", "--log-level=info"]);
+      expect(code).toBe(0);
+      expect(logger.getLevel()).toBe("info");
+      logSpy.mockRestore();
+      logger.setLevel("warn");
     });
   });
 });

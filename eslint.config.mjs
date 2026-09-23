@@ -1,6 +1,35 @@
 import eslint from "@eslint/js";
 import tseslint from "typescript-eslint";
 
+const localRulesPlugin = {
+  rules: {
+    "no-empty-catch": {
+      meta: {
+        type: "problem",
+        docs: {
+          description: "Forbid empty catch blocks, including those only containing comments",
+        },
+        schema: [],
+        messages: {
+          noEmptyCatch: "Empty catch block is not allowed. All catches must log or handle the error.",
+        },
+      },
+      create(context) {
+        return {
+          CatchClause(node) {
+            if (node.body.body.length === 0) {
+              context.report({
+                node,
+                messageId: "noEmptyCatch",
+              });
+            }
+          },
+        };
+      },
+    },
+  },
+};
+
 export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
@@ -14,6 +43,9 @@ export default tseslint.config(
     ],
   },
   {
+    plugins: {
+      local: localRulesPlugin,
+    },
     languageOptions: {
       parserOptions: {
         projectService: true,
@@ -27,7 +59,9 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": [
         "error",
         { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
-      ]
+      ],
+      "no-empty": ["error", { "allowEmptyCatch": false }],
+      "local/no-empty-catch": "error"
     }
   }
 );

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse, stripComments, type ParseError, printParseErrorCode } from "jsonc-parser";
 import { systemPaths } from "./paths.js";
+import { logger } from "./logger.js";
 import type { LuaRCConfig } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -124,8 +125,10 @@ export function mergeConfigs(
           resolvedPath = candidate;
         }
       }
-    } catch {
-      // Ignore stat error
+    } catch (err) {
+      logger.debug(
+        `Error checking annotations definitionsPath directory (${definitionsPath}): ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
   const normalizedDefPath = resolvedPath.split(path.sep).join("/");

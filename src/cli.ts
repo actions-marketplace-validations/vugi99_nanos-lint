@@ -7,6 +7,7 @@ import { resolveAnnotations } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
 import { formatReport } from "./reporter.js";
+import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
 
 function getVersionString(): string {
@@ -14,7 +15,10 @@ function getVersionString(): string {
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"));
     return `nanos-lint v${pkg.version}`;
-  } catch {
+  } catch (err) {
+    logger.debug(
+      `Could not read version from package.json: ${err instanceof Error ? err.message : String(err)}`
+    );
     return "nanos-lint v1.0.0";
   }
 }
@@ -35,6 +39,7 @@ interface CheckCommandOptions {
   lualsVersion: string;
   fail: boolean;
   quiet?: boolean;
+  logLevel?: string;
   github?: boolean;
   ignore?: string[];
 }
@@ -50,10 +55,26 @@ export function createProgram(options?: CreateProgramOptions): Command {
   program
     .description("Linter and type-checker for nanos world Lua scripts")
     .version(getVersionString(), "-v, --version", "Show version information")
+    .addOption(
+      new Option("-l, --log-level <level>", "Logging level: error, warn, info, debug, silent")
+        .choices(["error", "warn", "info", "debug", "silent"])
+        .default(DEFAULT_LOG_LEVEL)
+    )
+    .hook("preAction", (thisCommand, actionCommand) => {
+      const target = actionCommand || thisCommand;
+      const opts = target.optsWithGlobals
+        ? target.optsWithGlobals<{ logLevel?: string; quiet?: boolean }>()
+        : target.opts<{ logLevel?: string; quiet?: boolean }>();
+      if (opts.quiet) {
+        logger.setLevel("error");
+      } else if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
+        logger.setLevel(opts.logLevel as LogLevel);
+      }
+    })
     .exitOverride()
     .configureOutput({
       writeOut: (str) => console.log(str.trimEnd()),
-      writeErr: (str) => console.error(str.trimEnd()),
+      writeErr: (str) => logger.error(str.trimEnd()),
     });
 
   program
@@ -83,8 +104,18 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`, DEFAULT_LUALS_VERSION)
     .option("--no-fail", "Do not exit with code 1 if diagnostics are found")
     .option("--quiet", "Suppress progress output")
+    .addOption(
+      new Option("-l, --log-level <level>", "Logging level: error, warn, info, debug, silent")
+        .choices(["error", "warn", "info", "debug", "silent"])
+    )
     .option("--github", "Output in GitHub Actions format (shortcut for --format=github)")
     .action(async (targetPath: string = ".", opts: CheckCommandOptions) => {
+      if (opts.quiet) {
+        logger.setLevel("error");
+      } else if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
+        logger.setLevel(opts.logLevel as LogLevel);
+      }
+
       const format = opts.github
         ? "github"
         : opts.format || (process.env.GITHUB_ACTIONS ? "github" : "pretty");
@@ -123,8 +154,10 @@ export function createProgram(options?: CreateProgramOptions): Command {
         if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
           try {
             fs.unlinkSync(resolved.configPath);
-          } catch {
-            // Ignore temp file cleanup error
+          } catch (err) {
+            logger.warn(
+              `Failed to clean up temporary config file ${resolved.configPath}: ${err instanceof Error ? err.message : String(err)}`
+            );
           }
         }
       }
@@ -218,6 +251,21 @@ Examples:
 }
 
 export async function runCLI(args: string[] = process.argv.slice(2)): Promise<number> {
+  // Early parse of log-level so early exits (e.g. --version, --help) configure the logger
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "-l" || arg === "--log-level") {
+      if (i + 1 < args.length && isValidLogLevel(args[i + 1])) {
+        logger.setLevel(args[i + 1] as LogLevel);
+      }
+    } else if (arg.startsWith("--log-level=")) {
+      const val = arg.split("=")[1];
+      if (val && isValidLogLevel(val)) {
+        logger.setLevel(val as LogLevel);
+      }
+    }
+  }
+
   let exitCode = 0;
   const program = createProgram({
     setExitCode: (code) => {
@@ -233,9 +281,9 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
       return err.exitCode;
     }
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`error: ${message}`);
+    logger.error(`error: ${message}`);
     if (process.env.DEBUG && err instanceof Error && err.stack) {
-      console.error(err.stack);
+      logger.error(err.stack);
     }
     return 1;
   }
@@ -254,7 +302,10 @@ export function isDirectExecution(
         return fileURLToPath(urlStr);
       }
       return urlStr;
-    } catch {
+    } catch (err) {
+      logger.debug(
+        `[cli] Failed to convert URL "${urlStr}" using fileURLToPath: ${err instanceof Error ? err.message : String(err)}`
+      );
       return urlStr.replace(/^file:\/\/\/?/, "");
     }
   };
@@ -271,7 +322,10 @@ export function isDirectExecution(
     if (scriptPath === cliJsPath || scriptPath === cliTsPath) {
       return true;
     }
-  } catch {
+  } catch (err) {
+    logger.debug(
+      `[cli] Failed to resolve realpath for entry detection: ${err instanceof Error ? err.message : String(err)}`
+    );
     const normArgv = path.resolve(argv1).toLowerCase();
     const normMeta = toPath(importMetaUrl).toLowerCase();
     if (normArgv === normMeta) {
@@ -294,7 +348,7 @@ if (isDirectExecution()) {
       process.exit(code);
     })
     .catch((err) => {
-      console.error(err);
+      logger.error(err);
       process.exit(1);
     });
 }

@@ -10,6 +10,8 @@ import {
   resolveAnnotations,
   fetchLatestCommitId,
   fetchRawAnnotationsContent,
+  getCachedAnnotationsFilePath,
+  getAnnotationsMetadataFilePath,
   type AnnotationsMetadata,
 } from "../../src/annotations.js";
 
@@ -39,8 +41,8 @@ describe("annotations management and date-based caching", () => {
     }
     try {
       fs.rmSync(tempBaseDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup error
+    } catch (err) {
+      console.warn(`Failed to clean up tempBaseDir: ${err}`);
     }
   });
 
@@ -289,6 +291,43 @@ describe("annotations management and date-based caching", () => {
       }
     });
 
+    it("logs commit id when quiet is false and commitId is known", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockImplementation((_url: string | URL | Request) => {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("-- annotations\n" + " ".repeat(1200)),
+        } as unknown as Response);
+      });
+
+      try {
+        const file = await downloadAndCacheAnnotations("abcdef1234567890", tempBaseDir, { quiet: false });
+        expect(fs.existsSync(file)).toBe(true);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("falls back to unknown commitId when metadata is missing on offline cached fallback", async () => {
+      const cacheSubdir = path.join(tempBaseDir, "no-meta-cache");
+      fs.mkdirSync(cacheSubdir, { recursive: true });
+      const cachedLua = path.join(cacheSubdir, "annotations.lua");
+      fs.writeFileSync(cachedLua, "-- valid annotations\n" + " ".repeat(1200));
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Offline"));
+
+      try {
+        const resolved = await resolveAnnotations({ cacheDir: cacheSubdir });
+        expect(resolved).toBe(cachedLua);
+        const meta = readAnnotationsMetadata(cacheSubdir);
+        expect(meta?.commitId).toBe("unknown");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it("sends GITHUB_TOKEN Authorization header in fetchLatestCommitId when available", async () => {
       const origToken = process.env.GITHUB_TOKEN;
       process.env.GITHUB_TOKEN = "ghp_mock_token_12345";
@@ -340,6 +379,144 @@ describe("annotations management and date-based caching", () => {
       await expect(fetchRawAnnotationsContent()).rejects.toThrow(/Downloaded annotations\.lua appears truncated or invalid/);
 
       globalThis.fetch = originalFetch;
+    });
+
+    it("returns cached file when upstream commit matches metadata", async () => {
+      const cacheSubdir = path.join(tempBaseDir, "commit-match-cache");
+      fs.mkdirSync(cacheSubdir, { recursive: true });
+      const cachedLua = path.join(cacheSubdir, "annotations.lua");
+      fs.writeFileSync(cachedLua, "-- valid annotations\n" + " ".repeat(1200));
+
+      const meta: AnnotationsMetadata = {
+        commitId: "matching123456",
+        lastChecked: "2026-01-01",
+        date: { year: 2026, month: 1, day: 1 },
+      };
+      fs.writeFileSync(path.join(cacheSubdir, "metadata.json"), JSON.stringify(meta));
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ sha: "matching123456" }),
+      } as unknown as Response);
+
+      try {
+        const resolved = await resolveAnnotations({ cacheDir: cacheSubdir });
+        expect(resolved).toBe(cachedLua);
+        const updatedMeta = readAnnotationsMetadata(cacheSubdir);
+        const { dateStr } = getTodayDateString();
+        expect(updatedMeta?.lastChecked).toBe(dateStr);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("throws network connection error on cold cache failure when not a filesystem error", async () => {
+      const coldCacheDir = path.join(tempBaseDir, "cold-cache-non-fs-error");
+      fs.mkdirSync(coldCacheDir, { recursive: true });
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Connection refused"));
+
+      try {
+        await expect(resolveAnnotations({ cacheDir: coldCacheDir })).rejects.toThrow(
+          /Failed to resolve nanos world API annotations\. Please check your network connection/
+        );
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("resolves paths via getCachedAnnotationsFilePath and getAnnotationsMetadataFilePath", () => {
+      expect(getCachedAnnotationsFilePath()).toContain("annotations.lua");
+      expect(getAnnotationsMetadataFilePath()).toContain("metadata.json");
+    });
+
+    it("resolves explicit customPath or throws if not found", async () => {
+      const customFile = path.join(tempBaseDir, "my-custom.lua");
+      fs.writeFileSync(customFile, "-- custom");
+      const resolved = await resolveAnnotations({ customPath: customFile });
+      expect(resolved).toBe(path.resolve(customFile));
+
+      await expect(resolveAnnotations({ customPath: "/nonexistent/custom.lua" })).rejects.toThrow(
+        /Custom annotations file not found/
+      );
+    });
+
+    it("resolves annotations from NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS environment variable", async () => {
+      const customEnvFile = path.join(tempBaseDir, "env-custom.lua");
+      fs.writeFileSync(customEnvFile, "-- env custom");
+      process.env.NANOS_ANNOTATIONS_PATH = customEnvFile;
+      const resolved = await resolveAnnotations();
+      expect(resolved).toBe(path.resolve(customEnvFile));
+
+      delete process.env.NANOS_ANNOTATIONS_PATH;
+      process.env.NANOS_ANNOTATIONS = customEnvFile;
+      const resolved2 = await resolveAnnotations();
+      expect(resolved2).toBe(path.resolve(customEnvFile));
+
+      process.env.NANOS_ANNOTATIONS = "/nonexistent/env-annotations.lua";
+      await expect(resolveAnnotations()).rejects.toThrow(
+        /Annotations file specified in environment not found/
+      );
+    });
+
+    it("downloads and updates annotations when upstream commit changes", async () => {
+      const cacheSubdir = path.join(tempBaseDir, "commit-changed-cache");
+      fs.mkdirSync(cacheSubdir, { recursive: true });
+      const cachedLua = path.join(cacheSubdir, "annotations.lua");
+      fs.writeFileSync(cachedLua, "-- old annotations\n" + " ".repeat(1200));
+
+      const oldMeta: AnnotationsMetadata = {
+        commitId: "old123456",
+        lastChecked: "2026-01-01",
+        date: { year: 2026, month: 1, day: 1 },
+      };
+      fs.writeFileSync(path.join(cacheSubdir, "metadata.json"), JSON.stringify(oldMeta));
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockImplementation((url: string | URL | Request) => {
+        const urlStr = String(url);
+        if (urlStr.includes("commits")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ sha: "abcdef0123456789" }),
+          } as unknown as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve("-- updated annotations\n" + " ".repeat(1200)),
+        } as unknown as Response);
+      });
+
+      try {
+        const resolved = await resolveAnnotations({ cacheDir: cacheSubdir, quiet: true });
+        expect(resolved).toBe(cachedLua);
+        const updatedMeta = readAnnotationsMetadata(cacheSubdir);
+        expect(updatedMeta?.commitId).toBe("abcdef0123456789");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("returns bundled annotations when annotations.lua exists in package root", async () => {
+      const root = path.join(tempBaseDir, "mock-root");
+      fs.mkdirSync(root, { recursive: true });
+      const fakeBundled = path.join(root, "annotations.lua");
+      fs.writeFileSync(fakeBundled, "-- bundled annotations\n" + " ".repeat(1200));
+
+      const configModule = await import("../../src/config.js");
+      const rootSpy = vi.spyOn(configModule, "getPackageRoot").mockReturnValue(root);
+
+      try {
+        const resolved = await resolveAnnotations();
+        expect(resolved).toBe(fakeBundled);
+      } finally {
+        rootSpy.mockRestore();
+      }
     });
   });
 });

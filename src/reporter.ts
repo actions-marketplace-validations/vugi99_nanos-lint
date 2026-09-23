@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileUriToPath } from "./types.js";
+import { logger } from "./logger.js";
 import type { CheckResult, DiagnosticSeverity } from "./types.js";
 
 const SEVERITY_NAMES: Record<number, DiagnosticSeverity> = {
@@ -132,8 +133,10 @@ export function formatPretty(
       if (fs.existsSync(filePath)) {
         fileContent = fs.readFileSync(filePath, "utf-8").split(/\r?\n/);
       }
-    } catch {
-      // Ignore read error
+    } catch (err) {
+      logger.debug(
+        `Failed to read file snippet for ${filePath}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
 
     for (const d of diags) {
