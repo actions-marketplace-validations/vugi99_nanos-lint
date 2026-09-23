@@ -10,8 +10,9 @@ describe("system paths resolution via env-paths", () => {
     // developer's real ~/.cache/nanos-lint.
     const testRoot = process.env.NANOS_TEST_CACHE_ROOT;
     expect(testRoot, "Vitest global setup must provide an isolated cache root").toBeTruthy();
-    expect(systemPaths.cache.startsWith(testRoot as string)).toBe(true);
-    expect(systemPaths.temp.startsWith(testRoot as string)).toBe(true);
+    const normalizedRoot = (testRoot as string).toLowerCase();
+    expect(systemPaths.cache.toLowerCase().startsWith(normalizedRoot)).toBe(true);
+    expect(systemPaths.temp.toLowerCase().startsWith(normalizedRoot)).toBe(true);
   });
 
   it("resolves system paths structure with expected properties", () => {

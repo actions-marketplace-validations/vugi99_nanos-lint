@@ -465,8 +465,13 @@ describe("luals utilities", () => {
           expect(result.totalProblems).toBeGreaterThan(0);
           expect(result.totalFiles).toBe(1);
           // Diagnostics of other files in the workspace must be filtered out.
+          // `fileUriToPath()` yields forward slashes (and an upper-cased drive
+          // letter) on Windows, so compare the resolved paths exactly like
+          // `runLuaLSCheck()` does when it filters them.
           for (const uri of Object.keys(result.diagnostics)) {
-            expect(fileUriToPath(uri)).toBe(failFile);
+            expect(path.resolve(fileUriToPath(uri)).toLowerCase()).toBe(
+              path.resolve(failFile).toLowerCase()
+            );
           }
         } finally {
           if (resolved.isTemp && fs.existsSync(resolved.configPath)) {

@@ -62,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--log-level=silent`**: the CLI printed the full diagnosis report and command output regardless of the log level; those paths now respect `silent`.
 - Unit tests that reached the network or the system cache during LuaLS resolution now inject an isolated cache directory, and the `resolveLuaLSBinary()` test for the offline fallback now actually exercises the fallback download path instead of an unrelated explicit-version path.
 - Wall-clock budgets in `tests/unit/config.test.ts` (ReDoS regression guards) were raised to a wide margin so the checks cannot flake on slow CI runners while still failing on a real complexity regression.
+- **Windows CI**: the file-scoped diagnostic assertion in `tests/unit/luals-utils.test.ts` now resolves and lower-cases both paths before comparing (exactly like `runLuaLSCheck()` filters them), instead of comparing the forward-slash path returned by `fileUriToPath()` against a backslash Windows path.
 
 ### Security
 - Hardened `.github/workflows/release.yml` against command injection from workflow dispatch inputs and detected git tags by removing every `${{ }}` expression from `run:` script text.
