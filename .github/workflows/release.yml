@@ -3,9 +3,8 @@ name: Release
 on:
   workflow_run:
     workflows: ["CI"]
-    # No `branches:` filter on purpose: it matches the triggering run's branch and
-    # a tag push reports the tag name, so tag-triggered CI would be dropped. The
-    # job `if:` plus tag detection below decide whether anything is released.
+    # No `branches:` filter: it matches the triggering run's branch, and a tag push
+    # reports the tag name, so tag-triggered CI would be dropped.
     types:
       - completed
   workflow_dispatch:
@@ -15,16 +14,26 @@ on:
         required: false
         default: ''
 
+# One release at a time per commit, so duplicate runs cannot race each other.
+concurrency:
+  group: release-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: false
+
 jobs:
   build-and-release:
     name: Build & Publish Release
     runs-on: ubuntu-latest
+    # CI runs for master/main pushes, tag pushes and pull requests. Only the
+    # tag-triggered run may release: a branch push of the same commit sees the tag
+    # at HEAD too, which is what released every tag twice.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.head_repository.full_name == github.repository
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.head_branch != 'master' &&
+        github.event.workflow_run.head_branch != 'main'
       )
     # contents: write for the release and floating tag; id-token stays with publish-npm.
     permissions:
@@ -44,6 +53,7 @@ jobs:
         env:
           # Via env (never interpolated into `run:` text): prevents command injection.
           TAG_INPUT: ${{ github.event.inputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -68,6 +78,15 @@ jobs:
               exit 1
               ;;
           esac
+
+          # Idempotent: a re-pushed tag or a re-run must not build or publish again.
+          if curl -fsS -o /dev/null \
+               -H "Authorization: token ${GITHUB_TOKEN}" \
+               "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}"; then
+            echo "Release ${TAG} already exists. Skipping release build."
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           echo "Found release tag: $TAG"
           echo "tag_name=$TAG" >> "$GITHUB_OUTPUT"
@@ -363,4 +382,11 @@ jobs:
 
       # Version comes from package.json; the build job already validated the tag.
       - name: Publish to npm
-        run: npm publish --access public
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "nanos-lint@${VERSION}" version >/dev/null 2>&1; then
+            echo "nanos-lint@${VERSION} is already published; skipping."
+            exit 0
+          fi
+          npm publish --access public
