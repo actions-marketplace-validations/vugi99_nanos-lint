@@ -152,6 +152,8 @@ OPTIONS:
 
 Only `NANOS_LOG_LEVEL` controls the logging level; a generic `LOG_LEVEL` environment variable is intentionally not read, because CI images commonly set it.
 
+These variables configure the linter itself. The variables that only affect the repository's own test suite (`NANOS_LIVE_TESTS`, `NANOS_TEST_CACHE_ROOT`) are documented under [Test Suite Environment Variables](#test-suite-environment-variables).
+
 ---
 
 ## Workspace Configuration (`.luarc.json`)
@@ -219,6 +221,23 @@ npm run test:coverage
 
 # Offline: skip live LuaLS tests, perform no network access, disable coverage thresholds
 NANOS_LIVE_TESTS=0 npm run test:coverage
+```
+
+### Test Suite Environment Variables
+
+By default the suite runs **everything**, including the live LuaLS and annotations tests. `tests/global-setup.ts` downloads the LuaLS binary and the nanos world annotations file **exactly once per run** into an isolated temporary cache (removed afterwards, unless you point `NANOS_TEST_CACHE_ROOT` at your own directory); your real `~/.cache/nanos-lint` is never read or written, and the run fails if any test downloads the LuaLS archive a second time.
+
+| Variable | Description |
+| :--- | :--- |
+| `NANOS_LIVE_TESTS` | `0` (or `false`/`no`/`off`) runs the hermetic offline subset: live LuaLS/annotations tests are skipped, no network access is performed, and the coverage thresholds are not enforced (a warning is printed). Any other value, or leaving it unset, runs the full suite and requires the shared fixtures to resolve — if they cannot, the run fails loudly instead of silently skipping tests. |
+| `NANOS_TEST_CACHE_ROOT` | Uses the given directory as the isolated test cache instead of a fresh temporary one. Useful to avoid re-downloading LuaLS on repeated local runs; the counter-based single-download check still applies per run. |
+
+```bash
+# Fully offline run (no network access at all)
+NANOS_LIVE_TESTS=0 npm run test:coverage
+
+# Full run reusing a warm isolated cache for faster repeat runs
+NANOS_TEST_CACHE_ROOT=/tmp/nanos-lint-tests npm run test:coverage
 ```
 
 See [AGENTS.md](AGENTS.md) for development philosophy and quality gate requirements.

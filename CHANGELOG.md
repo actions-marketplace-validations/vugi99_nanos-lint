@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions cache keys in `.github/workflows/ci.yml` and `action.yml` now include the current ISO week so the entry is refreshed instead of being restored forever without ever being saved again; the previously dead restore-key prefixes (`luals-*`, and the exact-key-plus-dash form) were replaced with working prefixes.
 - `action.yml` fallback execution pins `npx --yes nanos-lint@2.6.1` exactly instead of the `^2.6.1` range, so a caller pinning an action tag can no longer execute a different minor version.
 - Test suite modernized: previously vacuous/conditional assertions in `tests/unit/luals-cache.test.ts`, `tests/unit/luals-utils.test.ts`, `tests/unit/cli.test.ts`, `tests/unit/config.test.ts`, and `tests/unit/regressions.test.ts` were replaced with deterministic assertions, missing fixtures are now asserted instead of silently skipped, `mockClear()` is used between flag variants, and the `-i/--ignore` regression test drives the real CLI instead of a locally built Commander program.
+- `README.md` now documents the test-suite environment variables (`NANOS_LIVE_TESTS`, `NANOS_TEST_CACHE_ROOT`), the single shared LuaLS download per run, and the isolated test cache; the runtime environment variable table links to it.
 
 ### Removed
 - 1-vCPU `ubuntu-slim` runner from the CI test matrix.
