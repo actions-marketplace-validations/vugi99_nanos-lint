@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-09-23
+
 ### Added
 - Cache status and inspection command (`nanos-lint cache status`, `cache info`, and `cache-status`) with human-readable terminal output and `--json` export displaying cached LuaLS binaries, annotations commit SHA, metadata freshness, and disk usage (#14).
 - Cache inspection and sizing utilities (`getCacheStatus`, `formatCacheStatusPretty`, `getDirectorySize`, `formatBytes`) exported in `src/cache-status.ts` and `src/paths.ts` (#14).
@@ -50,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extracted `countCheckedFiles()` from `src/luals/runner.ts` to `src/luals/files.ts`, keeping `runner.ts` well under the 500-line limit.
 - Fixed legacy cache path collision on Linux where `getLegacyCacheDir` resolved to the same directory as the primary cache, preventing redundant probes in `findExistingLuaLSDir` and respecting `reuseExisting: false` in `resolveLuaLSBinary`.
 - Duplicate releases: pushing a release commit to `master` and its tag produced two qualifying CI runs, so the release ran twice and the second `npm publish` failed with a 409. The release job now only runs for tag-triggered CI, skips a tag whose GitHub release already exists, and skips `npm publish` when the version is already published.
+
+### Security
+- Dropped security support for versions `< 2.8.0` in `SECURITY.md`.
 
 ## [2.7.0] - 2026-09-23
 
