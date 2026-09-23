@@ -11,11 +11,7 @@ import {
 } from "../../src/luals.js";
 import { isLiveTestsEnabled, seedCachedLuaLS } from "../helpers/live.js";
 
-/**
- * Records every binary validation spawn (`execFileSync(binary, ["--version"])`)
- * performed through `isBinaryValid()` while still delegating to the real
- * implementation.
- */
+/** Records every `isBinaryValid()` spawn while delegating to the real call. */
 const { execFileSyncCalls } = vi.hoisted(() => ({ execFileSyncCalls: [] as string[] }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -35,7 +31,7 @@ describe.skipIf(!isLiveTestsEnabled())("resolveLuaLSBinary cache handling", () =
     const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-warm-cache-"));
     try {
       const latest = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
-      // Two additional (older) versions that must not be probed on the warm path.
+      // Older versions that must not be probed on the warm path.
       await seedCachedLuaLS(baseCacheDir, "3.19.0");
       await seedCachedLuaLS(baseCacheDir, "3.18.0");
 
@@ -52,8 +48,7 @@ describe.skipIf(!isLiveTestsEnabled())("resolveLuaLSBinary cache handling", () =
       const resolved = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
 
       expect(resolved).toBe(latest);
-      // Exactly one validation spawn for the whole resolution: the metadata fast
-      // path must run before enumerating (and validating) every cached version.
+      // One spawn in total: the fast path must not enumerate the cache.
       expect(execFileSyncCalls).toEqual([latest]);
     } finally {
       fs.rmSync(baseCacheDir, { recursive: true, force: true });

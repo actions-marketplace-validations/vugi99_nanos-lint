@@ -52,8 +52,8 @@ nanos-lint/
 │   ├── fail/                # Invalid Lua fixtures (must produce expected diagnostics)
 │   ├── unit/                # Vitest unit tests
 │   ├── integration/         # Vitest integration tests with live LuaLS execution
-│   ├── global-setup.ts      # Vitest global setup: prepares one isolated cache and downloads the shared LuaLS binary/annotations exactly once per run
-│   └── helpers/             # Shared live-test fixtures, isolated-cache setup, and the LuaLS download counter
+│   ├── global-setup.ts      # Vitest global setup: isolated cache + one shared LuaLS download per run
+│   └── helpers/             # Live-test fixtures, isolated-cache setup, download counter
 ├── AGENTS.md                # This guideline document
 ├── CHANGELOG.md             # Keep a Changelog 1.1.0 version history
 ├── README.md                # User-facing documentation
@@ -80,7 +80,7 @@ npm run build
 npm run test:coverage
 ```
 
-These quality gates are automated in `.githooks/pre-commit`. The hook is installed by the `prepare` npm script (run automatically by `npm install`), which executes `git config core.hooksPath .githooks`; because that setting is repo-local git config, a fresh clone does not carry it. The hook therefore runs on every `git commit` only after dependencies have been installed at least once. `.gitattributes` forces LF endings for `.githooks/**` and shell scripts so the hook also works on Windows (Git for Windows).
+These quality gates are automated in `.githooks/pre-commit`, which the `prepare` npm script installs via `git config core.hooksPath .githooks`. That setting is repo-local, so a fresh clone only runs the hook after `npm install`. `.gitattributes` keeps hook and shell scripts on LF so it also works on Windows.
 
 If any of the above commands fail or emit warnings, investigate and fix them before responding to the user.
 
@@ -88,15 +88,13 @@ Additionally, whenever you make changes to the codebase, **you must update `CHAN
 
 ### Offline Test Mode
 
-By default, `npm test` and `npm run test:coverage` run the full suite, including the live LuaLS integration tests. `tests/global-setup.ts` downloads a single shared LuaLS binary (and the annotations file) **exactly once per test run** into an isolated temporary cache; no developer or CI cache outside that directory is read or written.
-
-Setting `NANOS_LIVE_TESTS=0` skips all live tests, performs no network access, and disables the coverage thresholds (the offline subset cannot meet them); the run prints a warning. Use it when working offline:
+The full suite (including live LuaLS tests) runs by default. `tests/global-setup.ts` downloads the shared LuaLS binary and annotations **once per run** into an isolated temporary cache, so no user or CI cache is read or written. `NANOS_LIVE_TESTS=0` skips the live tests, performs no network access, and disables the coverage thresholds:
 
 ```bash
 NANOS_LIVE_TESTS=0 npm run test:coverage
 ```
 
-Any other value (or leaving `NANOS_LIVE_TESTS` unset) requires the live tests to work: if the shared binary cannot be resolved, the test run fails loudly instead of silently skipping tests.
+Otherwise the live fixtures must resolve: failures abort the run instead of silently skipping tests.
 
 ---
 

@@ -17,8 +17,7 @@ describe("cli module flag and command parsing", () => {
       expect(code1).toBe(0);
       expect(spy).toHaveBeenCalledWith(expect.stringContaining("Usage: nanos-lint"));
 
-      // Clear between invocations so the second assertion cannot be satisfied by
-      // the first call's output.
+      // Clear so the second assertion cannot match the first call's output.
       spy.mockClear();
 
       const code2 = await runCLI(["-h"]);

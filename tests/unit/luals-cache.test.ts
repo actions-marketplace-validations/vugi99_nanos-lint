@@ -119,8 +119,7 @@ describe("LuaLS weekly cache check and version management", () => {
       fs.mkdirSync(v2Dir, { recursive: true });
       fs.writeFileSync(path.join(v2Dir, ".complete"), "different-version");
 
-      // Version 3: unparseable version name (kept inside tempBaseDir so no stray
-      // directory is ever created outside the test's own temporary directory)
+      // Version 3: unparseable version name (inside tempBaseDir, never ../).
       const v3Dir = path.join(tempBaseDir, "invalid version");
       fs.mkdirSync(v3Dir, { recursive: true });
       fs.writeFileSync(path.join(v3Dir, ".complete"), "invalid version");
@@ -262,11 +261,7 @@ describe("LuaLS weekly cache check and version management", () => {
   });
 
   describe.skipIf(!liveTestsEnabled)("resolveLuaLSBinary weekly caching behavior", () => {
-    /**
-     * Runs `fn` against a throw-away LuaLS cache base directory. Nothing is ever
-     * read from or written to the shared system cache: `cacheDir` is injected
-     * into `resolveLuaLSBinary`, so the developer's real cache stays untouched.
-     */
+    /** Runs `fn` against a throw-away LuaLS cache base directory. */
     async function withIsolatedCache<T>(fn: (baseCacheDir: string) => Promise<T>): Promise<T> {
       const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-luals-resolve-"));
       try {

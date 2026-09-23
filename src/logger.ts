@@ -35,9 +35,7 @@ export class Logger {
     if (initialLevel && isValidLogLevel(initialLevel)) {
       this.level = initialLevel;
     } else {
-      // Only the namespaced variable is honored: a bare LOG_LEVEL is commonly
-      // set by CI images and unrelated tooling, so it must not silently change
-      // nanos-lint's verbosity.
+      // A bare LOG_LEVEL is commonly set by unrelated tooling, so it is ignored.
       const envLevel = process.env.NANOS_LOG_LEVEL;
       if (envLevel && isValidLogLevel(envLevel.trim().toLowerCase())) {
         this.level = envLevel.trim().toLowerCase() as LogLevel;
@@ -59,12 +57,7 @@ export class Logger {
     return LOG_LEVEL_PRIORITY[this.level] >= LOG_LEVEL_PRIORITY[level];
   }
 
-  /**
-   * Whether command results (the diagnosis report, `init`/`clean-cache`
-   * confirmations, ...) should be written to stdout. Only `silent` disables
-   * them, so `--quiet`/`--log-level=error` still print the report while
-   * suppressing progress messages.
-   */
+  /** Whether command results should be written; only `silent` disables them. */
   public isOutputEnabled(): boolean {
     return this.level !== "silent";
   }

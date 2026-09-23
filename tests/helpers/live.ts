@@ -5,11 +5,7 @@ import { resolveAnnotations } from "../../src/annotations.js";
 
 const DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
 
-/**
- * Live tests execute the real LuaLS binary and (through the CLI) resolve the
- * real annotations file. They run by default and are skipped only when
- * `NANOS_LIVE_TESTS` is explicitly set to a falsy value.
- */
+/** Live tests run by default and are skipped only for a falsy `NANOS_LIVE_TESTS`. */
 export function isLiveTestsEnabled(): boolean {
   const raw = (process.env.NANOS_LIVE_TESTS ?? "").trim().toLowerCase();
   return !DISABLED_VALUES.has(raw);
@@ -18,12 +14,8 @@ export function isLiveTestsEnabled(): boolean {
 let sharedBinaryPromise: Promise<string> | null = null;
 
 /**
- * Resolves the LuaLS binary shared by the whole test run.
- *
- * `tests/global-setup.ts` downloads it exactly once into the isolated test
- * cache before any worker starts, so this call is a cache hit in practice.
- * Within a worker the promise is memoized, so concurrent tests await the same
- * resolution instead of racing into separate downloads.
+ * Shared LuaLS binary: a cache hit thanks to the global setup, memoized per
+ * worker so concurrent tests await the same resolution.
  */
 export function getSharedLuaLSBinary(): Promise<string> {
   sharedBinaryPromise ??= resolveLuaLSBinary(undefined, { quiet: true });
@@ -38,17 +30,11 @@ export function getSharedAnnotations(): Promise<string> {
   return sharedAnnotationsPromise;
 }
 
-/**
- * Copies the shared LuaLS installation into `baseCacheDir/<version>` and marks
- * it complete, so tests can exercise cache-specific behaviour with a real,
- * functional binary without mutating any shared directory.
- *
- * @returns the path of the seeded binary.
- */
+/** Copies the shared LuaLS install into `baseCacheDir/<version>`; returns its binary path. */
 export async function seedCachedLuaLS(baseCacheDir: string, version: string): Promise<string> {
   const info = getPlatformInfo(version);
   const binary = await getSharedLuaLSBinary();
-  // <version>/<binaryRelativePath> -> the version directory the cache expects.
+  // Walk up from the binary to the version directory the cache expects.
   const parentHops = info.binaryRelativePath.split(path.sep).length;
   const sourceDir = path.resolve(binary, ...Array(parentHops).fill(".."));
   const targetDir = path.join(baseCacheDir, version);

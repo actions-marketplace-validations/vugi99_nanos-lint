@@ -5,9 +5,7 @@ import path from "node:path";
 
 describe("system paths resolution via env-paths", () => {
   it("resolves every path inside the isolated per-run test cache root", () => {
-    // Hermeticity canary: the Vitest harness relocates the platform cache and
-    // temp directories into a throw-away root, so no test can read or write the
-    // developer's real ~/.cache/nanos-lint.
+    // Canary: the harness must relocate cache and temp out of the real home.
     const testRoot = process.env.NANOS_TEST_CACHE_ROOT;
     expect(testRoot, "Vitest global setup must provide an isolated cache root").toBeTruthy();
     const normalizedRoot = (testRoot as string).toLowerCase();

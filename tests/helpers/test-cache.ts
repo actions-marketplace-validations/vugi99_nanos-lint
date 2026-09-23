@@ -2,28 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-/**
- * Per-run isolated cache used by the whole Vitest run.
- *
- * `vitest.config.ts` creates the directory (unless the developer supplied
- * `NANOS_TEST_CACHE_ROOT` to reuse a warm one) and every worker inherits the
- * environment variables that relocate the platform cache directories, so no
- * test can ever read or write the developer's real `~/.cache/nanos-lint`.
- */
+/** Isolated cache root of the run; set by `vitest.config.ts`. */
 export const TEST_CACHE_ROOT_ENV = "NANOS_TEST_CACHE_ROOT";
 
-/**
- * Set by `vitest.config.ts` when it created the cache root itself. Only such
- * roots are deleted again after the run; a user supplied root is never touched.
- */
+/** `"1"` when the config created the root itself; only then is it deleted. */
 export const TEST_CACHE_EPHEMERAL_ENV = "NANOS_TEST_CACHE_EPHEMERAL";
 
-/**
- * Environment variables that relocate every cache path `env-paths` resolves:
- * `XDG_CACHE_HOME` on Linux, `HOME` on macOS, `LOCALAPPDATA`/`APPDATA` on
- * Windows. `TMPDIR`/`TEMP`/`TMP` are relocated as well so temporary artifacts
- * (LuaLS check output, annotation staging) stay inside the run directory.
- */
+/** Relocates the cache and temp paths `env-paths`/`os.tmpdir()` resolve. */
 export function testCacheEnv(root: string): Record<string, string> {
   const tmp = path.join(root, "tmp");
   if (process.platform === "win32") {
@@ -55,11 +40,7 @@ export function applyTestCacheEnv(target: NodeJS.ProcessEnv, root: string): void
   }
 }
 
-/**
- * Returns the cache root of this run, creating a fresh ephemeral one when
- * `NANOS_TEST_CACHE_ROOT` is not set. Idempotent: repeated calls (config
- * reloads in watch mode) reuse the value already stored in the environment.
- */
+/** Cache root of this run, created once and reused by later calls. */
 export function ensureTestCacheRoot(): { root: string; ephemeral: boolean } {
   const existing = process.env[TEST_CACHE_ROOT_ENV];
   if (existing) {

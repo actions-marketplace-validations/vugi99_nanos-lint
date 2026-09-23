@@ -197,13 +197,8 @@ export function getBaseLuaLSCacheDir(): string {
 }
 
 /**
- * Returns the cache directory of a LuaLS version.
- *
- * @param version       LuaLS version/tag.
- * @param baseCacheDir  Base directory holding the version sub-directories.
- *                      Defaults to the platform system cache. Injecting a
- *                      different directory (see `ResolveLuaLSOptions.cacheDir`)
- *                      keeps a caller fully isolated from the shared cache.
+ * Cache directory of a LuaLS version. `baseCacheDir` defaults to the system
+ * cache and can be overridden to keep a caller isolated from it.
  */
 export function getCacheDir(
   version: string = FALLBACK_LUALS_VERSION,
@@ -363,20 +358,13 @@ export function cleanupOldCachedLuaLSVersions(
 export interface DownloadOptions {
   quiet?: boolean;
   reuseExisting?: boolean;
-  /**
-   * Base directory searched for an already installed copy of the requested
-   * version when `reuseExisting` is enabled. Defaults to the platform system
-   * cache (plus legacy and package-bundled locations).
-   */
+  /** Base directory searched for an installed copy when reusing. Defaults to the system cache. */
   cacheDir?: string;
 }
 
 /**
- * Locates an existing, valid LuaLS directory for the specified version.
- * Checks primary system cache, legacy cache, and package bundled root.
- *
- * @param baseCacheDir Overrides the primary cache base directory (defaults to
- *                     the platform system cache).
+ * Locates an existing, valid LuaLS directory for the specified version in the
+ * primary cache (`baseCacheDir`), the legacy cache, or the package root.
  */
 export function findExistingLuaLSDir(
   version: string,
@@ -657,18 +645,9 @@ export async function downloadAndExtractLuaLS(
 
 export interface ResolveLuaLSOptions {
   quiet?: boolean;
-  /**
-   * Base directory used for the LuaLS cache (the parent of the per-version
-   * directories, the metadata file, and the temporary extraction folders).
-   * Defaults to the platform system cache. Useful for tests and embedders that
-   * must not touch the user's shared cache.
-   */
+  /** Cache base directory (version directories, metadata, temp extraction). Defaults to the system cache. */
   cacheDir?: string;
-  /**
-   * When `false`, an already installed copy of the requested version (legacy
-   * cache or package bundle) is not reused and the archive is always fetched
-   * from GitHub. Defaults to `true`.
-   */
+  /** Set to `false` to always fetch the archive instead of reusing an installed copy. */
   reuseExisting?: boolean;
 }
 
@@ -692,8 +671,6 @@ export async function resolveLuaLSBinary(
 
   const isDefaultOrLatest = !version || version === "latest";
 
-  // Cache base directory: the platform system cache unless the caller injected
-  // an isolated one.
   const baseCacheDir = options?.cacheDir ?? getBaseLuaLSCacheDir();
 
   // When a specific version is explicitly requested (not "latest"):
@@ -803,10 +780,7 @@ export async function resolveLuaLSBinary(
   const currentWeek = getIsoWeek();
   const metadata = readLuaLSMetadata(baseCacheDir);
 
-  // Fast path: the latest version was already resolved during the current week
-  // and its cached binary is still functional. This intentionally runs before
-  // listCachedLuaLSVersions() so the common warm-cache path does not spawn the
-  // LuaLS binary once per cached version just to enumerate the cache.
+  // Fast path first: enumerating the cache would spawn every cached binary.
   if (metadata && metadata.lastCheckedWeek === currentWeek && metadata.latestVersion) {
     const info = getPlatformInfo(metadata.latestVersion);
     const cachedPath = path.join(
@@ -818,11 +792,9 @@ export async function resolveLuaLSBinary(
     }
   }
 
-  // Enumerate the cache only when the fast path did not produce a usable binary.
   const cachedVersions = listCachedLuaLSVersions(baseCacheDir);
 
-  // Slow path within the same week: the recorded version is unusable, but
-  // another fully validated cached version can still be reused without network.
+  // Same week, but the recorded version is unusable: reuse another cached one.
   if (metadata && metadata.lastCheckedWeek === currentWeek && cachedVersions.length > 0) {
     const fallbackVersion = cachedVersions[0];
     const info = getPlatformInfo(fallbackVersion);

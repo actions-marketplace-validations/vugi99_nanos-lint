@@ -14,8 +14,7 @@ const binCli = path.join(rootDir, "bin", "nanos-lint.js");
 
 describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression tests", () => {
   beforeAll(async () => {
-    // The global setup warmed the isolated cache for this run; resolving here
-    // guarantees the fixtures are present before the first subprocess starts.
+    // Cache hits: guarantees the fixtures exist before the first subprocess.
     await Promise.all([getSharedLuaLSBinary(), getSharedAnnotations()]);
 
     if (!fs.existsSync(distCli)) {

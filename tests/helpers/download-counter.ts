@@ -2,20 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 /**
- * Test-harness guard that records every real LuaLS archive download performed
- * during a test run.
- *
- * The suite is required to download the shared LuaLS binary exactly once per
- * run (in `tests/global-setup.ts`, before any worker starts) and to reuse that
- * copy everywhere else. The counter wraps `globalThis.fetch` in the global
- * setup process and in every worker (`setupFiles`), appending a line per real
- * `releases/download/...lua-language-server...` request to a log inside the
- * isolated cache root; the global setup teardown then fails the run when more
- * than one download happened.
- *
- * Mocked `fetch` implementations installed by individual tests intentionally
- * bypass the counter: they never touch the network, so they cannot be part of a
- * duplicate-download regression.
+ * Records every real LuaLS archive download of a run, so the global setup can
+ * fail the run when the shared binary is fetched more than once. Mocked `fetch`
+ * implementations never touch the network and therefore bypass the counter.
  */
 export const LUALS_DOWNLOAD_LOG_FILENAME = "luals-downloads.log";
 
@@ -27,10 +16,7 @@ function isLuaLSArchiveUrl(url: string): boolean {
   return url.includes("lua-language-server/releases/download/");
 }
 
-/**
- * Installs the download counter on `globalThis.fetch`. Idempotent, and it never
- * replaces a `fetch` that a test has already replaced.
- */
+/** Installs the counter on `globalThis.fetch` (idempotent). */
 export function installLuaLSDownloadCounter(cacheRoot: string): void {
   const currentFetch = globalThis.fetch as typeof fetch & CounterMarkedFetch;
   if (currentFetch.__nanosLuaLSDownloadCounter) {
@@ -63,11 +49,7 @@ export function installLuaLSDownloadCounter(cacheRoot: string): void {
   globalThis.fetch = countingFetch as typeof fetch;
 }
 
-/**
- * Clears the download log. Called once by the global setup at the start of a
- * run, so a reused (`NANOS_TEST_CACHE_ROOT`) directory never reports downloads
- * from an earlier run.
- */
+/** Clears the log so a reused cache root does not report earlier runs. */
 export function resetLuaLSDownloadLog(cacheRoot: string): void {
   const logPath = path.join(cacheRoot, LUALS_DOWNLOAD_LOG_FILENAME);
   fs.rmSync(logPath, { force: true });

@@ -23,12 +23,7 @@ function getVersionString(): string {
   }
 }
 
-/**
- * Writes command results (reports, confirmations) to stdout unless the user
- * asked for complete silence with `--log-level=silent`. Unlike logger.info()
- * this is not gated by the `warn` default level, so the report is always shown
- * by default while `--quiet`/`--log-level=error` still suppress only progress.
- */
+/** Writes command results to stdout unless the level is `silent`. */
 function writeOutput(message: string): void {
   if (logger.isOutputEnabled()) {
     console.log(message);

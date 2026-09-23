@@ -51,12 +51,8 @@ runs:
       with:
         node-version: '24'
 
-    # The ISO week in the cache key is what makes the entry refresh: with
-    # `luals-version: latest` the resolved LuaLS build changes over time, and a
-    # static key would always hit exactly and therefore never save a newer binary.
-    # The restore-keys below are prefixes, so a new week still reuses the entries
-    # written by previous weeks (and by other pinned versions) as a warm start.
-    # This step is unconditionally cheap (a single `date` call), even with cache: false.
+    # The ISO week refreshes the cache entry (a static key would never be saved
+    # again); restore-keys fall back to previous weeks. Cheap: one `date` call.
     - name: Compute cache week
       id: cacheweek
       shell: bash
@@ -115,16 +111,12 @@ runs:
           ARGS+=("--quiet")
         fi
 
-        # `dist/` is gitignored, so a `uses: vugi99/nanos-lint@<ref>` consumer never
-        # receives it and always falls through to the pinned npx install below. The
-        # first branch only applies to a local checkout (`uses: ./`) or a vendored
-        # copy that ran `npm run build`.
+        # dist/ is gitignored, so `uses: vugi99/nanos-lint@<ref>` consumers always
+        # take the npx branch; the first one is for local `uses: ./` checkouts.
         if [ -f "$ACTION_PATH/dist/cli.js" ]; then
           node "$ACTION_PATH/dist/cli.js" "${ARGS[@]}"
         else
-          # Exact version on purpose: a floating range could run a different
-          # minor/patch than the tag the caller pinned (e.g. nanos-lint@v2.6.1
-          # running 2.9.x). This pin must be updated together with "version" in
-          # package.json whenever a new release is cut.
+          # Exact version: a range could run a different release than the pinned
+          # tag. Bump together with "version" in package.json.
           npx --yes nanos-lint@2.6.1 "${ARGS[@]}"
         fi

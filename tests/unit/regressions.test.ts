@@ -86,7 +86,7 @@ describe("Regression tests for audit review issues", () => {
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       try {
-        // Simulates: check --ignore some_dir tests/pass/character.lua
+        // check --ignore some_dir tests/pass/character.lua
         const code = await runCLI(["check", "--ignore", "some_dir", "tests/pass/character.lua"]);
         expect(code).toBe(0);
 
