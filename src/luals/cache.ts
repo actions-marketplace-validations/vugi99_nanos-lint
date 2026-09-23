@@ -211,17 +211,19 @@ export function findExistingLuaLSDir(
 
   // 2. Legacy cache (nanos-lint <= 2.2.1)
   const legacyCache = getLegacyCacheDir(version);
-  const legacyBin = path.join(legacyCache, info.binaryRelativePath);
-  const legacyMarker = path.join(legacyCache, ".complete");
-  if (fs.existsSync(legacyMarker)) {
-    try {
-      if (fs.readFileSync(legacyMarker, "utf-8").trim() === version && isBinaryValid(legacyBin)) {
-        return legacyCache;
+  if (path.resolve(legacyCache) !== path.resolve(primaryCache)) {
+    const legacyBin = path.join(legacyCache, info.binaryRelativePath);
+    const legacyMarker = path.join(legacyCache, ".complete");
+    if (fs.existsSync(legacyMarker)) {
+      try {
+        if (fs.readFileSync(legacyMarker, "utf-8").trim() === version && isBinaryValid(legacyBin)) {
+          return legacyCache;
+        }
+      } catch (err) {
+        logger.debug(
+          `[luals] Error checking legacy LuaLS cache marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
-    } catch (err) {
-      logger.debug(
-        `[luals] Error checking legacy LuaLS cache marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
-      );
     }
   }
 

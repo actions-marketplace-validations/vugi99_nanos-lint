@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Promoted `redefined-local`, `unused-local`, and `unused-vararg` diagnostics from `Hint` to `Warning` in `templates/.luarc.json`.
 
 ### Fixed
+- Fixed legacy cache path collision on Linux where `getLegacyCacheDir` resolved to the same directory as the primary cache, preventing redundant probes in `findExistingLuaLSDir` and respecting `reuseExisting: false` in `resolveLuaLSBinary`.
 - Duplicate releases: pushing a release commit to `master` and its tag produced two qualifying CI runs, so the release ran twice and the second `npm publish` failed with a 409. The release job now only runs for tag-triggered CI, skips a tag whose GitHub release already exists, and skips `npm publish` when the version is already published.
 
 ## [2.7.0] - 2026-09-23

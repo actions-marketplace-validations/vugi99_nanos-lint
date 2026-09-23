@@ -103,57 +103,61 @@ export async function resolveLuaLSBinary(
     }
 
     // Probe legacy cache location from nanos-lint <= 2.2.1
-    const legacyDir = getLegacyCacheDir(resolvedVersion);
-    const legacyPath = path.join(legacyDir, info.binaryRelativePath);
-    const legacyMarker = path.join(legacyDir, ".complete");
+    if (options?.reuseExisting !== false) {
+      const legacyDir = getLegacyCacheDir(resolvedVersion);
+      if (path.resolve(legacyDir) !== path.resolve(cachedDir)) {
+        const legacyPath = path.join(legacyDir, info.binaryRelativePath);
+        const legacyMarker = path.join(legacyDir, ".complete");
 
-    if (fs.existsSync(legacyPath)) {
-      let validLegacy = false;
-      if (fs.existsSync(legacyMarker)) {
-        try {
-          const stored = fs.readFileSync(legacyMarker, "utf-8").trim();
-          if (stored === resolvedVersion && isBinaryValid(legacyPath)) {
+        if (fs.existsSync(legacyPath)) {
+          let validLegacy = false;
+          if (fs.existsSync(legacyMarker)) {
+            try {
+              const stored = fs.readFileSync(legacyMarker, "utf-8").trim();
+              if (stored === resolvedVersion && isBinaryValid(legacyPath)) {
+                validLegacy = true;
+              }
+            } catch (err) {
+              logger.debug(
+                `[luals] Failed to read legacy complete marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
+              );
+            }
+          } else if (isBinaryValid(legacyPath)) {
             validLegacy = true;
           }
-        } catch (err) {
-          logger.debug(
-            `[luals] Failed to read legacy complete marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      } else if (isBinaryValid(legacyPath)) {
-        validLegacy = true;
-      }
 
-      if (validLegacy) {
-        if (path.resolve(legacyDir) !== path.resolve(cachedDir)) {
-          try {
-            fs.mkdirSync(path.dirname(cachedDir), { recursive: true });
-            fs.cpSync(legacyDir, cachedDir, { recursive: true });
-            if (fs.existsSync(cachedPath) && isBinaryValid(cachedPath)) {
-              return cachedPath;
+          if (validLegacy) {
+            try {
+              fs.mkdirSync(path.dirname(cachedDir), { recursive: true });
+              fs.cpSync(legacyDir, cachedDir, { recursive: true });
+              if (fs.existsSync(cachedPath) && isBinaryValid(cachedPath)) {
+                return cachedPath;
+              }
+            } catch (err) {
+              logger.warn(
+                `[luals] Failed to migrate legacy cache from ${legacyDir} to ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
+              );
             }
-          } catch (err) {
-            logger.warn(
-              `[luals] Failed to migrate legacy cache from ${legacyDir} to ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
-            );
+            return legacyPath;
           }
         }
-        return legacyPath;
       }
     }
 
     // In PATH
-    try {
-      const cmd = process.platform === "win32" ? "where.exe" : "which";
-      const { stdout } = await execFileAsync(cmd, ["lua-language-server"]);
-      const found = stdout.trim().split(/\r?\n/)[0];
-      if (found && fs.existsSync(found) && isBinaryValid(found)) {
-        return found;
+    if (options?.reuseExisting !== false) {
+      try {
+        const cmd = process.platform === "win32" ? "where.exe" : "which";
+        const { stdout } = await execFileAsync(cmd, ["lua-language-server"]);
+        const found = stdout.trim().split(/\r?\n/)[0];
+        if (found && fs.existsSync(found) && isBinaryValid(found)) {
+          return found;
+        }
+      } catch (err) {
+        logger.debug(
+          `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
-    } catch (err) {
-      logger.debug(
-        `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`
-      );
     }
 
     // Download and cache explicit version
