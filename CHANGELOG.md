@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LuaLS resolution tests inject an isolated cache, and the offline-fallback test exercises the fallback download path.
 - ReDoS regression budgets in `tests/unit/config.test.ts` widened to avoid CI flakes.
 - Windows CI: the file-scoped diagnostic assertion normalizes path separators and case.
+- **CodeQL `js/incomplete-url-substring-sanitization`**: the LuaLS request assertions in `tests/unit/luals-cache.test.ts` and the download counter in `tests/helpers/download-counter.ts` now parse URLs and compare the hostname and path instead of matching substrings.
 
 ### Security
 - Hardened `.github/workflows/release.yml` against command injection: no `${{ }}` expression remains in any `run:` script text.

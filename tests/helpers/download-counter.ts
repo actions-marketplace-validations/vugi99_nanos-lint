@@ -12,8 +12,18 @@ interface CounterMarkedFetch {
   __nanosLuaLSDownloadCounter?: boolean;
 }
 
+/** Matches the exact release-download endpoint (parsed, never a substring check). */
 function isLuaLSArchiveUrl(url: string): boolean {
-  return url.includes("lua-language-server/releases/download/");
+  try {
+    const parsed = new URL(url);
+    return (
+      parsed.hostname === "github.com" &&
+      parsed.pathname.startsWith("/LuaLS/lua-language-server/releases/download/")
+    );
+  } catch {
+    // Relative or malformed URL: cannot be a LuaLS archive request.
+    return false;
+  }
 }
 
 /** Installs the counter on `globalThis.fetch` (idempotent). */

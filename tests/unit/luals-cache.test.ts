@@ -271,6 +271,21 @@ describe("LuaLS weekly cache check and version management", () => {
       }
     }
 
+    /** Parses recorded requests so assertions match hosts and paths, never substrings. */
+    function parseRequests(urls: string[]): { host: string; path: string }[] {
+      return urls.map((raw) => {
+        const parsed = new URL(raw);
+        return { host: parsed.hostname, path: parsed.pathname };
+      });
+    }
+
+    function isLuaLSArchiveRequest(request: { host: string; path: string }): boolean {
+      return (
+        request.host === "github.com" &&
+        request.path.startsWith("/LuaLS/lua-language-server/releases/download/")
+      );
+    }
+
     function mockFetch(impl: (url: string) => Promise<unknown>): () => void {
       const originalFetch = globalThis.fetch;
       const spy = vi.fn((url: string | URL | Request) => impl(String(url)));
@@ -335,9 +350,10 @@ describe("LuaLS weekly cache check and version management", () => {
           expect(typeof bin).toBe("string");
           expect(fs.existsSync(bin)).toBe(true);
 
-          // The GitHub release API was consulted exactly once and no archive was downloaded.
-          expect(requestedUrls.filter((u) => u.includes("api.github.com"))).toHaveLength(1);
-          expect(requestedUrls.some((u) => u.includes("/download/"))).toBe(false);
+          // The GitHub release API was consulted exactly once, without downloading.
+          const requests = parseRequests(requestedUrls);
+          expect(requests.filter((r) => r.host === "api.github.com")).toHaveLength(1);
+          expect(requests.filter(isLuaLSArchiveRequest)).toHaveLength(0);
 
           const updated = readLuaLSMetadata(baseCacheDir);
           expect(updated?.lastCheckedWeek).toBe(getIsoWeek());
@@ -399,8 +415,12 @@ describe("LuaLS weekly cache check and version management", () => {
         // The fallback version was selected and used for the (failed) download attempt.
         expect(readLuaLSMetadata(baseCacheDir)?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
         expect(
-          requestedUrls.some((url) =>
-            url.includes(`/download/${FALLBACK_LUALS_VERSION}/lua-language-server-`)
+          parseRequests(requestedUrls).some(
+            (r) =>
+              isLuaLSArchiveRequest(r) &&
+              r.path.startsWith(
+                `/LuaLS/lua-language-server/releases/download/${FALLBACK_LUALS_VERSION}/`
+              )
           )
         ).toBe(true);
       });
@@ -491,7 +511,7 @@ describe("LuaLS weekly cache check and version management", () => {
           const updated = readLuaLSMetadata(baseCacheDir);
           expect(updated?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
           // The cached version was reused instead of attempting a download.
-          expect(requestedUrls.some((u) => u.includes("/download/"))).toBe(false);
+          expect(parseRequests(requestedUrls).filter(isLuaLSArchiveRequest)).toHaveLength(0);
         } finally {
           restoreFetch();
         }
