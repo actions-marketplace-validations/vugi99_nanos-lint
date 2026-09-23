@@ -60,6 +60,13 @@ npx nanos-lint init
 ```
 This generates a `.luarc.json` file in your workspace pointing to the nanos world definitions and schemas.
 
+### 4. Pre-warm Cache for Offline / Docker Environments
+
+To pre-populate all required assets (both LuaLS binary and nanos world annotations) for air-gapped CI or container builds:
+```bash
+npx nanos-lint warmup
+```
+
 ---
 
 ## GitHub Actions Integration
@@ -117,6 +124,7 @@ nanos-lint [command] [options] [path]
 COMMANDS:
   check [path]             Check a workspace or Lua file (default)
   init [path]              Scaffold a .luarc.json configuration in the workspace (copies definitions to .nanos-lint/; supports --annotations <path>)
+  warmup, download         Pre-fetch and cache both LuaLS binary and annotations for offline execution
   download-luals [version] Download and cache the LuaLS binary (the version can also be passed via --luals-version <ver>)
   clean-cache, clean       Clear the nanos-lint cache directory
   help, --help, -h         Show help message

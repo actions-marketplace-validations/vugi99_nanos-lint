@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
 import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.js";
-import { resolveAnnotations } from "./annotations.js";
+import { resolveAnnotations, readAnnotationsMetadata } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
 import { formatReport } from "./reporter.js";
@@ -204,6 +204,30 @@ export function createProgram(options?: CreateProgramOptions): Command {
     });
 
   program
+    .command("warmup")
+    .alias("download")
+    .description("Pre-fetch and cache both LuaLS binary and annotations for offline execution")
+    .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`)
+    .option("--annotations <path>", "Path to custom annotations.lua file")
+    .option("-q, --quiet", "Suppress download progress logging")
+    .action(async (opts?: { lualsVersion?: string; annotations?: string; quiet?: boolean }) => {
+      const ver = opts?.lualsVersion || DEFAULT_LUALS_VERSION;
+      const bin = await resolveLuaLSBinary(ver, { quiet: opts?.quiet });
+      writeOutput(`[warmup] LuaLS binary ready: ${bin}`);
+
+      const annotationsPath = await resolveAnnotations({
+        customPath: opts?.annotations,
+        quiet: opts?.quiet,
+      });
+      const meta = readAnnotationsMetadata();
+      const commitInfo =
+        meta?.commitId && meta.commitId !== "unknown" ? ` (commit ${meta.commitId.slice(0, 7)})` : "";
+      writeOutput(`[warmup] nanos world annotations ready: ${annotationsPath}${commitInfo}`);
+      writeOutput("[warmup] Cache pre-warmed successfully. Ready for offline execution.");
+      setExitCode(0);
+    });
+
+  program
     .command("download-luals [version]")
     .description("Download and cache the LuaLS binary")
     .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`)
@@ -251,6 +275,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
     `
 Examples:
   $ npx nanos-lint
+  $ npx nanos-lint warmup
   $ npx nanos-lint check ./my-package
   $ npx nanos-lint check . --checklevel=Error
   $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"
