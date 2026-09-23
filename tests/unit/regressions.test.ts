@@ -390,7 +390,13 @@ describe("Regression tests for audit review issues", () => {
           configPath,
           JSON.stringify({
             files: {
-              exclude: ["**/*.{bak,tmp}", "**/item-[0-9].lua", "**/temp-?.lua", "**/nested/**"],
+              exclude: [
+                "**/*.{bak,tmp}",
+                "**/drop-{1,2}.lua",
+                "**/item-[0-9].lua",
+                "**/temp-?.lua",
+                "**/nested/**",
+              ],
             },
           }),
           "utf-8"
@@ -399,6 +405,8 @@ describe("Regression tests for audit review issues", () => {
           "keep.lua",
           "notes.bak",
           "cache.tmp",
+          "drop-1.lua",
+          "drop-2.lua",
           "item-1.lua",
           "item-a.lua",
           "item-10.lua",
@@ -410,8 +418,13 @@ describe("Regression tests for audit review issues", () => {
         fs.mkdirSync(path.join(tempDir, "deep", "nested"), { recursive: true });
         fs.writeFileSync(path.join(tempDir, "deep", "nested", "deep.lua"), "-- fixture");
 
-        // Only `keep.lua`, `item-a.lua` (not a digit), `item-10.lua` (two digits)
-        // and `temp-aa.lua` (two characters after `temp-`) remain.
+        // The brace case has to target `.lua` files to affect the total: brace
+        // expansion of non-Lua extensions (`**/*.{bak,tmp}`) can only match files
+        // that are not counted anyway. Removed here: `drop-1.lua` and
+        // `drop-2.lua` (braces), `item-1.lua` (character class), `temp-a.lua`
+        // (`?`) and `deep/nested/deep.lua`, leaving `keep.lua`, `item-a.lua`
+        // (not a digit), `item-10.lua` (two digits) and `temp-aa.lua` (two
+        // characters after `temp-`).
         expect(countCheckedFiles(tempDir, configPath)).toBe(4);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });

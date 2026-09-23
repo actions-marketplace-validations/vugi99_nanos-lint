@@ -16,13 +16,22 @@ const MAX_PATTERN_LENGTH = 65536;
 /**
  * Complexity budget per pattern. `minimatch` evaluates patterns through an AST
  * but still compiles them to regular expressions, so ambiguous wildcards inside
- * one path segment can backtrack catastrophically, and brace groups expand
- * combinatorially (`{a,b}` repeated 16 times is 65 536 alternatives). A hostile
- * or accidental `.luarc.json` could otherwise freeze the file walk, so patterns
- * beyond the budget are skipped with a warning instead of being matched.
+ * one path segment can backtrack, and brace groups expand combinatorially
+ * (`{a,b}` repeated 16 times is 65 536 alternatives). A hostile or accidental
+ * `.luarc.json` could otherwise stall the file walk, so patterns beyond the
+ * budget are skipped with a warning instead of being matched.
+ *
+ * The ambiguity of one segment grows like `C(segment length, wildcards)`, so the
+ * per-segment cap is what keeps matching cheap. `**\/*a*a*a*a\/*a*a*a*a\/*a*a*a*a\/*a*a*a*z.lua`
+ * (4 wildcards per segment) stays within a 4-wildcard cap yet costs ~5 ms per
+ * candidate file — ~100 s on a 20 000-file tree — while two wildcards per
+ * segment cost `C(60, 2) = 1 770` splits, hundreds of times less. The budget is
+ * deliberately far below what minimatch can parse: every realistic pattern
+ * (`**\/*.{bak,tmp}`, `**\/node_modules\/**`, `**\/item-[0-9].lua`,
+ * `**\/*.min.*`) needs at most two wildcards in any one segment.
  */
-const MAX_WILDCARDS_PER_SEGMENT = 4;
-const MAX_TOTAL_WILDCARDS = 24;
+const MAX_WILDCARDS_PER_SEGMENT = 2;
+const MAX_TOTAL_WILDCARDS = 12;
 const MAX_BRACE_ALTERNATIVES = 256;
 
 /** Counts wildcard tokens (`*`, `?`, character classes and brace groups). */
