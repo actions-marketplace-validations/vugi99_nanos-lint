@@ -12,6 +12,7 @@ import {
   findExistingLuaLSDir,
   resolveLuaLSBinary,
   getPlatformInfo,
+  getIsoWeek,
 } from "../../src/luals/index.js";
 
 describe("Cache Corruption Detection and Self-Healing", () => {
@@ -96,6 +97,18 @@ describe("Cache Corruption Detection and Self-Healing", () => {
     it("purges LuaLS metadata.json missing required fields", () => {
       const metaPath = path.join(tempDir, "metadata.json");
       fs.writeFileSync(metaPath, JSON.stringify({ someKey: "value" }));
+
+      const result = readLuaLSMetadata(tempDir);
+      expect(result).toBeNull();
+      expect(fs.existsSync(metaPath)).toBe(false);
+    });
+
+    it("purges LuaLS metadata.json when latestVersion contains path traversal (Issue #17)", () => {
+      const metaPath = path.join(tempDir, "metadata.json");
+      fs.writeFileSync(
+        metaPath,
+        JSON.stringify({ lastCheckedWeek: getIsoWeek(), latestVersion: "../EVIL" })
+      );
 
       const result = readLuaLSMetadata(tempDir);
       expect(result).toBeNull();
@@ -265,6 +278,37 @@ describe("Cache Corruption Detection and Self-Healing", () => {
         } else {
           delete process.env.XDG_CACHE_HOME;
         }
+      }
+    });
+
+    it("rejects traversal latestVersion in metadata.json and does not escape cache (Issue #17)", async () => {
+      const lualsDir = path.join(tempDir, "luals");
+      fs.mkdirSync(lualsDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(lualsDir, "metadata.json"),
+        JSON.stringify({ lastCheckedWeek: getIsoWeek(), latestVersion: "../EVIL" }),
+        "utf8"
+      );
+
+      // Plant a plausible binary where the un-sanitized join pointed: <tempDir>/EVIL/bin/lua-language-server
+      const evilBin = path.join(
+        tempDir,
+        "EVIL",
+        process.platform === "win32" ? "bin/lua-language-server.exe" : "bin/lua-language-server"
+      );
+      fs.mkdirSync(path.dirname(evilBin), { recursive: true });
+      fs.writeFileSync(evilBin, "#!/bin/sh\necho 1.2.3\n" + "#".repeat(120000), { mode: 0o755 });
+
+      // Mock fetch so it doesn't do real network calls
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("network disabled"));
+
+      try {
+        await expect(
+          resolveLuaLSBinary("latest", { cacheDir: lualsDir, quiet: true, reuseExisting: true })
+        ).rejects.toThrow();
+      } finally {
+        globalThis.fetch = origFetch;
       }
     });
   });

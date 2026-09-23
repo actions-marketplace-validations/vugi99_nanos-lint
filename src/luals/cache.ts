@@ -66,11 +66,16 @@ export function readLuaLSMetadata(baseCacheDir: string = getBaseLuaLSCacheDir())
   try {
     const content = fs.readFileSync(metaPath, "utf-8");
     const parsed = JSON.parse(content) as LuaLSMetadata;
+    const rawVersion = parsed?.latestVersion;
+    const safeVersion = typeof rawVersion === "string" ? sanitizeLuaLSVersion(rawVersion) : null;
     if (
       typeof parsed?.lastCheckedWeek === "string" &&
-      typeof parsed?.latestVersion === "string"
+      safeVersion !== null
     ) {
-      return parsed;
+      return {
+        ...parsed,
+        latestVersion: safeVersion,
+      };
     }
     try {
       fs.unlinkSync(metaPath);

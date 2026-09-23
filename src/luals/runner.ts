@@ -13,6 +13,7 @@ import {
   FALLBACK_LUALS_VERSION,
   resolveLuaLSVersion,
   fetchLatestLuaLSVersionFromGitHub,
+  sanitizeLuaLSVersion,
 } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import {
@@ -205,14 +206,16 @@ export async function resolveLuaLSBinary(
   const metadata = readLuaLSMetadata(baseCacheDir);
 
   // Fast path first: enumerating the cache would spawn every cached binary.
-  if (options?.reuseExisting !== false && metadata && metadata.lastCheckedWeek === currentWeek && metadata.latestVersion) {
-    const info = getPlatformInfo(metadata.latestVersion);
-    const cachedPath = path.join(
-      getCacheDir(metadata.latestVersion, baseCacheDir),
-      info.binaryRelativePath
-    );
-    if (isBinaryValid(cachedPath)) {
-      return cachedPath;
+  const safeLatest = metadata?.latestVersion ? sanitizeLuaLSVersion(metadata.latestVersion) : null;
+  if (options?.reuseExisting !== false && metadata && metadata.lastCheckedWeek === currentWeek && safeLatest) {
+    const info = getPlatformInfo(safeLatest);
+    const targetDir = path.resolve(getCacheDir(safeLatest, baseCacheDir));
+    const resolvedBase = path.resolve(baseCacheDir);
+    if (targetDir.startsWith(resolvedBase + path.sep) || targetDir === resolvedBase) {
+      const cachedPath = path.join(targetDir, info.binaryRelativePath);
+      if (isBinaryValid(cachedPath)) {
+        return cachedPath;
+      }
     }
   }
 
