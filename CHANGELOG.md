@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Enforced file line limits via ESLint `max-lines` (500 lines for `src/**/*.ts`, 1000 lines for `tests/**/*.ts`).
+- Modularized `src/luals.ts` into `src/luals/` submodules (`version.ts`, `platform.ts`, `cache.ts`, `download.ts`, `runner.ts`, and `index.ts`), retaining 100% backward-compatible exports from `src/luals.ts`.
+
 ### Fixed
 - Duplicate releases: pushing a release commit to `master` and its tag produced two qualifying CI runs, so the release ran twice and the second `npm publish` failed with a 409. The release job now only runs for tag-triggered CI, skips a tag whose GitHub release already exists, and skips `npm publish` when the version is already published.
 

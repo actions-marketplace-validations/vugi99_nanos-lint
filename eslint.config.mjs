@@ -64,5 +64,31 @@ export default defineConfig(
       "no-empty": ["error", { "allowEmptyCatch": false }],
       "local/no-empty-catch": "error"
     }
+  },
+  {
+    files: ["src/**/*.ts"],
+    rules: {
+      "max-lines": [
+        "error",
+        {
+          max: 500,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
+    },
+  },
+  {
+    files: ["tests/**/*.ts"],
+    rules: {
+      "max-lines": [
+        "error",
+        {
+          max: 1000,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
+    },
   }
 );
