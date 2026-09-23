@@ -13,6 +13,8 @@ import {
   runLuaLSCheck,
   downloadAndExtractLuaLS,
   limitDownloadStream,
+  isAllowedDownloadUrl,
+  computeFileSha256,
   getLegacyCacheDir,
 } from "../../src/luals.js";
 import { resolveWorkspaceConfig } from "../../src/config.js";
@@ -647,6 +649,46 @@ describe("luals utilities", () => {
         collected.push(Buffer.from(chunk));
       }
       expect(Buffer.concat(collected).toString()).toBe("chunk1chunk2");
+    });
+
+    it("isAllowedDownloadUrl validates HTTPS GitHub domains correctly (Issue #19)", () => {
+      expect(isAllowedDownloadUrl("https://github.com/LuaLS/releases")).toBe(true);
+      expect(isAllowedDownloadUrl("https://objects.githubusercontent.com/asset.tar.gz")).toBe(true);
+      expect(isAllowedDownloadUrl("https://release-assets.githubusercontent.com/asset.zip")).toBe(true);
+      expect(isAllowedDownloadUrl("https://raw.githubusercontent.com/file")).toBe(true);
+      expect(isAllowedDownloadUrl("http://github.com/insecure")).toBe(false);
+      expect(isAllowedDownloadUrl("https://evil.com/fake.tar.gz")).toBe(false);
+      expect(isAllowedDownloadUrl("not-a-url")).toBe(false);
+    });
+
+    it("computeFileSha256 produces valid hex digest (Issue #19)", () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-hash-test-"));
+      try {
+        const filePath = path.join(tempTarget, "test.txt");
+        fs.writeFileSync(filePath, "nanos-lint-test");
+        const hash = computeFileSha256(filePath);
+        expect(hash).toMatch(/^[a-f0-9]{64}$/);
+      } finally {
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("downloadAndExtractLuaLS rejects untrusted redirect URLs (Issue #19)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-redirect-test-"));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        url: "https://evil-mirror.com/asset.tar.gz",
+        body: { cancel: vi.fn() },
+      } as unknown as Response);
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/Redirect to untrusted URL blocked/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
     });
   });
 

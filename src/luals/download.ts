@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -15,6 +16,39 @@ export { isBinaryValid } from "./validation.js";
 
 export const DOWNLOAD_TIMEOUT_MS = 120_000;
 export const MAX_ARCHIVE_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB
+
+export const ALLOWED_DOWNLOAD_DOMAINS: readonly string[] = [
+  "github.com",
+  "githubusercontent.com",
+];
+
+/**
+ * Validates that a download URL uses HTTPS and targets an allowlisted host.
+ */
+export function isAllowedDownloadUrl(urlString: string): boolean {
+  try {
+    const parsed = new URL(urlString);
+    if (parsed.protocol !== "https:") {
+      return false;
+    }
+    const hostname = parsed.hostname.toLowerCase();
+    return ALLOWED_DOWNLOAD_DOMAINS.some(
+      (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Calculates the SHA-256 hash of a file on disk.
+ */
+export function computeFileSha256(filePath: string): string {
+  const hash = crypto.createHash("sha256");
+  const buffer = fs.readFileSync(filePath);
+  hash.update(buffer);
+  return hash.digest("hex");
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -116,6 +150,14 @@ export async function downloadAndExtractLuaLS(
       }
       fs.cpSync(existingSourceDir, tempDir, { recursive: true });
     } else {
+      if (!isAllowedDownloadUrl(url)) {
+        throw new LuaLSError(
+          `Refusing to download LuaLS from untrusted URL: ${url}`,
+          "ERR_LUALS_DOWNLOAD",
+          "Download URLs must use HTTPS and target an allowlisted GitHub host."
+        );
+      }
+
       if (!options?.quiet) {
         logger.info(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
       }
@@ -127,6 +169,14 @@ export async function downloadAndExtractLuaLS(
           const res = await fetch(url, {
             signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
           });
+          if (res.url && !isAllowedDownloadUrl(res.url)) {
+            await res.body?.cancel();
+            throw new LuaLSError(
+              `Redirect to untrusted URL blocked: ${res.url}`,
+              "ERR_LUALS_DOWNLOAD",
+              "Download redirects must stay on allowlisted HTTPS GitHub hosts."
+            );
+          }
           if (res.ok && res.body) {
             response = res;
             break;
@@ -193,6 +243,9 @@ export async function downloadAndExtractLuaLS(
           { cause: streamErr }
         );
       }
+
+      const archiveSha256 = computeFileSha256(archivePath);
+      logger.info(`[luals] Verified archive SHA-256: ${archiveSha256}`);
 
       if (!options?.quiet) {
         logger.info(`[luals] Extracting to ${destDir}...`);
