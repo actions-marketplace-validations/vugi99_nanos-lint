@@ -43,7 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `src/logger.ts` no longer reads a bare `LOG_LEVEL` environment variable (commonly set by CI images for unrelated tooling); only `NANOS_LOG_LEVEL` is honored.
 - CI test matrix: dropped the 1-vCPU `ubuntu-slim` runner (hard 15-minute job limit) that could silently block every release, since `release.yml` only fires when CI concludes successfully. Linux x64 remains covered by `ubuntu-latest`.
 - GitHub Actions cache keys in `.github/workflows/ci.yml` and `action.yml` now include the current ISO week so the entry is refreshed instead of being restored forever without ever being saved again; the previously dead restore-key prefixes (`luals-*`, and the exact-key-plus-dash form) were replaced with working prefixes.
-- All third-party and first-party actions in `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and `action.yml` are pinned to full commit SHAs with a version comment.
 - `action.yml` fallback execution pins `npx --yes nanos-lint@2.6.1` exactly instead of the `^2.6.1` range, so a caller pinning an action tag can no longer execute a different minor version.
 - Test suite modernized: previously vacuous/conditional assertions in `tests/unit/luals-cache.test.ts`, `tests/unit/luals-utils.test.ts`, `tests/unit/cli.test.ts`, `tests/unit/config.test.ts`, and `tests/unit/regressions.test.ts` were replaced with deterministic assertions, missing fixtures are now asserted instead of silently skipped, `mockClear()` is used between flag variants, and the `-i/--ignore` regression test drives the real CLI instead of a locally built Commander program.
 
@@ -66,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Hardened `.github/workflows/release.yml` against command injection from workflow dispatch inputs and detected git tags by removing every `${{ }}` expression from `run:` script text.
-- Scoped `id-token: write` to the npm publish job only and pinned all GitHub Actions to immutable commit SHAs with version comments.
+- Scoped `id-token: write` to the npm publish job only, so the release job and its third-party actions can no longer mint OIDC tokens.
 
 ## [2.6.1] - 2026-09-23
 
