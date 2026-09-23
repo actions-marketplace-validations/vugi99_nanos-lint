@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-09-24
+
 ### Added
 - Security vulnerability reporting guidelines and working `gh api` CLI examples in `AGENTS.md` specifying private GitHub Security Advisories for responsible disclosure.
 - Bundled `glob@13` together with its `minimatch`, `path-scurry`, `lru-cache`, `minipass`, and `brace-expansion` dependency tree, inlined through `tsdown` so the published package keeps zero runtime dependencies while `countCheckedFiles()` gains full glob support (#27).
@@ -32,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Bound glob pattern complexity in `countCheckedFiles()` (#27): patterns that exceed the per-segment wildcard (max 2), total wildcard (max 12) or brace-expansion (max 256) budget are skipped with a warning, keeping the walk bounded against catastrophic regex backtracking and combinatorial brace expansion from a hostile `.luarc.json`. The budgets are conservative on purpose — matching cost grows like `C(segment length, wildcards per segment)` — and a skipped pattern only over-counts the reported file total, never under-counts it.
+- Dropped security support for versions `< 2.8.1` in `SECURITY.md`.
 
 ## [2.8.0] - 2026-09-23
 
