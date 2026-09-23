@@ -196,6 +196,52 @@ export function getLegacyCacheDir(version: string = FALLBACK_LUALS_VERSION): str
 
 export interface DownloadOptions {
   quiet?: boolean;
+  reuseExisting?: boolean;
+}
+
+/**
+ * Locates an existing, valid LuaLS directory for the specified version.
+ * Checks primary system cache, legacy cache, and package bundled root.
+ */
+export function findExistingLuaLSDir(version: string): string | null {
+  const info = getPlatformInfo(version);
+
+  // 1. Primary system cache
+  const primaryCache = getCacheDir(version);
+  const primaryBin = path.join(primaryCache, info.binaryRelativePath);
+  const primaryMarker = path.join(primaryCache, ".complete");
+  if (fs.existsSync(primaryMarker)) {
+    try {
+      if (fs.readFileSync(primaryMarker, "utf-8").trim() === version && isBinaryValid(primaryBin)) {
+        return primaryCache;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  // 2. Legacy cache (nanos-lint <= 2.2.1)
+  const legacyCache = getLegacyCacheDir(version);
+  const legacyBin = path.join(legacyCache, info.binaryRelativePath);
+  const legacyMarker = path.join(legacyCache, ".complete");
+  if (fs.existsSync(legacyMarker)) {
+    try {
+      if (fs.readFileSync(legacyMarker, "utf-8").trim() === version && isBinaryValid(legacyBin)) {
+        return legacyCache;
+      }
+    } catch {
+      // Ignore
+    }
+  }
+
+  // 3. Package bundled root (release distributions)
+  const pkgRoot = getPackageRoot();
+  const pkgBin = path.join(pkgRoot, info.binaryRelativePath);
+  if (fs.existsSync(pkgBin) && isBinaryValid(pkgBin)) {
+    return pkgRoot;
+  }
+
+  return null;
 }
 
 /**
@@ -260,70 +306,78 @@ export async function downloadAndExtractLuaLS(
   );
   fs.mkdirSync(tempDir, { recursive: true });
 
+  const canReuse = options?.reuseExisting !== false;
+  const existingSourceDir = canReuse ? findExistingLuaLSDir(resolvedVersion) : null;
+  const shouldCopyFromExisting =
+    existingSourceDir !== null &&
+    path.resolve(existingSourceDir) !== path.resolve(destDir);
+
   const url = `https://github.com/LuaLS/lua-language-server/releases/download/${resolvedVersion}/${info.assetName}`;
   const archivePath = path.join(tempDir, info.assetName);
 
-  if (!options?.quiet) {
-    console.log(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
-  }
-
-  let response: Response | null = null;
-  let lastErr: unknown = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      const res = await fetch(url);
-      if (res.ok && res.body) {
-        response = res;
-        break;
-      }
-      await res.body?.cancel();
-      lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
-    } catch (err) {
-      lastErr = err;
-    }
-    if (attempt < 3) {
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
-    }
-  }
-
-  if (!response || !response.body) {
-    try {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup error
-    }
-    throw lastErr || new Error(`Failed to download ${url}`);
-  }
-
   try {
-    const arrayBuffer = await response.arrayBuffer();
-    fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
-
-    if (!options?.quiet) {
-      console.log(`[luals] Extracting to ${destDir}...`);
-    }
-
-    try {
-      // Both Windows 10+ and UNIX systems have tar built in
-      await execFileAsync("tar", ["-xf", archivePath, "-C", tempDir]);
-    } catch (tarErr) {
-      // Fallback for PowerShell Expand-Archive on Windows if tar fails
-      if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
-        await execFileAsync("powershell.exe", [
-          "-NoProfile",
-          "-Command",
-          `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(tempDir)}' -Force`,
-        ]);
-      } else {
-        throw tarErr;
+    if (shouldCopyFromExisting) {
+      if (!options?.quiet) {
+        console.log(`[luals] Reusing existing LuaLS ${resolvedVersion} installation from ${existingSourceDir}...`);
       }
-    }
+      fs.cpSync(existingSourceDir, tempDir, { recursive: true });
+    } else {
+      if (!options?.quiet) {
+        console.log(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
+      }
 
-    // Cleanup archive file
-    try {
-      fs.unlinkSync(archivePath);
-    } catch {
-      // Ignore cleanup error
+      let response: Response | null = null;
+      let lastErr: unknown = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const res = await fetch(url);
+          if (res.ok && res.body) {
+            response = res;
+            break;
+          }
+          await res.body?.cancel();
+          lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
+        } catch (err) {
+          lastErr = err;
+        }
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+        }
+      }
+
+      if (!response || !response.body) {
+        throw lastErr || new Error(`Failed to download ${url}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
+
+      if (!options?.quiet) {
+        console.log(`[luals] Extracting to ${destDir}...`);
+      }
+
+      try {
+        // Both Windows 10+ and UNIX systems have tar built in
+        await execFileAsync("tar", ["-xf", archivePath, "-C", tempDir]);
+      } catch (tarErr) {
+        // Fallback for PowerShell Expand-Archive on Windows if tar fails
+        if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
+          await execFileAsync("powershell.exe", [
+            "-NoProfile",
+            "-Command",
+            `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(tempDir)}' -Force`,
+          ]);
+        } else {
+          throw tarErr;
+        }
+      }
+
+      // Cleanup archive file
+      try {
+        fs.unlinkSync(archivePath);
+      } catch {
+        // Ignore cleanup error
+      }
     }
 
     const tempBinaryPath = path.join(tempDir, info.binaryRelativePath);

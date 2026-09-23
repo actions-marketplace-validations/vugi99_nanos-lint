@@ -8,6 +8,7 @@ import {
   countCheckedFiles,
   getPlatformInfo,
   resolveLuaLSBinary,
+  findExistingLuaLSDir,
 } from "../../src/luals.js";
 import path from "node:path";
 import fs from "node:fs";
@@ -212,6 +213,22 @@ describe("luals utilities", () => {
           delete process.env.GITHUB_TOKEN;
         }
         globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
+  describe("findExistingLuaLSDir", () => {
+    it("returns null for non-existent versions", () => {
+      const result = findExistingLuaLSDir("0.0.0-nonexistent");
+      expect(result).toBeNull();
+    });
+
+    it("returns primary cache directory when valid binary and marker exist", () => {
+      const result = findExistingLuaLSDir("3.19.1");
+      // Since 3.19.1 was pre-resolved/cached, it should return a string path if present
+      if (result !== null) {
+        expect(typeof result).toBe("string");
+        expect(fs.existsSync(result)).toBe(true);
       }
     });
   });

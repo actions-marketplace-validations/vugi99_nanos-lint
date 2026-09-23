@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll } from "vitest";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -19,6 +19,10 @@ import {
 import { runCLI, createProgram } from "../../src/cli.js";
 
 describe("Regression tests for audit review issues", () => {
+  beforeAll(async () => {
+    // Ensure LuaLS is resolved once before tests so subsequent calls reuse the cached binary
+    await resolveLuaLSBinary("latest", { quiet: true });
+  }, 120000);
   describe("Issue 1: Hard failure on missing target or failed LuaLS check", () => {
     it("throws an error when targetPath does not exist", async () => {
       const missingTarget = path.join(os.tmpdir(), "nanos-non-existent-target-12345");
@@ -511,7 +515,7 @@ describe("Regression tests for audit review issues", () => {
 
         try {
           await expect(
-            downloadAndExtractLuaLS("3.19.1", corruptDir, { quiet: true })
+            downloadAndExtractLuaLS("3.19.1", corruptDir, { quiet: true, reuseExisting: false })
           ).rejects.toThrow();
           expect(fetchAttempted).toBe(true);
         } finally {
