@@ -12,6 +12,7 @@ import {
   isBinaryValid,
   runLuaLSCheck,
   downloadAndExtractLuaLS,
+  limitDownloadStream,
   getLegacyCacheDir,
 } from "../../src/luals.js";
 import { resolveWorkspaceConfig } from "../../src/config.js";
@@ -25,6 +26,7 @@ import {
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import { Readable } from "node:stream";
 
 const liveTestsEnabled = isLiveTestsEnabled();
 
@@ -560,6 +562,91 @@ describe("luals utilities", () => {
         globalThis.fetch = originalFetch;
         fs.rmSync(tempTarget, { recursive: true, force: true });
       }
+    });
+
+    it("enforces Content-Length upper bound on archive download (Issue #18)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-bound-"));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "content-length": "200000000" }),
+        body: {
+          cancel: vi.fn(),
+        },
+      } as unknown as Response);
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/exceeds maximum limit/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("passes AbortSignal timeout to fetch during archive download (Issue #18)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-sig-"));
+      const originalFetch = globalThis.fetch;
+      let capturedSignal: AbortSignal | undefined;
+      globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+        capturedSignal = init?.signal as AbortSignal;
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: "Internal Error",
+          body: { cancel: vi.fn() },
+        } as unknown as Response);
+      });
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow();
+        expect(capturedSignal).toBeDefined();
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects download when stream chunks exceed maximum size limit (Issue #18)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-stream-limit-"));
+      const originalFetch = globalThis.fetch;
+      const bigChunk = Buffer.alloc(1024 * 1024); // 1 MB
+      let count = 0;
+      const stream = new Readable({
+        read() {
+          if (count++ < 160) {
+            this.push(bigChunk);
+          } else {
+            this.push(null);
+          }
+        },
+      });
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        body: stream,
+      } as unknown as Response);
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/exceeded maximum allowed size/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("limitDownloadStream yields chunks when under size limit (Issue #18)", async () => {
+      async function* generate() {
+        yield Buffer.from("chunk1");
+        yield Buffer.from("chunk2");
+      }
+      const collected: Buffer[] = [];
+      for await (const chunk of limitDownloadStream(generate())) {
+        collected.push(Buffer.from(chunk));
+      }
+      expect(Buffer.concat(collected).toString()).toBe("chunk1chunk2");
     });
   });
 

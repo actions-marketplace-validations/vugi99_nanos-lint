@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { logger } from "../logger.js";
 import { DEFAULT_LUALS_VERSION, resolveLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
@@ -11,6 +13,9 @@ import { LuaLSError } from "../errors.js";
 
 export { isBinaryValid } from "./validation.js";
 
+export const DOWNLOAD_TIMEOUT_MS = 120_000;
+export const MAX_ARCHIVE_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB
+
 const execFileAsync = promisify(execFile);
 
 /**
@@ -18,6 +23,26 @@ const execFileAsync = promisify(execFile);
  */
 export function escapePowerShellSingleQuote(str: string): string {
   return str.replace(/'/g, "''");
+}
+
+/**
+ * Enforces a maximum byte count on an asynchronous download stream.
+ */
+export async function* limitDownloadStream(
+  source: AsyncIterable<Uint8Array | Buffer>
+): AsyncGenerator<Uint8Array | Buffer, void, unknown> {
+  let total = 0;
+  for await (const chunk of source) {
+    total += chunk.length;
+    if (total > MAX_ARCHIVE_SIZE_BYTES) {
+      throw new LuaLSError(
+        `Download exceeded maximum allowed size of ${MAX_ARCHIVE_SIZE_BYTES} bytes`,
+        "ERR_LUALS_DOWNLOAD",
+        "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN."
+      );
+    }
+    yield chunk;
+  }
 }
 
 export interface DownloadOptions {
@@ -99,7 +124,9 @@ export async function downloadAndExtractLuaLS(
       let lastErr: unknown = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const res = await fetch(url);
+          const res = await fetch(url, {
+            signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+          });
           if (res.ok && res.body) {
             response = res;
             break;
@@ -126,8 +153,46 @@ export async function downloadAndExtractLuaLS(
         );
       }
 
-      const arrayBuffer = await response.arrayBuffer();
-      fs.writeFileSync(archivePath, Buffer.from(arrayBuffer));
+      const contentLengthHeader = response.headers?.get?.("content-length");
+      if (contentLengthHeader) {
+        const contentLength = parseInt(contentLengthHeader, 10);
+        if (!isNaN(contentLength) && contentLength > MAX_ARCHIVE_SIZE_BYTES) {
+          await response.body.cancel();
+          throw new LuaLSError(
+            `Archive size (${contentLength} bytes) exceeds maximum limit (${MAX_ARCHIVE_SIZE_BYTES} bytes)`,
+            "ERR_LUALS_DOWNLOAD",
+            "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN."
+          );
+        }
+      }
+
+      const fileStream = fs.createWriteStream(archivePath);
+      try {
+        const streamSource =
+          typeof (Readable as unknown as { fromWeb?: (stream: unknown) => Readable }).fromWeb === "function" &&
+          !("pipe" in response.body)
+            ? Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
+            : (response.body as unknown as Readable);
+
+        await pipeline(streamSource, limitDownloadStream, fileStream);
+      } catch (streamErr) {
+        try {
+          if (fs.existsSync(archivePath)) {
+            fs.unlinkSync(archivePath);
+          }
+        } catch (unlinkErr) {
+          void unlinkErr;
+        }
+        if (streamErr instanceof LuaLSError) {
+          throw streamErr;
+        }
+        throw new LuaLSError(
+          `Failed to download LuaLS from ${url}: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`,
+          "ERR_LUALS_DOWNLOAD",
+          "Check your network connection or specify a custom binary with LUALS_BIN.",
+          { cause: streamErr }
+        );
+      }
 
       if (!options?.quiet) {
         logger.info(`[luals] Extracting to ${destDir}...`);
