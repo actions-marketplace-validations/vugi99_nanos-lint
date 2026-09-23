@@ -126,6 +126,7 @@ COMMANDS:
   init [path]              Scaffold a .luarc.json configuration in the workspace (copies definitions to .nanos-lint/; supports --annotations <path>)
   warmup, download         Pre-fetch and cache both LuaLS binary and annotations for offline execution
   cache status, cache info Show cache status, installed versions, and disk usage (supports --json)
+  cache clean              Clear the nanos-lint cache directory
   cache-status             Alias for cache status
   download-luals [version] Download and cache the LuaLS binary (the version can also be passed via --luals-version <ver>)
   clean-cache, clean       Clear the nanos-lint cache directory
@@ -172,7 +173,7 @@ If your project already has a `.luarc.json`, `nanos-lint` automatically merges i
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/LuaLS/lua-language-server/master/setting/schema.json",
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
   "diagnostics": {
     "disable": [
       "lowercase-global"

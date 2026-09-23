@@ -3,11 +3,11 @@ import path from "node:path";
 import { systemPaths, getDirectorySize, formatBytes } from "./paths.js";
 import {
   readLuaLSMetadata,
-  listCachedLuaLSVersions,
+  listCachedLuaLSVersionDirs,
   getCacheDir,
 } from "./luals/cache.js";
 import { getPlatformInfo } from "./luals/platform.js";
-import { isBinaryValid } from "./luals/download.js";
+import { isBinaryValid } from "./luals/validation.js";
 import {
   readAnnotationsMetadata,
   isAnnotationsValid,
@@ -50,17 +50,25 @@ export function getCacheStatus(baseCacheDir: string = systemPaths.cache): CacheS
   const totalSizeFormatted = formatBytes(totalSize);
 
   // 1. LuaLS Inspection
-  const lualsBaseDir = baseCacheDir;
+  const lualsBaseDir = path.join(baseCacheDir, "luals");
   const lualsMeta = readLuaLSMetadata(lualsBaseDir);
-  const cachedVersionStrings = listCachedLuaLSVersions(lualsBaseDir);
+  const candidateVersions = listCachedLuaLSVersionDirs(lualsBaseDir);
 
   const versionInfos: CachedLuaLSVersionInfo[] = [];
 
-  for (const ver of cachedVersionStrings) {
+  for (const ver of candidateVersions) {
     const versionDir = getCacheDir(ver, lualsBaseDir);
+    const marker = path.join(versionDir, ".complete");
     const info = getPlatformInfo(ver);
     const binPath = path.join(versionDir, info.binaryRelativePath);
-    const isValid = fs.existsSync(binPath) && isBinaryValid(binPath);
+    let isValid = false;
+    if (fs.existsSync(marker) && fs.existsSync(binPath)) {
+      try {
+        isValid = fs.readFileSync(marker, "utf-8").trim() === ver && isBinaryValid(binPath);
+      } catch {
+        isValid = false;
+      }
+    }
     const dirSize = getDirectorySize(versionDir);
 
     versionInfos.push({

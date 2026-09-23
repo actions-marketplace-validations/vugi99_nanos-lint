@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cache status and inspection command (`nanos-lint cache status`, `cache info`, and `cache-status`) with human-readable terminal output and `--json` export displaying cached LuaLS binaries, annotations commit SHA, metadata freshness, and disk usage (#14).
 - Cache inspection and sizing utilities (`getCacheStatus`, `formatCacheStatusPretty`, `getDirectorySize`, `formatBytes`) exported in `src/cache-status.ts` and `src/paths.ts` (#14).
 - Dedicated unit test suite `tests/unit/cache-status.test.ts` verifying disk size calculation, byte formatting, empty and populated cache reporting, and CLI subcommands (#14).
+- Exported helper `listCachedLuaLSVersionDirs()` in `src/luals/cache.ts` and `countCheckedFiles()` in `src/luals/files.ts`.
+- Documented `nanos-lint cache clean` subcommand in `README.md` and CLI references.
 - Dedicated warmup / download CLI command (`nanos-lint warmup` and alias `download`) pre-fetching and caching both the LuaLS binary and nanos world annotations for air-gapped CI and Docker build pipelines (#13).
 - Centralized typed error hierarchy in `src/errors.ts` (`NanosLintError`, `ConfigError`, `LuaLSError`, `AnnotationsError`, `CacheError`) providing structured error codes and actionable remediation hints for users and programmatic consumers (#12).
 - Enhanced CLI error reporting formatting `NanosLintError` failures with clean error messages and remediation hints (`hint: ...`) without raw stack traces unless running with `--log-level=debug` or `DEBUG` (#12).
@@ -19,9 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dedicated unit test suite `tests/unit/cache-corruption.test.ts` covering automated self-healing across corrupted annotations, malformed metadata, broken binaries, and legacy cache states.
 
 ### Changed
+- Promoted `redefined-local`, `unused-local`, and `unused-vararg` diagnostics from `Hint` to `Warning` in `templates/.luarc.json`; projects running with default `--checklevel=Warning` can opt out by specifying `--checklevel=Error` or setting their severities back to `Hint` in `.luarc.json`.
+- Dropped `?/init.lua` from default `runtime.path` in `templates/.luarc.json` intentionally to align with standard nanos world package layouts.
+- Updated `$schema` URL in `templates/.luarc.json` and `README.md` to point to the live `LuaLS/vscode-lua` repository.
+- Refined module coverage floors in `vitest.config.ts` targeting `src/luals/runner.ts`, `src/luals/cache.ts`, and `src/luals/download.ts`, while excluding zero-logic re-export shims (`src/luals.ts`, `src/luals/index.ts`).
+- Aligned `diagnostics.neededFileStatus` in `mergeConfigs()` to key-merge overrides alongside `diagnostics.severity`.
+- Enhanced `ERR_LUALS_CORRUPTED_CACHE` error messages in `resolveLuaLSBinary()` to include actual underlying failure causes instead of unconditionally claiming offline.
 - Enabled GitHub Actions CI workflow triggers on push and pull requests targeting the `dev` branch (`.github/workflows/ci.yml`).
 - Enforced file line limits via ESLint `max-lines` (500 lines for `src/**/*.ts`, 1000 lines for `tests/**/*.ts`).
-- Modularized `src/luals.ts` into `src/luals/` submodules (`version.ts`, `platform.ts`, `cache.ts`, `download.ts`, `runner.ts`, and `index.ts`), retaining 100% backward-compatible exports from `src/luals.ts`.
+- Modularized `src/luals.ts` into `src/luals/` submodules (`version.ts`, `platform.ts`, `cache.ts`, `download.ts`, `runner.ts`, `validation.ts`, `files.ts`, and `index.ts`), retaining 100% backward-compatible exports from `src/luals.ts`.
 - Automated self-healing for corrupted or malformed `metadata.json` files across LuaLS and annotations caches, automatically purging invalid JSON files on parse errors.
 - Enhanced `resolveAnnotations()` to purge corrupted or 0-byte cached files and automatically fall back to bundled definitions when offline.
 - Improved offline diagnostics in `resolveLuaLSBinary()` providing clear remediation hints (`nanos-lint clean-cache`) when cached binaries fail execution checks and cannot be re-downloaded.
@@ -30,10 +38,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Documented transitive runtime dependency `is-safe-filename` (from `env-paths@4.0.0`) in `tsdown.config.ts`, explaining why it is inlined into the zero-dependency bundle.
 - Cleaned up redundant `diagnostics.globals` singletons in `templates/.luarc.json` that are already declared as global tables in `annotations.lua`.
 - Configured nanos package lookup paths (`Shared/?.lua`, `Client/?.lua`, `Server/?.lua`) and mapped `"Package.Require": "require"` via `runtime.special` in `templates/.luarc.json`.
-- Promoted `redefined-local`, `unused-local`, and `unused-vararg` diagnostics from `Hint` to `Warning` in `templates/.luarc.json`.
 - Updated `AGENTS.md` guidelines noting that running checks manually before committing is unnecessary because the full quality suite runs automatically in the pre-commit hook.
 
 ### Fixed
+- Fixed cache status inspection in `getCacheStatus()` (`src/cache-status.ts`) by targeting `<cache>/luals` rather than `<cache>`, accurately discovering cached LuaLS copies, metadata freshness, and distinguishing valid versus corrupted binaries (#14).
+- Filtered `diagnostics.severity` and `diagnostics.neededFileStatus` keys against LuaLS's 62 valid diagnostic codes in `mergeConfigs()`, automatically dropping obsolete or unrecognized keys (such as `syntax-error`) with a warning to prevent LuaLS from silently voiding the entire severity table (#22).
+- Resolved circular import between `src/luals/cache.ts` and `src/luals/download.ts` by extracting `isBinaryValid()` to `src/luals/validation.ts`.
+- Clamped `formatBytes()` for inputs `< 1` and handled scale promotion on boundary rounding (e.g. `1023.6` -> `"1.00 KB"`, `0.4` -> `"0 B"`).
+- Consistently honored `reuseExisting: false` across all bundled, cached, and PATH fallback branches in `resolveLuaLSBinary()` and `downloadAndExtractLuaLS()`.
+- Extracted `countCheckedFiles()` from `src/luals/runner.ts` to `src/luals/files.ts`, keeping `runner.ts` well under the 500-line limit.
 - Fixed legacy cache path collision on Linux where `getLegacyCacheDir` resolved to the same directory as the primary cache, preventing redundant probes in `findExistingLuaLSDir` and respecting `reuseExisting: false` in `resolveLuaLSBinary`.
 - Duplicate releases: pushing a release commit to `master` and its tag produced two qualifying CI runs, so the release ran twice and the second `npm publish` failed with a 409. The release job now only runs for tag-triggered CI, skips a tag whose GitHub release already exists, and skips `npm publish` when the version is already published.
 

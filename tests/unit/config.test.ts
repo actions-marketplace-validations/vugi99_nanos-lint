@@ -82,6 +82,49 @@ describe("config module", () => {
     expect(merged.diagnostics?.disable).toContain("lowercase-global");
   });
 
+  it("filters unrecognized diagnostic codes from diagnostics.severity and neededFileStatus (Issue #22)", () => {
+    const base: LuaRCConfig = {
+      diagnostics: {
+        severity: {
+          "unused-local": "Warning",
+          "redefined-local": "Warning",
+        },
+        neededFileStatus: {
+          "unused-local": "Any",
+        },
+      },
+    };
+
+    const override: LuaRCConfig = {
+      diagnostics: {
+        severity: {
+          "syntax-error": "Error",
+          "bogus-key": "Warning",
+          "undefined-global": "Error",
+        },
+        neededFileStatus: {
+          "syntax-error": "Any",
+          "redefined-local": "Any",
+        },
+      },
+    };
+
+    const merged = mergeConfigs(base, override);
+    expect(merged.diagnostics?.severity).toEqual({
+      "unused-local": "Warning",
+      "redefined-local": "Warning",
+      "undefined-global": "Error",
+    });
+    expect(merged.diagnostics?.severity).not.toHaveProperty("syntax-error");
+    expect(merged.diagnostics?.severity).not.toHaveProperty("bogus-key");
+
+    expect(merged.diagnostics?.neededFileStatus).toEqual({
+      "unused-local": "Any",
+      "redefined-local": "Any",
+    });
+    expect(merged.diagnostics?.neededFileStatus).not.toHaveProperty("syntax-error");
+  });
+
   it("preserves default ignore rules when cliIgnore is passed", () => {
     const base: LuaRCConfig = {
       runtime: { version: "Lua 5.4" },

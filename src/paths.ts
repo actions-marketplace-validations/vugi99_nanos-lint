@@ -63,9 +63,14 @@ export function getDirectorySize(targetPath: string): number {
  */
 export function formatBytes(bytes: number): string {
   if (bytes <= 0 || !Number.isFinite(bytes)) return "0 B";
+  if (bytes < 1) return `${Math.round(bytes)} B`;
   const units = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  const val = bytes / Math.pow(1024, i);
+  let i = Math.max(0, Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1));
+  let val = bytes / Math.pow(1024, i);
+  if (Math.round(val) >= 1024 && i < units.length - 1) {
+    i++;
+    val /= 1024;
+  }
   const formatted =
     i === 0
       ? val.toFixed(0)

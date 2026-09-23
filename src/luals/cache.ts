@@ -6,7 +6,7 @@ import { logger } from "../logger.js";
 import { getPackageRoot } from "../config.js";
 import { FALLBACK_LUALS_VERSION, sanitizeLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
-import { isBinaryValid } from "./download.js";
+import { isBinaryValid } from "./validation.js";
 
 export function getBaseLuaLSCacheDir(): string {
   return path.join(systemPaths.cache, "luals");
@@ -100,6 +100,33 @@ export function writeLuaLSMetadata(
     fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2), "utf-8");
   } catch (err) {
     logger.warn(`[luals] Failed to write LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Lists all candidate LuaLS version directories under baseCacheDir without running
+ * execution smoke tests on the binaries.
+ */
+export function listCachedLuaLSVersionDirs(baseCacheDir: string = getBaseLuaLSCacheDir()): string[] {
+  if (!fs.existsSync(baseCacheDir)) {
+    return [];
+  }
+  try {
+    const entries = fs.readdirSync(baseCacheDir, { withFileTypes: true });
+    const versions: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) {
+        continue;
+      }
+      const version = sanitizeLuaLSVersion(entry.name);
+      if (version) {
+        versions.push(version);
+      }
+    }
+    return versions;
+  } catch (err) {
+    logger.debug(`[luals] Failed to list cached LuaLS version directories: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
   }
 }
 

@@ -1,12 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { logger } from "../logger.js";
 import { DEFAULT_LUALS_VERSION, resolveLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { findExistingLuaLSDir, getBaseLuaLSCacheDir, getCacheDir } from "./cache.js";
+import { isBinaryValid } from "./validation.js";
 import { LuaLSError } from "../errors.js";
+
+export { isBinaryValid } from "./validation.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,32 +18,6 @@ const execFileAsync = promisify(execFile);
  */
 export function escapePowerShellSingleQuote(str: string): string {
   return str.replace(/'/g, "''");
-}
-
-/**
- * Verifies that a LuaLS binary exists, has non-trivial size, and is executable.
- */
-export function isBinaryValid(binaryPath: string): boolean {
-  if (!fs.existsSync(binaryPath)) {
-    return false;
-  }
-  try {
-    const stats = fs.statSync(binaryPath);
-    if (!stats.isFile() || stats.size < 100_000) {
-      return false;
-    }
-    const output = execFileSync(binaryPath, ["--version"], {
-      timeout: 5000,
-      stdio: "pipe",
-      encoding: "utf-8",
-    });
-    return /^\d+\.\d+\.\d+/.test(output.trim());
-  } catch (err) {
-    logger.debug(
-      `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`
-    );
-    return false;
-  }
 }
 
 export interface DownloadOptions {
@@ -62,7 +39,7 @@ export async function downloadAndExtractLuaLS(
   const completeMarker = path.join(destDir, ".complete");
 
   if (fs.existsSync(destDir)) {
-    if (fs.existsSync(binaryPath) && fs.existsSync(completeMarker)) {
+    if (options?.reuseExisting !== false && fs.existsSync(binaryPath) && fs.existsSync(completeMarker)) {
       try {
         const storedVersion = fs.readFileSync(completeMarker, "utf-8").trim();
         if (storedVersion === resolvedVersion && isBinaryValid(binaryPath)) {
@@ -74,7 +51,7 @@ export async function downloadAndExtractLuaLS(
         );
       }
     }
-    // destDir exists but is invalid/corrupted/stale: clean it up before downloading
+    // destDir exists but is invalid/corrupted/stale or reuseExisting is false: clean it up before downloading
     try {
       fs.rmSync(destDir, { recursive: true, force: true });
     } catch (err) {

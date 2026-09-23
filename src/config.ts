@@ -118,6 +118,77 @@ export interface MergeConfigOptions {
 }
 
 /**
+ * Set of recognized diagnostic codes supported by Lua Language Server (LuaLS).
+ * LuaLS discards the entire `diagnostics.severity` object if it contains a single
+ * unrecognized key (such as obsolete 'syntax-error'). nanos-lint filters severity
+ * and neededFileStatus maps against this allow-list to ensure valid configuration.
+ */
+export const VALID_LUALS_DIAGNOSTIC_CODES: ReadonlySet<string> = new Set([
+  "ambiguity-1",
+  "assign-type-mismatch",
+  "await-in-sync",
+  "cast-local-type",
+  "cast-type-mismatch",
+  "circle-doc-class",
+  "close-non-object",
+  "code-after-break",
+  "codestyle-check",
+  "count-down-loop",
+  "deprecated",
+  "different-requires",
+  "discard-returns",
+  "doc-field-no-class",
+  "duplicate-doc-alias",
+  "duplicate-doc-field",
+  "duplicate-doc-param",
+  "duplicate-index",
+  "duplicate-set-field",
+  "empty-block",
+  "global-element",
+  "global-in-nil-env",
+  "incomplete-signature-doc",
+  "inject-field",
+  "invisible",
+  "lowercase-global",
+  "missing-fields",
+  "missing-global-doc",
+  "missing-local-export-doc",
+  "missing-parameter",
+  "missing-return",
+  "missing-return-value",
+  "name-style-check",
+  "need-check-nil",
+  "newfield-call",
+  "newline-call",
+  "no-unknown",
+  "not-yieldable",
+  "param-type-mismatch",
+  "redefined-local",
+  "redundant-parameter",
+  "redundant-return",
+  "redundant-return-value",
+  "redundant-value",
+  "return-type-mismatch",
+  "spell-check",
+  "trailing-space",
+  "unbalanced-assignments",
+  "undefined-doc-class",
+  "undefined-doc-name",
+  "undefined-doc-param",
+  "undefined-env-child",
+  "undefined-field",
+  "undefined-global",
+  "unknown-cast-variable",
+  "unknown-diag-code",
+  "unknown-operator",
+  "unreachable-code",
+  "unused-function",
+  "unused-label",
+  "unused-local",
+  "unused-vararg",
+]);
+
+/**
  * Merges a base nanos configuration with a workspace override configuration.
  * Guarantees that nanos API annotations are included in workspace.library,
  * and standardizes paths for LuaLS.
@@ -160,11 +231,37 @@ export function mergeConfigs(
   const overrideGlobals = override.diagnostics?.globals ?? [];
   const globalsSet = new Set<string>([...baseGlobals, ...overrideGlobals]);
 
-  // Merge severities
-  const mergedSeverity = {
+  // Merge severities and filter out unknown keys to prevent LuaLS from voiding the table
+  const rawSeverity = {
     ...(base.diagnostics?.severity ?? {}),
     ...(override.diagnostics?.severity ?? {}),
   };
+  const mergedSeverity: Record<string, string> = {};
+  for (const [code, level] of Object.entries(rawSeverity)) {
+    if (VALID_LUALS_DIAGNOSTIC_CODES.has(code)) {
+      mergedSeverity[code] = level;
+    } else {
+      logger.warn(
+        `[config] Unrecognized diagnostic code "${code}" in diagnostics.severity was dropped to prevent LuaLS from discarding the severity configuration.`
+      );
+    }
+  }
+
+  // Merge neededFileStatus and filter out unknown keys
+  const rawNeededFileStatus = {
+    ...(base.diagnostics?.neededFileStatus ?? {}),
+    ...(override.diagnostics?.neededFileStatus ?? {}),
+  };
+  const mergedNeededFileStatus: Record<string, string> = {};
+  for (const [code, status] of Object.entries(rawNeededFileStatus)) {
+    if (VALID_LUALS_DIAGNOSTIC_CODES.has(code)) {
+      mergedNeededFileStatus[code] = status;
+    } else {
+      logger.warn(
+        `[config] Unrecognized diagnostic code "${code}" in diagnostics.neededFileStatus was dropped.`
+      );
+    }
+  }
 
   const hasCliIgnore = Boolean(options?.cliIgnore && options.cliIgnore.length > 0);
 
@@ -243,6 +340,7 @@ export function mergeConfigs(
       ...(override.diagnostics ?? {}),
       globals: Array.from(globalsSet),
       severity: mergedSeverity,
+      ...(Object.keys(mergedNeededFileStatus).length > 0 ? { neededFileStatus: mergedNeededFileStatus } : {}),
     },
   };
 

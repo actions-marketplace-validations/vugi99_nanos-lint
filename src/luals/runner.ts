@@ -6,7 +6,7 @@ import { logger } from "../logger.js";
 import { getPackageRoot } from "../config.js";
 import { systemPaths } from "../paths.js";
 import { fileUriToPath } from "../types.js";
-import type { CheckOptions, CheckResult, DiagnosticReport, LuaRCConfig } from "../types.js";
+import type { CheckOptions, CheckResult, DiagnosticReport } from "../types.js";
 import { LuaLSError } from "../errors.js";
 import {
   DEFAULT_LUALS_VERSION,
@@ -25,9 +25,19 @@ import {
   cleanupOldCachedLuaLSVersions,
   getIsoWeek,
 } from "./cache.js";
-import { isBinaryValid, downloadAndExtractLuaLS } from "./download.js";
+import { isBinaryValid } from "./validation.js";
+import { downloadAndExtractLuaLS } from "./download.js";
+import { countCheckedFiles } from "./files.js";
+
+export { countCheckedFiles } from "./files.js";
 
 const execFileAsync = promisify(execFile);
+
+function isOfflineError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /offline|enotfound|eai_again|econnrefused|etimedout|fetch failed/i.test(msg);
+}
 
 export interface ResolveLuaLSOptions {
   quiet?: boolean;
@@ -47,7 +57,7 @@ export async function resolveLuaLSBinary(
   }
 
   // 2. Bundled with package (release distribution) - check early for default version to avoid network delay
-  if (!version || version === "latest") {
+  if (options?.reuseExisting !== false && (!version || version === "latest")) {
     const defaultInfo = getPlatformInfo(FALLBACK_LUALS_VERSION);
     const defaultBundledPath = path.join(getPackageRoot(), defaultInfo.binaryRelativePath);
     if (fs.existsSync(defaultBundledPath) && isBinaryValid(defaultBundledPath)) {
@@ -65,9 +75,11 @@ export async function resolveLuaLSBinary(
     const info = getPlatformInfo(resolvedVersion);
 
     // Bundled with package for explicitly requested version
-    const bundledPath = path.join(getPackageRoot(), info.binaryRelativePath);
-    if (fs.existsSync(bundledPath) && isBinaryValid(bundledPath)) {
-      return bundledPath;
+    if (options?.reuseExisting !== false) {
+      const bundledPath = path.join(getPackageRoot(), info.binaryRelativePath);
+      if (fs.existsSync(bundledPath) && isBinaryValid(bundledPath)) {
+        return bundledPath;
+      }
     }
 
     // User cache for explicitly requested version
@@ -77,11 +89,15 @@ export async function resolveLuaLSBinary(
 
     let wasCorrupted = false;
     if (fs.existsSync(cachedPath)) {
+      let isValid = false;
       if (fs.existsSync(completeMarker)) {
         try {
           const storedVersion = fs.readFileSync(completeMarker, "utf-8").trim();
           if (storedVersion === resolvedVersion && isBinaryValid(cachedPath)) {
-            return cachedPath;
+            isValid = true;
+            if (options?.reuseExisting !== false) {
+              return cachedPath;
+            }
           }
         } catch (err) {
           logger.debug(
@@ -89,9 +105,11 @@ export async function resolveLuaLSBinary(
           );
         }
       }
-      wasCorrupted = true;
-      if (!options?.quiet) {
-        logger.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
+      if (!isValid) {
+        wasCorrupted = true;
+        if (!options?.quiet) {
+          logger.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
+        }
       }
       try {
         fs.rmSync(cachedDir, { recursive: true, force: true });
@@ -169,8 +187,10 @@ export async function resolveLuaLSBinary(
       );
     } catch (err) {
       if (wasCorrupted) {
+        const isOffline = isOfflineError(err);
+        const reason = isOffline ? "while offline" : (err instanceof Error ? err.message : String(err));
         throw new LuaLSError(
-          `Cached LuaLS binary at '${cachedPath}' is corrupted (failed execution/size check) and cannot be re-downloaded while offline. Please connect to the internet to repair or run 'nanos-lint clean-cache'.`,
+          `Cached LuaLS binary at '${cachedPath}' is corrupted (failed execution/size check) and cannot be re-downloaded ${isOffline ? reason : `: ${reason}`}. Please ${isOffline ? "connect to the internet" : "verify your network connection"} to repair or run 'nanos-lint clean-cache'.`,
           "ERR_LUALS_CORRUPTED_CACHE",
           "Connect to the internet to repair the corrupted binary or run 'nanos-lint clean-cache'.",
           { cause: err }
@@ -185,7 +205,7 @@ export async function resolveLuaLSBinary(
   const metadata = readLuaLSMetadata(baseCacheDir);
 
   // Fast path first: enumerating the cache would spawn every cached binary.
-  if (metadata && metadata.lastCheckedWeek === currentWeek && metadata.latestVersion) {
+  if (options?.reuseExisting !== false && metadata && metadata.lastCheckedWeek === currentWeek && metadata.latestVersion) {
     const info = getPlatformInfo(metadata.latestVersion);
     const cachedPath = path.join(
       getCacheDir(metadata.latestVersion, baseCacheDir),
@@ -196,11 +216,11 @@ export async function resolveLuaLSBinary(
     }
   }
 
-  const cachedVersions = listCachedLuaLSVersions(baseCacheDir);
+  const cachedVersions = options?.reuseExisting !== false ? listCachedLuaLSVersions(baseCacheDir) : [];
 
   // Same week, but the recorded version is unusable: reuse another cached one.
   const firstCachedVersion = cachedVersions[0];
-  if (metadata && metadata.lastCheckedWeek === currentWeek && firstCachedVersion) {
+  if (options?.reuseExisting !== false && metadata && metadata.lastCheckedWeek === currentWeek && firstCachedVersion) {
     const info = getPlatformInfo(firstCachedVersion);
     return path.join(getCacheDir(firstCachedVersion, baseCacheDir), info.binaryRelativePath);
   }
@@ -239,15 +259,18 @@ export async function resolveLuaLSBinary(
   let wasCorrupted = false;
   if (fs.existsSync(targetBinaryPath)) {
     if (fs.existsSync(completeMarker) && isBinaryValid(targetBinaryPath)) {
-      // Already downloaded and valid; clean up any older versions
-      cleanupOldCachedLuaLSVersions(targetVersion, baseCacheDir);
-      return targetBinaryPath;
+      if (options?.reuseExisting !== false) {
+        // Already downloaded and valid; clean up any older versions
+        cleanupOldCachedLuaLSVersions(targetVersion, baseCacheDir);
+        return targetBinaryPath;
+      }
+    } else {
+      wasCorrupted = true;
     }
-    wasCorrupted = true;
   }
 
   // Check PATH as fallback before downloading if offline/unreachable
-  if (!onlineTag) {
+  if (options?.reuseExisting !== false && !onlineTag) {
     try {
       const cmd = process.platform === "win32" ? "where.exe" : "which";
       const { stdout } = await execFileAsync(cmd, ["lua-language-server"]);
@@ -268,8 +291,10 @@ export async function resolveLuaLSBinary(
     downloadedBinary = await downloadAndExtractLuaLS(targetVersion, targetCacheDir, options);
   } catch (err) {
     if (wasCorrupted) {
+      const isOffline = isOfflineError(err);
+      const reason = isOffline ? "while offline" : (err instanceof Error ? err.message : String(err));
       throw new LuaLSError(
-        `Cached LuaLS binary at '${targetBinaryPath}' is corrupted (failed execution/size check) and cannot be re-downloaded while offline. Please connect to the internet to repair or run 'nanos-lint clean-cache'.`,
+        `Cached LuaLS binary at '${targetBinaryPath}' is corrupted (failed execution/size check) and cannot be re-downloaded ${isOffline ? reason : `: ${reason}`}. Please ${isOffline ? "connect to the internet" : "verify your network connection"} to repair or run 'nanos-lint clean-cache'.`,
         "ERR_LUALS_CORRUPTED_CACHE",
         "Connect to the internet to repair the corrupted binary or run 'nanos-lint clean-cache'.",
         { cause: err }
@@ -426,161 +451,5 @@ export async function runLuaLSCheck(
     totalFilesChecked: filesChecked,
     diagnostics,
   };
-}
-
-/**
- * Counts candidate Lua files within targetPath, taking ignoreDir and files.exclude into account.
- */
-export function countCheckedFiles(targetPath: string, configPath?: string): number {
-  const absPath = path.resolve(targetPath);
-  if (!fs.existsSync(absPath)) {
-    return 0;
-  }
-
-  if (fs.statSync(absPath).isFile()) {
-    return absPath.toLowerCase().endsWith(".lua") ? 1 : 0;
-  }
-
-  let ignoreDirs: string[] = [".git", ".vscode", ".nanos-lint", "node_modules"];
-  let excludePatterns: string[] = [];
-
-  if (configPath && fs.existsSync(configPath)) {
-    try {
-      const cfg = JSON.parse(fs.readFileSync(configPath, "utf-8")) as LuaRCConfig;
-      if (cfg.workspace?.ignoreDir) {
-        ignoreDirs = cfg.workspace.ignoreDir;
-      }
-      if (cfg.files?.exclude) {
-        excludePatterns = cfg.files.exclude;
-      }
-    } catch (err) {
-      logger.warn(
-        `[luals] Failed to parse config file for file counting at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }
-
-  const normIgnoreDirs = new Set(ignoreDirs.map((d) => d.replace(/\\/g, "/").toLowerCase()));
-
-  function isExcluded(relPath: string): boolean {
-    const norm = relPath.replace(/\\/g, "/");
-    const baseName = path.posix.basename(norm);
-
-    for (const pat of excludePatterns) {
-      const normPat = pat.replace(/\\/g, "/");
-      if (norm === normPat || baseName === normPat) return true;
-      if (normPat.endsWith("/**")) {
-        const dir = normPat.slice(0, -3);
-        if (norm === dir || norm.startsWith(`${dir}/`)) return true;
-      }
-      if (norm.startsWith(`${normPat}/`)) return true;
-
-      if (normPat.includes("*") || normPat.includes("?")) {
-        // If pattern has no slash, it matches basename anywhere
-        if (!normPat.includes("/")) {
-          const baseRegexStr =
-            "^" +
-            normPat
-              .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-              .replace(/\*/g, ".*")
-              .replace(/\?/g, ".") +
-            "$";
-          try {
-            if (new RegExp(baseRegexStr, "i").test(baseName)) return true;
-          } catch (err) {
-            logger.debug(
-              `[luals] Invalid regex for pattern "${normPat}": ${err instanceof Error ? err.message : String(err)}`
-            );
-          }
-        }
-
-        // Convert glob with ** and * to regex matching full relPath
-        let regexStr = normPat;
-        const hasLeadingDoubleStar = regexStr.startsWith("**/");
-        if (hasLeadingDoubleStar) {
-          regexStr = regexStr.slice(3);
-        }
-        const hasTrailingDoubleStar = regexStr.endsWith("/**");
-        if (hasTrailingDoubleStar) {
-          regexStr = regexStr.slice(0, -3);
-        }
-
-        let escaped = regexStr
-          .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-          .replace(/\/\*\*\//g, "/(?:.*/)?")
-          .replace(/\*\*/g, ".*")
-          .replace(/(?<!\.)\*/g, "[^/]*")
-          .replace(/\?/g, "[^/]");
-
-        if (hasLeadingDoubleStar) {
-          escaped = `(?:^|.*/)${escaped}`;
-        }
-        if (hasTrailingDoubleStar) {
-          escaped = `${escaped}(?:/.*)?`;
-        }
-
-        try {
-          if (new RegExp(`^${escaped}$`, "i").test(norm)) return true;
-        } catch (err) {
-          logger.debug(
-            `[luals] Invalid glob regex for pattern "${normPat}": ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-    }
-    return false;
-  }
-
-  let count = 0;
-
-  function walk(currentDir: string, relDir: string = "") {
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    } catch (err) {
-      logger.debug(
-        `[luals] Failed to read directory ${currentDir}: ${err instanceof Error ? err.message : String(err)}`
-      );
-      return;
-    }
-
-    for (const entry of entries) {
-      const name = entry.name;
-      const relPath = relDir ? `${relDir}/${name}` : name;
-      const fullPath = path.join(currentDir, name);
-
-      const isDirectory =
-        entry.isDirectory() ||
-        (entry.isSymbolicLink() &&
-          (() => {
-            try {
-              return fs.statSync(fullPath).isDirectory();
-            } catch (err) {
-              logger.debug(
-                `[luals] Failed to stat symlink target ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
-              );
-              return false;
-            }
-          })());
-
-      if (isDirectory) {
-        const lowerName = name.toLowerCase();
-        if (normIgnoreDirs.has(lowerName) || normIgnoreDirs.has(relPath.toLowerCase())) {
-          continue;
-        }
-        if (isExcluded(relPath) || isExcluded(`${relPath}/**`)) {
-          continue;
-        }
-        walk(fullPath, relPath);
-      } else if (entry.isFile() && name.toLowerCase().endsWith(".lua")) {
-        if (!isExcluded(relPath)) {
-          count++;
-        }
-      }
-    }
-  }
-
-  walk(absPath);
-  return count;
 }
 

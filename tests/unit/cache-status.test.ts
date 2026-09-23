@@ -17,10 +17,13 @@ describe("Cache Status Inspection and Reporting", () => {
       expect(formatBytes(0)).toBe("0 B");
       expect(formatBytes(-100)).toBe("0 B");
       expect(formatBytes(NaN)).toBe("0 B");
+      expect(formatBytes(0.4)).toBe("0 B");
+      expect(formatBytes(0.6)).toBe("1 B");
     });
 
     it("formats byte values across scales", () => {
       expect(formatBytes(512)).toBe("512 B");
+      expect(formatBytes(1023.6)).toBe("1.00 KB");
       expect(formatBytes(1536)).toBe("1.50 KB");
       expect(formatBytes(1488978)).toBe("1.42 MB");
       expect(formatBytes(44564480)).toBe("42.5 MB");
@@ -78,12 +81,16 @@ describe("Cache Status Inspection and Reporting", () => {
       expect(pretty).toContain("Status:         Not cached");
     });
 
-    it("inspects populated cache directory with metadata and versions", () => {
+    it("inspects populated cache directory with metadata and versions", async () => {
+      const validationModule = await import("../../src/luals/validation.js");
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-status-test-"));
       try {
+        const lualsDir = path.join(tempDir, "luals");
+        fs.mkdirSync(lualsDir, { recursive: true });
+
         // LuaLS metadata
         fs.writeFileSync(
-          path.join(tempDir, "metadata.json"),
+          path.join(lualsDir, "metadata.json"),
           JSON.stringify({
             lastCheckedWeek: "2026-W39",
             lastCheckedDate: "2026-09-23",
@@ -92,13 +99,21 @@ describe("Cache Status Inspection and Reporting", () => {
           "utf-8"
         );
 
-        // LuaLS version directory with dummy executable
-        const vDir = path.join(tempDir, "3.19.1");
+        // LuaLS valid version directory (3.19.1)
+        const vDir = path.join(lualsDir, "3.19.1");
         const binDir = path.join(vDir, "bin");
         fs.mkdirSync(binDir, { recursive: true });
         fs.writeFileSync(path.join(vDir, ".complete"), "3.19.1", "utf-8");
         const binFile = path.join(binDir, process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server");
         fs.writeFileSync(binFile, Buffer.alloc(120_000));
+
+        // LuaLS corrupted version directory (3.18.0)
+        const corruptDir = path.join(lualsDir, "3.18.0");
+        const corruptBinDir = path.join(corruptDir, "bin");
+        fs.mkdirSync(corruptBinDir, { recursive: true });
+        fs.writeFileSync(path.join(corruptDir, ".complete"), "3.18.0", "utf-8");
+        const corruptBinFile = path.join(corruptBinDir, process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server");
+        fs.writeFileSync(corruptBinFile, Buffer.alloc(50_000));
 
         // Annotations
         const annDir = path.join(tempDir, "annotations");
@@ -118,18 +133,35 @@ describe("Cache Status Inspection and Reporting", () => {
           "utf-8"
         );
 
-        const report = getCacheStatus(tempDir);
-        expect(report.totalSize).toBeGreaterThan(120_000);
-        expect(report.luals.weeklyCheck).toBe("2026-W39");
-        expect(report.luals.targetVersion).toBe("3.19.1");
-        expect(report.annotations.status).toBe("valid");
-        expect(report.annotations.commitId).toBe("8f3a9b2c12345678");
+        const isBinSpy = vi.spyOn(validationModule, "isBinaryValid").mockImplementation((p) => p.includes("3.19.1"));
 
-        const pretty = formatCacheStatusPretty(report);
-        expect(pretty).toContain("Weekly Check:   2026-W39 (last checked: 2026-09-23)");
-        expect(pretty).toContain("Target Version: 3.19.1");
-        expect(pretty).toContain("Commit SHA:     8f3a9b2c (docgen-output)");
-        expect(pretty).toContain("Last Checked:   2026-09-23");
+        try {
+          const report = getCacheStatus(tempDir);
+          expect(report.totalSize).toBeGreaterThan(120_000);
+          expect(report.luals.weeklyCheck).toBe("2026-W39");
+          expect(report.luals.targetVersion).toBe("3.19.1");
+          expect(report.luals.versions).toHaveLength(2);
+
+          const v319 = report.luals.versions.find((v) => v.version === "3.19.1");
+          const v318 = report.luals.versions.find((v) => v.version === "3.18.0");
+          expect(v319).toBeDefined();
+          expect(v319?.status).toBe("valid");
+          expect(v318).toBeDefined();
+          expect(v318?.status).toBe("corrupted");
+
+          expect(report.annotations.status).toBe("valid");
+          expect(report.annotations.commitId).toBe("8f3a9b2c12345678");
+
+          const pretty = formatCacheStatusPretty(report);
+          expect(pretty).toContain("Weekly Check:   2026-W39 (last checked: 2026-09-23)");
+          expect(pretty).toContain("Target Version: 3.19.1");
+          expect(pretty).toContain("3.19.1 (status: valid");
+          expect(pretty).toContain("3.18.0 (status: corrupted");
+          expect(pretty).toContain("Commit SHA:     8f3a9b2c (docgen-output)");
+          expect(pretty).toContain("Last Checked:   2026-09-23");
+        } finally {
+          isBinSpy.mockRestore();
+        }
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }

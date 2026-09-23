@@ -236,5 +236,67 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
       fs.rmSync(tempWorkspace, { recursive: true, force: true });
     }
   });
+
+  it("reports unused-local at Warning severity through default merged config and recovers from legacy syntax-error (Issue #22)", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unused-local-"));
+    try {
+      const luaFile = path.join(tempDir, "unused.lua");
+      fs.writeFileSync(luaFile, "local myUnused = 123\n", "utf-8");
+
+      // 1. Default merged config (no workspace config)
+      const resolved = resolveWorkspaceConfig(luaFile);
+      try {
+        const result = await runLuaLSCheck(luaFile, resolved.configPath, {
+          path: luaFile,
+          checklevel: "Warning",
+        });
+        expect(result.passed).toBe(false);
+        expect(result.totalWarnings).toBe(1);
+        const diags = Object.values(result.diagnostics).flat();
+        const unusedDiag = diags.find((d) => d.code === "unused-local");
+        expect(unusedDiag).toBeDefined();
+        expect(unusedDiag?.severity).toBe(2); // 2 = Warning
+      } finally {
+        if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+          fs.unlinkSync(resolved.configPath);
+        }
+      }
+
+      // 2. Legacy workspace config with obsolete "syntax-error": "Error"
+      const legacyConfig = path.join(tempDir, ".luarc.json");
+      fs.writeFileSync(
+        legacyConfig,
+        JSON.stringify({
+          diagnostics: {
+            severity: {
+              "syntax-error": "Error",
+              "redefined-local": "Warning",
+            },
+          },
+        }),
+        "utf-8"
+      );
+
+      const resolvedLegacy = resolveWorkspaceConfig(tempDir);
+      try {
+        const resultLegacy = await runLuaLSCheck(luaFile, resolvedLegacy.configPath, {
+          path: luaFile,
+          checklevel: "Warning",
+        });
+        expect(resultLegacy.passed).toBe(false);
+        expect(resultLegacy.totalWarnings).toBe(1);
+        const diagsLegacy = Object.values(resultLegacy.diagnostics).flat();
+        const unusedDiagLegacy = diagsLegacy.find((d) => d.code === "unused-local");
+        expect(unusedDiagLegacy).toBeDefined();
+        expect(unusedDiagLegacy?.severity).toBe(2); // 2 = Warning
+      } finally {
+        if (resolvedLegacy.isTemp && fs.existsSync(resolvedLegacy.configPath)) {
+          fs.unlinkSync(resolvedLegacy.configPath);
+        }
+      }
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
 

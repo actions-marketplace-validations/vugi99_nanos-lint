@@ -530,6 +530,37 @@ describe("luals utilities", () => {
         }
       }
     );
+
+    it("handles download failure when fetch rejects", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-dl-fail-"));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network connection error"));
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/Failed to download LuaLS/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("throws LuaLSError when response body is null", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-dl-nobody-"));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: null,
+      } as unknown as Response);
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/Failed to download LuaLS/);
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("getLegacyCacheDir", () => {
