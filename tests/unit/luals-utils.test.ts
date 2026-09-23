@@ -690,6 +690,46 @@ describe("luals utilities", () => {
         fs.rmSync(tempTarget, { recursive: true, force: true });
       }
     });
+
+    it("downloadAndExtractLuaLS refuses to chmod or execute archive-planted symlink (Issue #20)", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-symlink-extract-"));
+      const origLstat = fs.lstatSync;
+      const lstatSpy = vi.spyOn(fs, "lstatSync").mockImplementation((filePath, options) => {
+        const str = String(filePath);
+        if (str.includes("lua-language-server")) {
+          return {
+            isSymbolicLink: () => true,
+            isFile: () => false,
+            size: 200_000,
+          } as unknown as fs.Stats;
+        }
+        return origLstat(filePath, options);
+      });
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        body: Readable.from([Buffer.from("archive-content")]),
+      } as unknown as Response);
+
+      const origExists = fs.existsSync;
+      const existsSpy = vi.spyOn(fs, "existsSync").mockImplementation((p) => {
+        if (String(p).includes("lua-language-server")) return true;
+        return origExists(p);
+      });
+
+      try {
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+        ).rejects.toThrow(/symbolic link/);
+      } finally {
+        lstatSpy.mockRestore();
+        existsSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("getLegacyCacheDir", () => {

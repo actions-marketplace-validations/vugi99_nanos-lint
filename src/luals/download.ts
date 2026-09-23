@@ -253,7 +253,11 @@ export async function downloadAndExtractLuaLS(
 
       try {
         // Both Windows 10+ and UNIX systems have tar built in
-        await execFileAsync("tar", ["-xf", archivePath, "-C", tempDir]);
+        const tarArgs =
+          process.platform === "win32"
+            ? ["-xf", archivePath, "-C", tempDir]
+            : ["-xf", archivePath, "--no-same-owner", "--no-same-permissions", "-C", tempDir];
+        await execFileAsync("tar", tarArgs);
       } catch (tarErr) {
         // Fallback for PowerShell Expand-Archive on Windows if tar fails
         if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
@@ -279,6 +283,43 @@ export async function downloadAndExtractLuaLS(
 
     const tempBinaryPath = path.join(tempDir, info.binaryRelativePath);
 
+    // Verify file exists before checking attributes
+    if (!fs.existsSync(tempBinaryPath)) {
+      throw new LuaLSError(
+        `Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space."
+      );
+    }
+
+    // Verify binary is a regular file and not a symlink to prevent chmod following archive-planted symlinks
+    const lstat = fs.lstatSync(tempBinaryPath);
+    if (lstat.isSymbolicLink()) {
+      throw new LuaLSError(
+        `Extracted binary at '${tempBinaryPath}' is a symbolic link. Refusing to chmod or execute archive-planted symlinks.`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+      );
+    }
+    if (!lstat.isFile()) {
+      throw new LuaLSError(
+        `Extracted binary at '${tempBinaryPath}' is not a regular file.`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+      );
+    }
+
+    // Verify that the real path does not escape the extraction directory
+    const realBinaryPath = fs.realpathSync(tempBinaryPath);
+    const resolvedTemp = path.resolve(tempDir);
+    if (!realBinaryPath.startsWith(resolvedTemp + path.sep) && realBinaryPath !== resolvedTemp) {
+      throw new LuaLSError(
+        `Extracted binary path escapes extraction directory: ${realBinaryPath}`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+      );
+    }
+
     // Make executable on unix
     if (process.platform !== "win32") {
       try {
@@ -290,8 +331,7 @@ export async function downloadAndExtractLuaLS(
       }
     }
 
-    // Verify file exists, has non-trivial size, and is valid executable before promotion
-    if (!fs.existsSync(tempBinaryPath) || fs.statSync(tempBinaryPath).size < 100_000) {
+    if (lstat.size < 100_000) {
       throw new LuaLSError(
         `Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`,
         "ERR_LUALS_EXTRACT",
