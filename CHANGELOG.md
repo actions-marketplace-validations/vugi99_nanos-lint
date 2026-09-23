@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enforce 120s timeout and stream LuaLS archive downloads directly to disk with a 150 MB upper bound, preventing indefinite process hangs and out-of-memory exhaustion (#18).
 - Enforce HTTPS GitHub host allowlisting on download URLs and redirects, audit-log archive SHA-256 checksums, and document the binary verification model in `SECURITY.md` (#19).
 - Harden tar extraction with `--no-same-owner --no-same-permissions` on POSIX and validate extracted binary path against symlinks and directory escapes before chmod or execution (#20).
+- Prevent symlink loops and directory escapes in `countCheckedFiles` by resolving canonical directory paths and restricting symlink traversal within the workspace root (#21).
 
 ## [2.8.0] - 2026-09-23
 

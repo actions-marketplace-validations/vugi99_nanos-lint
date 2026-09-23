@@ -7,9 +7,19 @@ import type { LuaRCConfig } from "../types.js";
  * Counts candidate Lua files within targetPath, taking ignoreDir and files.exclude into account.
  */
 export function countCheckedFiles(targetPath: string, configPath?: string): number {
-  const absPath = path.resolve(targetPath);
+  let absPath = path.resolve(targetPath);
   if (!fs.existsSync(absPath)) {
     return 0;
+  }
+
+  try {
+    absPath = fs.realpathSync.native(absPath);
+  } catch {
+    try {
+      absPath = fs.realpathSync(absPath);
+    } catch (err) {
+      void err;
+    }
   }
 
   if (fs.statSync(absPath).isFile()) {
@@ -107,6 +117,8 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
   }
 
   let count = 0;
+  const visitedRealDirs = new Set<string>();
+  visitedRealDirs.add(absPath);
 
   function walk(currentDir: string, relDir: string = "") {
     let entries: fs.Dirent[];
@@ -146,6 +158,29 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
         if (isExcluded(relPath) || isExcluded(`${relPath}/**`)) {
           continue;
         }
+
+        let realDir: string;
+        try {
+          realDir = fs.realpathSync.native(fullPath);
+        } catch {
+          try {
+            realDir = fs.realpathSync(fullPath);
+          } catch {
+            realDir = fullPath;
+          }
+        }
+
+        // Prevent following symlinks outside the checked tree
+        const isSymlink = entry.isSymbolicLink();
+        if (isSymlink && !realDir.startsWith(absPath + path.sep) && realDir !== absPath) {
+          continue;
+        }
+
+        if (visitedRealDirs.has(realDir)) {
+          continue;
+        }
+        visitedRealDirs.add(realDir);
+
         walk(fullPath, relPath);
       } else if (entry.isFile() && name.toLowerCase().endsWith(".lua")) {
         if (!isExcluded(relPath)) {

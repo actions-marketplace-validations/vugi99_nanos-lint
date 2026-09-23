@@ -391,6 +391,27 @@ describe("luals utilities", () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
     });
+
+    it("does not loop infinitely or inflate count on circular symlinks (Issue #21)", () => {
+      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-symlink-loop-"));
+      try {
+        const packDir = path.join(tempRoot, "pack");
+        fs.mkdirSync(packDir, { recursive: true });
+        fs.writeFileSync(path.join(packDir, "a.lua"), "print('hi')");
+
+        try {
+          const linkPath = path.join(packDir, "self");
+          fs.symlinkSync(packDir, linkPath, process.platform === "win32" ? "junction" : "dir");
+        } catch (err) {
+          void err;
+        }
+
+        const count = countCheckedFiles(tempRoot);
+        expect(count).toBe(1);
+      } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("resolveLuaLSBinary", () => {
