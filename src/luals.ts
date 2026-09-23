@@ -77,9 +77,10 @@ export function escapePowerShellSingleQuote(str: string): string {
 }
 
 /**
- * Resolves the latest available LuaLS release tag from the GitHub API.
+ * Fetches the latest available LuaLS release tag from the GitHub API.
+ * Returns null if the request fails, times out, or receives an invalid tag.
  */
-export async function resolveLatestLuaLSVersion(): Promise<string> {
+export async function fetchLatestLuaLSVersionFromGitHub(): Promise<string | null> {
   try {
     const headers: Record<string, string> = { "User-Agent": "nanos-lint" };
     if (process.env.GITHUB_TOKEN) {
@@ -105,7 +106,16 @@ export async function resolveLatestLuaLSVersion(): Promise<string> {
       `[luals] Failed to resolve latest LuaLS version from GitHub API: ${err instanceof Error ? err.message : String(err)}`
     );
   }
-  return FALLBACK_LUALS_VERSION;
+  return null;
+}
+
+/**
+ * Resolves the latest available LuaLS release tag from the GitHub API,
+ * falling back to FALLBACK_LUALS_VERSION if offline or unreachable.
+ */
+export async function resolveLatestLuaLSVersion(): Promise<string> {
+  const version = await fetchLatestLuaLSVersionFromGitHub();
+  return version || FALLBACK_LUALS_VERSION;
 }
 
 /**
@@ -182,8 +192,12 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
   throw new Error(`Unsupported platform: ${platform}`);
 }
 
+export function getBaseLuaLSCacheDir(): string {
+  return path.join(systemPaths.cache, "luals");
+}
+
 export function getCacheDir(version: string = FALLBACK_LUALS_VERSION): string {
-  return path.join(systemPaths.cache, "luals", version);
+  return path.join(getBaseLuaLSCacheDir(), version);
 }
 
 /**
@@ -195,6 +209,143 @@ export function getLegacyCacheDir(version: string = FALLBACK_LUALS_VERSION): str
       ? process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local")
       : process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
   return path.join(base, "nanos-lint", "luals", version);
+}
+
+export const LUALS_METADATA_FILENAME = "metadata.json";
+
+export interface LuaLSMetadata {
+  lastCheckedWeek: string;
+  latestVersion: string;
+  lastCheckedDate?: string;
+}
+
+/**
+ * Calculates the ISO 8601 week string for a given date in the format 'YYYY-Www' (e.g. '2026-W39').
+ */
+export function getIsoWeek(d: Date = new Date()): string {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+export function getLuaLSMetadataPath(baseCacheDir: string = getBaseLuaLSCacheDir()): string {
+  return path.join(baseCacheDir, LUALS_METADATA_FILENAME);
+}
+
+export function readLuaLSMetadata(baseCacheDir: string = getBaseLuaLSCacheDir()): LuaLSMetadata | null {
+  const metaPath = getLuaLSMetadataPath(baseCacheDir);
+  if (!fs.existsSync(metaPath)) {
+    return null;
+  }
+  try {
+    const content = fs.readFileSync(metaPath, "utf-8");
+    const parsed = JSON.parse(content) as LuaLSMetadata;
+    if (
+      typeof parsed?.lastCheckedWeek === "string" &&
+      typeof parsed?.latestVersion === "string"
+    ) {
+      return parsed;
+    }
+  } catch (err) {
+    logger.debug(`[luals] Failed to parse LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return null;
+}
+
+export function writeLuaLSMetadata(
+  metadata: LuaLSMetadata,
+  baseCacheDir: string = getBaseLuaLSCacheDir()
+): void {
+  try {
+    fs.mkdirSync(baseCacheDir, { recursive: true });
+    const metaPath = getLuaLSMetadataPath(baseCacheDir);
+    fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2), "utf-8");
+  } catch (err) {
+    logger.warn(`[luals] Failed to write LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Lists all cached LuaLS versions in baseCacheDir that have a valid .complete marker
+ * and a functional executable binary.
+ */
+export function listCachedLuaLSVersions(baseCacheDir: string = getBaseLuaLSCacheDir()): string[] {
+  if (!fs.existsSync(baseCacheDir)) {
+    return [];
+  }
+  try {
+    const entries = fs.readdirSync(baseCacheDir, { withFileTypes: true });
+    const versions: string[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) {
+        continue;
+      }
+      const version = sanitizeLuaLSVersion(entry.name);
+      if (!version) {
+        continue;
+      }
+      const dirPath = path.join(baseCacheDir, entry.name);
+      const marker = path.join(dirPath, ".complete");
+      const info = getPlatformInfo(version);
+      const bin = path.join(dirPath, info.binaryRelativePath);
+      if (fs.existsSync(marker) && fs.existsSync(bin)) {
+        try {
+          if (fs.readFileSync(marker, "utf-8").trim() === version && isBinaryValid(bin)) {
+            versions.push(version);
+          }
+        } catch (err) {
+          logger.debug(`[luals] Error validating cached version ${version}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+    return versions;
+  } catch (err) {
+    logger.debug(`[luals] Failed to list cached LuaLS versions: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
+/**
+ * Removes older cached LuaLS version directories, preserving keepVersion,
+ * hidden/temporary directories, and metadata files.
+ */
+export function cleanupOldCachedLuaLSVersions(
+  keepVersion: string,
+  baseCacheDir: string = getBaseLuaLSCacheDir()
+): string[] {
+  if (!fs.existsSync(baseCacheDir)) {
+    return [];
+  }
+  const removed: string[] = [];
+  try {
+    const entries = fs.readdirSync(baseCacheDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      if (entry.name.startsWith(".")) {
+        continue;
+      }
+      if (entry.name !== keepVersion) {
+        const dirPath = path.join(baseCacheDir, entry.name);
+        try {
+          fs.rmSync(dirPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+          removed.push(entry.name);
+          logger.info(`[luals] Cleaned up older cached LuaLS version: ${entry.name}`);
+        } catch (err) {
+          logger.warn(
+            `[luals] Failed to remove older cached LuaLS version at ${dirPath}: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+    }
+  } catch (err) {
+    logger.debug(`[luals] Failed to clean up old LuaLS versions: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  return removed;
 }
 
 export interface DownloadOptions {
@@ -497,103 +648,193 @@ export async function resolveLuaLSBinary(
     }
   }
 
-  const resolvedVersion = await resolveLuaLSVersion(version);
-  const info = getPlatformInfo(resolvedVersion);
+  const isDefaultOrLatest = !version || version === "latest";
 
-  // Bundled with package for explicitly requested version
-  const bundledPath = path.join(getPackageRoot(), info.binaryRelativePath);
-  if (fs.existsSync(bundledPath) && isBinaryValid(bundledPath)) {
-    return bundledPath;
-  }
+  // When a specific version is explicitly requested (not "latest"):
+  if (!isDefaultOrLatest) {
+    const resolvedVersion = await resolveLuaLSVersion(version);
+    const info = getPlatformInfo(resolvedVersion);
 
-  // 3. User cache
-  const cachedDir = getCacheDir(resolvedVersion);
-  const cachedPath = path.join(cachedDir, info.binaryRelativePath);
-  const completeMarker = path.join(cachedDir, ".complete");
+    // Bundled with package for explicitly requested version
+    const bundledPath = path.join(getPackageRoot(), info.binaryRelativePath);
+    if (fs.existsSync(bundledPath) && isBinaryValid(bundledPath)) {
+      return bundledPath;
+    }
 
-  if (fs.existsSync(cachedPath)) {
-    if (fs.existsSync(completeMarker)) {
-      try {
-        const storedVersion = fs.readFileSync(completeMarker, "utf-8").trim();
-        if (storedVersion === resolvedVersion && isBinaryValid(cachedPath)) {
-          return cachedPath;
+    // User cache for explicitly requested version
+    const cachedDir = getCacheDir(resolvedVersion);
+    const cachedPath = path.join(cachedDir, info.binaryRelativePath);
+    const completeMarker = path.join(cachedDir, ".complete");
+
+    if (fs.existsSync(cachedPath)) {
+      if (fs.existsSync(completeMarker)) {
+        try {
+          const storedVersion = fs.readFileSync(completeMarker, "utf-8").trim();
+          if (storedVersion === resolvedVersion && isBinaryValid(cachedPath)) {
+            return cachedPath;
+          }
+        } catch (err) {
+          logger.debug(
+            `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`
+          );
         }
+      }
+      if (!options?.quiet) {
+        logger.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
+      }
+      try {
+        fs.rmSync(cachedDir, { recursive: true, force: true });
       } catch (err) {
-        logger.debug(
-          `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`
+        logger.warn(
+          `[luals] Failed to remove corrupted cache directory ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
         );
       }
     }
-    // Cached binary is corrupted/incomplete/stale - clean up and re-download
-    if (!options?.quiet) {
-      logger.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
+
+    // Probe legacy cache location from nanos-lint <= 2.2.1
+    const legacyDir = getLegacyCacheDir(resolvedVersion);
+    const legacyPath = path.join(legacyDir, info.binaryRelativePath);
+    const legacyMarker = path.join(legacyDir, ".complete");
+
+    if (fs.existsSync(legacyPath)) {
+      let validLegacy = false;
+      if (fs.existsSync(legacyMarker)) {
+        try {
+          const stored = fs.readFileSync(legacyMarker, "utf-8").trim();
+          if (stored === resolvedVersion && isBinaryValid(legacyPath)) {
+            validLegacy = true;
+          }
+        } catch (err) {
+          logger.debug(
+            `[luals] Failed to read legacy complete marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      } else if (isBinaryValid(legacyPath)) {
+        validLegacy = true;
+      }
+
+      if (validLegacy) {
+        if (path.resolve(legacyDir) !== path.resolve(cachedDir)) {
+          try {
+            fs.mkdirSync(path.dirname(cachedDir), { recursive: true });
+            fs.cpSync(legacyDir, cachedDir, { recursive: true });
+            if (fs.existsSync(cachedPath) && isBinaryValid(cachedPath)) {
+              return cachedPath;
+            }
+          } catch (err) {
+            logger.warn(
+              `[luals] Failed to migrate legacy cache from ${legacyDir} to ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
+        return legacyPath;
+      }
     }
+
+    // In PATH
     try {
-      fs.rmSync(cachedDir, { recursive: true, force: true });
+      const cmd = process.platform === "win32" ? "where.exe" : "which";
+      const { stdout } = await execFileAsync(cmd, ["lua-language-server"]);
+      const found = stdout.trim().split(/\r?\n/)[0];
+      if (found && fs.existsSync(found) && isBinaryValid(found)) {
+        return found;
+      }
     } catch (err) {
-      logger.warn(
-        `[luals] Failed to remove corrupted cache directory ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
+      logger.debug(
+        `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
+    // Download and cache explicit version
+    return await downloadAndExtractLuaLS(resolvedVersion, undefined, options);
+  }
+
+  // 3. Default/latest version: Weekly cache check & auto-cleanup
+  const baseCacheDir = getBaseLuaLSCacheDir();
+  const currentWeek = getIsoWeek();
+  const metadata = readLuaLSMetadata(baseCacheDir);
+  const cachedVersions = listCachedLuaLSVersions(baseCacheDir);
+
+  // Check if we already checked for updates during the current week and have a valid binary
+  if (metadata && metadata.lastCheckedWeek === currentWeek) {
+    if (metadata.latestVersion) {
+      const info = getPlatformInfo(metadata.latestVersion);
+      const cachedPath = path.join(getCacheDir(metadata.latestVersion), info.binaryRelativePath);
+      if (isBinaryValid(cachedPath)) {
+        return cachedPath;
+      }
+    }
+    if (cachedVersions.length > 0) {
+      const fallbackVersion = cachedVersions[0];
+      const info = getPlatformInfo(fallbackVersion);
+      const cachedPath = path.join(getCacheDir(fallbackVersion), info.binaryRelativePath);
+      if (isBinaryValid(cachedPath)) {
+        return cachedPath;
+      }
+    }
+  }
+
+  // We need to check for updates (new week, missing metadata, or no valid binary in cache)
+  const onlineTag = await fetchLatestLuaLSVersionFromGitHub();
+  const today = new Date().toISOString().split("T")[0];
+
+  let targetVersion: string;
+  if (onlineTag) {
+    targetVersion = onlineTag;
+  } else if (metadata?.latestVersion && cachedVersions.includes(metadata.latestVersion)) {
+    logger.info(`[luals] Network unreachable or rate limited; using cached LuaLS ${metadata.latestVersion}.`);
+    targetVersion = metadata.latestVersion;
+  } else if (cachedVersions.length > 0) {
+    logger.info(`[luals] Network unreachable or rate limited; using cached LuaLS ${cachedVersions[0]}.`);
+    targetVersion = cachedVersions[0];
+  } else {
+    targetVersion = FALLBACK_LUALS_VERSION;
+  }
+
+  // Update metadata with the current week and target version
+  writeLuaLSMetadata(
+    {
+      lastCheckedWeek: currentWeek,
+      latestVersion: targetVersion,
+      lastCheckedDate: today,
+    },
+    baseCacheDir
+  );
+
+  const info = getPlatformInfo(targetVersion);
+  const targetCacheDir = getCacheDir(targetVersion);
+  const targetBinaryPath = path.join(targetCacheDir, info.binaryRelativePath);
+  const completeMarker = path.join(targetCacheDir, ".complete");
+
+  if (fs.existsSync(completeMarker) && isBinaryValid(targetBinaryPath)) {
+    // Already downloaded and valid; clean up any older versions
+    cleanupOldCachedLuaLSVersions(targetVersion, baseCacheDir);
+    return targetBinaryPath;
+  }
+
+  // Check PATH as fallback before downloading if offline/unreachable
+  if (!onlineTag) {
+    try {
+      const cmd = process.platform === "win32" ? "where.exe" : "which";
+      const { stdout } = await execFileAsync(cmd, ["lua-language-server"]);
+      const found = stdout.trim().split(/\r?\n/)[0];
+      if (found && fs.existsSync(found) && isBinaryValid(found)) {
+        return found;
+      }
+    } catch (err) {
+      logger.debug(
+        `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
 
-  // 3b. Probe legacy cache location from nanos-lint <= 2.2.1
-  const legacyDir = getLegacyCacheDir(resolvedVersion);
-  const legacyPath = path.join(legacyDir, info.binaryRelativePath);
-  const legacyMarker = path.join(legacyDir, ".complete");
+  // Download and extract latest LuaLS
+  const downloadedBinary = await downloadAndExtractLuaLS(targetVersion, targetCacheDir, options);
 
-  if (fs.existsSync(legacyPath)) {
-    let validLegacy = false;
-    if (fs.existsSync(legacyMarker)) {
-      try {
-        const stored = fs.readFileSync(legacyMarker, "utf-8").trim();
-        if (stored === resolvedVersion && isBinaryValid(legacyPath)) {
-          validLegacy = true;
-        }
-      } catch (err) {
-        logger.debug(
-          `[luals] Failed to read legacy complete marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    } else if (isBinaryValid(legacyPath)) {
-      validLegacy = true;
-    }
+  // If update is found, download latest LuaLS to replace the older one, remove the older one from cache afterwards
+  cleanupOldCachedLuaLSVersions(targetVersion, baseCacheDir);
 
-    if (validLegacy) {
-      // Migrate legacy cache to new location if paths differ
-      if (path.resolve(legacyDir) !== path.resolve(cachedDir)) {
-        try {
-          fs.mkdirSync(path.dirname(cachedDir), { recursive: true });
-          fs.cpSync(legacyDir, cachedDir, { recursive: true });
-          if (fs.existsSync(cachedPath) && isBinaryValid(cachedPath)) {
-            return cachedPath;
-          }
-        } catch (err) {
-          logger.warn(
-            `[luals] Failed to migrate legacy cache from ${legacyDir} to ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-      return legacyPath;
-    }
-  }
-
-  // 4. In PATH
-  try {
-    const cmd = process.platform === "win32" ? "where.exe" : "which";
-    const { stdout } = await execFileAsync(cmd, ["lua-language-server"]);
-    const found = stdout.trim().split(/\r?\n/)[0];
-    if (found && fs.existsSync(found) && isBinaryValid(found)) {
-      return found;
-    }
-  } catch (err) {
-    logger.debug(
-      `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-
-  // 5. Download and cache
-  return await downloadAndExtractLuaLS(resolvedVersion, undefined, options);
+  return downloadedBinary;
 }
 
 export async function runLuaLSCheck(

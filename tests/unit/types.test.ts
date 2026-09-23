@@ -31,5 +31,9 @@ describe("fileUriToPath helper edge cases", () => {
     // Unix path in fallback
     const unixFallback = fileUriToPath("file:///%ZZ/var/log/file.lua");
     expect(unixFallback).toBe("/%ZZ/var/log/file.lua");
+
+    // Malformed encoding with Windows drive letter fallback
+    const driveFallback = fileUriToPath("file:///c:%ZZ/foo.lua");
+    expect(driveFallback).toBe("C:%ZZ/foo.lua");
   });
 });

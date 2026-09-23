@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `macos-latest`, `macos-26-intel`, `ubuntu-slim`, and `ubuntu-26.04-arm` runners to the GitHub Actions CI test matrix in `.github/workflows/ci.yml`.
 - Architecture-aware cache keys (`${{ runner.os }}-${{ runner.arch }}`) in `.github/workflows/ci.yml` and `action.yml` preventing cross-architecture cache collisions between x64 and arm64 runners.
 - Documentation in `README.md` for standalone Linux ARM64 and macOS release distributions, `-l, --log-level` option, and `NANOS_LOG_LEVEL` environment variable.
+- Weekly checking cadence for LuaLS updates in `src/luals.ts` tracking ISO week in `metadata.json` (`lastCheckedWeek`), eliminating redundant GitHub API requests on every invocation.
+- Automatic cleanup helper `cleanupOldCachedLuaLSVersions()` removing older cached LuaLS version directories when a newer version is downloaded or verified.
+- Dedicated unit test suite `tests/unit/luals-cache.test.ts` verifying weekly ISO week caching, metadata parsing, cache discovery, error recovery, and older version purging.
 
 ### Changed
 - Replaced direct `console.log`, `console.warn`, and `console.error` calls across the codebase with centralized `logger` methods.
@@ -25,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `downloadAndExtractLuaLS()` now automatically reuses existing local LuaLS installations when available instead of repeatedly re-downloading archives from GitHub, reducing test suite execution time by ~85%.
 - Updated `AGENTS.md` guidelines instructing agents to systematically update `CHANGELOG.md` under `## [Unreleased]` after making changes, and to review, verify, and promote unreleased entries when preparing and publishing releases.
 - Migrated `eslint.config.mjs` from deprecated `tseslint.config()` to ESLint core's native `defineConfig()` from `eslint/config`.
+- `resolveLuaLSBinary()` now reuses the cached latest LuaLS when checked within the same week, checks for updates weekly when unpinned, and gracefully falls back to existing cache if offline.
 
 ## [2.6.1] - 2026-09-23
 
