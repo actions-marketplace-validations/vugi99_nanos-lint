@@ -91,7 +91,9 @@ describe("Regression tests for audit review issues", () => {
         expect(code).toBe(0);
 
         expect(checkSpy).toHaveBeenCalledTimes(1);
-        const [targetPath, , options] = checkSpy.mock.calls[0];
+        const firstCall = checkSpy.mock.calls[0];
+        expect(firstCall).toBeDefined();
+        const [targetPath, , options] = firstCall!;
         expect(targetPath).toBe("tests/pass/character.lua");
         expect(options.ignore).toEqual(["some_dir"]);
       } finally {

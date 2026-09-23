@@ -62,7 +62,38 @@ export default defineConfig(
         { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
       ],
       "no-empty": ["error", { "allowEmptyCatch": false }],
-      "local/no-empty-catch": "error"
+      "local/no-empty-catch": "error",
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/await-thenable": "error",
+      "@typescript-eslint/no-misused-promises": "error",
+      "eqeqeq": ["error", "always", { "null": "ignore" }],
+      "prefer-const": "error"
     }
+  },
+  {
+    files: ["src/**/*.ts"],
+    rules: {
+      "max-lines": [
+        "error",
+        {
+          max: 500,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
+    },
+  },
+  {
+    files: ["tests/**/*.ts"],
+    rules: {
+      "max-lines": [
+        "error",
+        {
+          max: 1000,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
+    },
   }
 );

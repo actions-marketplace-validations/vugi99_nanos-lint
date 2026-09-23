@@ -3,11 +3,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
 import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.js";
-import { resolveAnnotations } from "./annotations.js";
+import { resolveAnnotations, readAnnotationsMetadata } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
+import { getCacheStatus, formatCacheStatusPretty } from "./cache-status.js";
 import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
+import { ConfigError, NanosLintError } from "./errors.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
 
 function getVersionString(): string {
@@ -141,7 +143,11 @@ export function createProgram(options?: CreateProgramOptions): Command {
       if (opts.config) {
         const resolvedConfig = path.resolve(opts.config);
         if (!fs.existsSync(resolvedConfig)) {
-          throw new Error(`Configuration file not found: ${resolvedConfig}`);
+          throw new ConfigError(
+            `Configuration file not found: ${resolvedConfig}`,
+            "ERR_CONFIG_NOT_FOUND",
+            "Verify the path passed to --config exists and is readable."
+          );
         }
       }
 
@@ -199,6 +205,30 @@ export function createProgram(options?: CreateProgramOptions): Command {
     });
 
   program
+    .command("warmup")
+    .alias("download")
+    .description("Pre-fetch and cache both LuaLS binary and annotations for offline execution")
+    .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`)
+    .option("--annotations <path>", "Path to custom annotations.lua file")
+    .option("-q, --quiet", "Suppress download progress logging")
+    .action(async (opts?: { lualsVersion?: string; annotations?: string; quiet?: boolean }) => {
+      const ver = opts?.lualsVersion || DEFAULT_LUALS_VERSION;
+      const bin = await resolveLuaLSBinary(ver, { quiet: opts?.quiet });
+      writeOutput(`[warmup] LuaLS binary ready: ${bin}`);
+
+      const annotationsPath = await resolveAnnotations({
+        customPath: opts?.annotations,
+        quiet: opts?.quiet,
+      });
+      const meta = readAnnotationsMetadata();
+      const commitInfo =
+        meta?.commitId && meta.commitId !== "unknown" ? ` (commit ${meta.commitId.slice(0, 7)})` : "";
+      writeOutput(`[warmup] nanos world annotations ready: ${annotationsPath}${commitInfo}`);
+      writeOutput("[warmup] Cache pre-warmed successfully. Ready for offline execution.");
+      setExitCode(0);
+    });
+
+  program
     .command("download-luals [version]")
     .description("Download and cache the LuaLS binary")
     .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`)
@@ -210,25 +240,69 @@ export function createProgram(options?: CreateProgramOptions): Command {
       setExitCode(0);
     });
 
+  const handleCleanCache = (): void => {
+    try {
+      const cleared = cleanCache();
+      if (cleared) {
+        writeOutput(`[cache] Cleared cache at: ${cleared}`);
+      } else {
+        writeOutput(`[cache] Cache is already empty (${systemPaths.cache})`);
+      }
+      setExitCode(0);
+    } catch (err) {
+      logger.error(
+        `[cache] Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`
+      );
+      setExitCode(1);
+    }
+  };
+
+  const handleCacheStatus = (opts?: { json?: boolean }): void => {
+    const report = getCacheStatus();
+    if (opts?.json) {
+      writeOutput(JSON.stringify(report, null, 2));
+    } else {
+      writeOutput(formatCacheStatusPretty(report));
+    }
+    setExitCode(0);
+  };
+
+  const cacheCmd = program
+    .command("cache")
+    .description("Inspect or manage the nanos-lint cache")
+    .option("--json", "Output cache state in JSON format");
+
+  cacheCmd
+    .command("status", { isDefault: true })
+    .alias("info")
+    .description("Show cache status, installed versions, and disk usage")
+    .option("--json", "Output cache state in JSON format")
+    .action((opts: { json?: boolean }, cmd: Command) => {
+      const json = opts?.json || (cmd.parent ? Boolean(cmd.parent.opts()?.json) : false);
+      handleCacheStatus({ json });
+    });
+
+  cacheCmd
+    .command("clean")
+    .description("Clear the nanos-lint cache")
+    .action(() => {
+      handleCleanCache();
+    });
+
+  program
+    .command("cache-status")
+    .description("Show cache status, installed versions, and disk usage")
+    .option("--json", "Output cache state in JSON format")
+    .action((opts: { json?: boolean }) => {
+      handleCacheStatus(opts);
+    });
+
   program
     .command("clean-cache")
     .alias("clean")
     .description("Clear the nanos-lint cache")
     .action(() => {
-      try {
-        const cleared = cleanCache();
-        if (cleared) {
-          writeOutput(`[cache] Cleared cache at: ${cleared}`);
-        } else {
-          writeOutput(`[cache] Cache is already empty (${systemPaths.cache})`);
-        }
-        setExitCode(0);
-      } catch (err) {
-        logger.error(
-          `[cache] Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`
-        );
-        setExitCode(1);
-      }
+      handleCleanCache();
     });
 
   program
@@ -246,6 +320,8 @@ export function createProgram(options?: CreateProgramOptions): Command {
     `
 Examples:
   $ npx nanos-lint
+  $ npx nanos-lint warmup
+  $ npx nanos-lint cache status
   $ npx nanos-lint check ./my-package
   $ npx nanos-lint check . --checklevel=Error
   $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"
@@ -261,9 +337,13 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
   // Early parse of log-level so early exits (e.g. --version, --help) configure the logger
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (!arg) {
+      continue;
+    }
     if (arg === "-l" || arg === "--log-level") {
-      if (i + 1 < args.length && isValidLogLevel(args[i + 1])) {
-        logger.setLevel(args[i + 1] as LogLevel);
+      const nextArg = args[i + 1];
+      if (nextArg && isValidLogLevel(nextArg)) {
+        logger.setLevel(nextArg as LogLevel);
       }
     } else if (arg.startsWith("--log-level=")) {
       const val = arg.split("=")[1];
@@ -287,9 +367,24 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
     if (err instanceof CommanderError) {
       return err.exitCode;
     }
+    if (err instanceof NanosLintError) {
+      logger.error(`error: ${err.message}`);
+      if (err.remedy) {
+        logger.error(`hint: ${err.remedy}`);
+      }
+      if ((logger.getLevel() === "debug" || process.env.DEBUG) && err.stack) {
+        logger.error(err.stack);
+        if (err.cause) {
+          logger.error(
+            `cause: ${err.cause instanceof Error ? err.cause.stack || err.cause.message : String(err.cause)}`
+          );
+        }
+      }
+      return 1;
+    }
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`error: ${message}`);
-    if (process.env.DEBUG && err instanceof Error && err.stack) {
+    if ((logger.getLevel() === "debug" || process.env.DEBUG) && err instanceof Error && err.stack) {
       logger.error(err.stack);
     }
     return 1;

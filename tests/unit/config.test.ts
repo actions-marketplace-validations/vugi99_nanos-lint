@@ -40,9 +40,10 @@ describe("config module", () => {
     const templatePath = getDefaultTemplatePath();
     const config = loadConfigFile(templatePath);
     expect(config.runtime?.version).toBe("Lua 5.4");
+    expect(config.runtime?.path).toContain("Shared/?.lua");
+    expect(config.runtime?.special?.["Package.Require"]).toBe("require");
     expect(config.diagnostics?.enable).toBe(true);
-    expect(config.diagnostics?.globals).toContain("Package");
-    expect(config.diagnostics?.globals).toContain("Server");
+    expect(config.diagnostics?.severity?.["unused-local"]).toBe("Warning");
     expect(config.workspace?.ignoreDir).toContain("script");
     expect(config.workspace?.ignoreDir).toContain("node_modules");
   });
@@ -79,6 +80,49 @@ describe("config module", () => {
     expect(merged.diagnostics?.globals).toContain("MyCustomGlobal");
     expect(merged.diagnostics?.severity?.["undefined-field"]).toBe("Information");
     expect(merged.diagnostics?.disable).toContain("lowercase-global");
+  });
+
+  it("filters unrecognized diagnostic codes from diagnostics.severity and neededFileStatus (Issue #22)", () => {
+    const base: LuaRCConfig = {
+      diagnostics: {
+        severity: {
+          "unused-local": "Warning",
+          "redefined-local": "Warning",
+        },
+        neededFileStatus: {
+          "unused-local": "Any",
+        },
+      },
+    };
+
+    const override: LuaRCConfig = {
+      diagnostics: {
+        severity: {
+          "syntax-error": "Error",
+          "bogus-key": "Warning",
+          "undefined-global": "Error",
+        },
+        neededFileStatus: {
+          "syntax-error": "Any",
+          "redefined-local": "Any",
+        },
+      },
+    };
+
+    const merged = mergeConfigs(base, override);
+    expect(merged.diagnostics?.severity).toEqual({
+      "unused-local": "Warning",
+      "redefined-local": "Warning",
+      "undefined-global": "Error",
+    });
+    expect(merged.diagnostics?.severity).not.toHaveProperty("syntax-error");
+    expect(merged.diagnostics?.severity).not.toHaveProperty("bogus-key");
+
+    expect(merged.diagnostics?.neededFileStatus).toEqual({
+      "unused-local": "Any",
+      "redefined-local": "Any",
+    });
+    expect(merged.diagnostics?.neededFileStatus).not.toHaveProperty("syntax-error");
   });
 
   it("preserves default ignore rules when cliIgnore is passed", () => {

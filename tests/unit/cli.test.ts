@@ -242,6 +242,47 @@ describe("cli module flag and command parsing", () => {
       logSpy.mockRestore();
     });
 
+    it("handles warmup command and download alias with default and custom options", async () => {
+      const lualsSpy = vi.spyOn(lualsModule, "resolveLuaLSBinary").mockResolvedValue("/mock/bin/luals");
+      const annotSpy = vi.spyOn(annotationsModule, "resolveAnnotations").mockResolvedValue("/mock/annotations.lua");
+      const metaSpy = vi.spyOn(annotationsModule, "readAnnotationsMetadata").mockReturnValue({
+        commitId: "abcdef123456",
+        lastChecked: "2026-09-23",
+        date: { year: 2026, month: 9, day: 23 },
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      const codeDefault = await runCLI(["warmup"]);
+      expect(codeDefault).toBe(0);
+      expect(lualsSpy).toHaveBeenCalledWith("latest", { quiet: undefined });
+      expect(annotSpy).toHaveBeenCalledWith({ customPath: undefined, quiet: undefined });
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[warmup] LuaLS binary ready: /mock/bin/luals"));
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[warmup] nanos world annotations ready: /mock/annotations.lua (commit abcdef1)")
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[warmup] Cache pre-warmed successfully. Ready for offline execution.")
+      );
+
+      // Test alias "download" and custom options
+      const codeDownload = await runCLI([
+        "download",
+        "--luals-version",
+        "3.19.0",
+        "--annotations",
+        "/custom/annotations.lua",
+        "--quiet",
+      ]);
+      expect(codeDownload).toBe(0);
+      expect(lualsSpy).toHaveBeenCalledWith("3.19.0", { quiet: true });
+      expect(annotSpy).toHaveBeenCalledWith({ customPath: "/custom/annotations.lua", quiet: true });
+
+      lualsSpy.mockRestore();
+      annotSpy.mockRestore();
+      metaSpy.mockRestore();
+      logSpy.mockRestore();
+    });
+
     it("handles errors during clean-cache execution", async () => {
       const cleanSpy = vi.spyOn(pathsModule, "cleanCache").mockImplementation(() => {
         throw new Error("EACCES: permission denied");

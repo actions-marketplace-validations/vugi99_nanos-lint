@@ -5,6 +5,7 @@ import { parse, stripComments, type ParseError, printParseErrorCode } from "json
 import { systemPaths } from "./paths.js";
 import { logger } from "./logger.js";
 import type { LuaRCConfig } from "./types.js";
+import { ConfigError } from "./errors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,10 +75,26 @@ export function parseJsonc<T = unknown>(text: string): T {
 
 export function loadConfigFile(filePath: string): LuaRCConfig {
   if (!fs.existsSync(filePath)) {
-    throw new Error(`Configuration file not found: ${filePath}`);
+    throw new ConfigError(
+      `Configuration file not found: ${filePath}`,
+      "ERR_CONFIG_NOT_FOUND",
+      "Ensure the configuration file path is correct or run 'nanos-lint init' to generate a default config."
+    );
   }
   const content = fs.readFileSync(filePath, "utf-8");
-  return parseJsonc<LuaRCConfig>(content);
+  try {
+    return parseJsonc<LuaRCConfig>(content);
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      throw err;
+    }
+    throw new ConfigError(
+      `Failed to parse configuration file at ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      "ERR_CONFIG_PARSE",
+      "Check your .luarc.json syntax or run 'nanos-lint init --force' to scaffold a clean template.",
+      { cause: err }
+    );
+  }
 }
 
 /**
@@ -99,6 +116,77 @@ export function stripTrailingSlashes(value: string): string {
 export interface MergeConfigOptions {
   cliIgnore?: string[];
 }
+
+/**
+ * Set of recognized diagnostic codes supported by Lua Language Server (LuaLS).
+ * LuaLS discards the entire `diagnostics.severity` object if it contains a single
+ * unrecognized key (such as obsolete 'syntax-error'). nanos-lint filters severity
+ * and neededFileStatus maps against this allow-list to ensure valid configuration.
+ */
+export const VALID_LUALS_DIAGNOSTIC_CODES: ReadonlySet<string> = new Set([
+  "ambiguity-1",
+  "assign-type-mismatch",
+  "await-in-sync",
+  "cast-local-type",
+  "cast-type-mismatch",
+  "circle-doc-class",
+  "close-non-object",
+  "code-after-break",
+  "codestyle-check",
+  "count-down-loop",
+  "deprecated",
+  "different-requires",
+  "discard-returns",
+  "doc-field-no-class",
+  "duplicate-doc-alias",
+  "duplicate-doc-field",
+  "duplicate-doc-param",
+  "duplicate-index",
+  "duplicate-set-field",
+  "empty-block",
+  "global-element",
+  "global-in-nil-env",
+  "incomplete-signature-doc",
+  "inject-field",
+  "invisible",
+  "lowercase-global",
+  "missing-fields",
+  "missing-global-doc",
+  "missing-local-export-doc",
+  "missing-parameter",
+  "missing-return",
+  "missing-return-value",
+  "name-style-check",
+  "need-check-nil",
+  "newfield-call",
+  "newline-call",
+  "no-unknown",
+  "not-yieldable",
+  "param-type-mismatch",
+  "redefined-local",
+  "redundant-parameter",
+  "redundant-return",
+  "redundant-return-value",
+  "redundant-value",
+  "return-type-mismatch",
+  "spell-check",
+  "trailing-space",
+  "unbalanced-assignments",
+  "undefined-doc-class",
+  "undefined-doc-name",
+  "undefined-doc-param",
+  "undefined-env-child",
+  "undefined-field",
+  "undefined-global",
+  "unknown-cast-variable",
+  "unknown-diag-code",
+  "unknown-operator",
+  "unreachable-code",
+  "unused-function",
+  "unused-label",
+  "unused-local",
+  "unused-vararg",
+]);
 
 /**
  * Merges a base nanos configuration with a workspace override configuration.
@@ -143,11 +231,37 @@ export function mergeConfigs(
   const overrideGlobals = override.diagnostics?.globals ?? [];
   const globalsSet = new Set<string>([...baseGlobals, ...overrideGlobals]);
 
-  // Merge severities
-  const mergedSeverity = {
+  // Merge severities and filter out unknown keys to prevent LuaLS from voiding the table
+  const rawSeverity = {
     ...(base.diagnostics?.severity ?? {}),
     ...(override.diagnostics?.severity ?? {}),
   };
+  const mergedSeverity: Record<string, string> = {};
+  for (const [code, level] of Object.entries(rawSeverity)) {
+    if (VALID_LUALS_DIAGNOSTIC_CODES.has(code)) {
+      mergedSeverity[code] = level;
+    } else {
+      logger.warn(
+        `[config] Unrecognized diagnostic code "${code}" in diagnostics.severity was dropped to prevent LuaLS from discarding the severity configuration.`
+      );
+    }
+  }
+
+  // Merge neededFileStatus and filter out unknown keys
+  const rawNeededFileStatus = {
+    ...(base.diagnostics?.neededFileStatus ?? {}),
+    ...(override.diagnostics?.neededFileStatus ?? {}),
+  };
+  const mergedNeededFileStatus: Record<string, string> = {};
+  for (const [code, status] of Object.entries(rawNeededFileStatus)) {
+    if (VALID_LUALS_DIAGNOSTIC_CODES.has(code)) {
+      mergedNeededFileStatus[code] = status;
+    } else {
+      logger.warn(
+        `[config] Unrecognized diagnostic code "${code}" in diagnostics.neededFileStatus was dropped.`
+      );
+    }
+  }
 
   const hasCliIgnore = Boolean(options?.cliIgnore && options.cliIgnore.length > 0);
 
@@ -226,6 +340,7 @@ export function mergeConfigs(
       ...(override.diagnostics ?? {}),
       globals: Array.from(globalsSet),
       severity: mergedSeverity,
+      ...(Object.keys(mergedNeededFileStatus).length > 0 ? { neededFileStatus: mergedNeededFileStatus } : {}),
     },
   };
 
@@ -333,15 +448,21 @@ export interface InitWorkspaceOptions {
 export function initWorkspace(workspacePath: string, options?: InitWorkspaceOptions): string {
   const targetFile = path.join(workspacePath, ".luarc.json");
   if (fs.existsSync(targetFile) && !options?.force) {
-    throw new Error(`.luarc.json already exists at ${targetFile}. Use --force to overwrite.`);
+    throw new ConfigError(
+      `.luarc.json already exists at ${targetFile}. Use --force to overwrite.`,
+      "ERR_CONFIG_EXISTS",
+      "Pass --force to overwrite the existing .luarc.json file."
+    );
   }
 
   const template = loadConfigFile(getDefaultTemplatePath());
   const sourceAnnotations = options?.annotationsPath || getDefaultAnnotationsPath();
 
   if (!fs.existsSync(sourceAnnotations)) {
-    throw new Error(
-      `Definitions file not found at ${sourceAnnotations}. Make sure annotations have been downloaded or pass a valid file with --annotations.`
+    throw new ConfigError(
+      `Definitions file not found at ${sourceAnnotations}. Make sure annotations have been downloaded or pass a valid file with --annotations.`,
+      "ERR_ANNOTATIONS_NOT_FOUND",
+      "Run 'nanos-lint warmup' to download annotations or provide --annotations <path>."
     );
   }
 

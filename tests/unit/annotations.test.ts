@@ -163,7 +163,7 @@ describe("annotations management and date-based caching", () => {
       fs.mkdirSync(cacheSubdir, { recursive: true });
 
       const cachedLua = path.join(cacheSubdir, "annotations.lua");
-      fs.writeFileSync(cachedLua, "-- today cached");
+      fs.writeFileSync(cachedLua, "-- today cached\n" + " ".repeat(1200));
 
       const { dateStr, dateObj } = getTodayDateString();
       const meta: AnnotationsMetadata = {
@@ -234,7 +234,7 @@ describe("annotations management and date-based caching", () => {
       fs.mkdirSync(cacheSubdir, { recursive: true });
 
       const cachedLua = path.join(cacheSubdir, "annotations.lua");
-      fs.writeFileSync(cachedLua, "-- old cached annotations");
+      fs.writeFileSync(cachedLua, "-- old cached annotations\n" + " ".repeat(1200));
 
       // Yesterday's metadata
       const oldMeta: AnnotationsMetadata = {

@@ -82,7 +82,9 @@ npm run test:coverage
 
 These quality gates are automated in `.githooks/pre-commit`, which the `prepare` npm script installs via `git config core.hooksPath .githooks`. That setting is repo-local, so a fresh clone only runs the hook after `npm install`. `.gitattributes` keeps hook and shell scripts on LF so it also works on Windows.
 
-If any of the above commands fail or emit warnings, investigate and fix them before responding to the user.
+There is no need to manually run all checks before committing because those checks are already included in and executed by the pre-commit hook on every commit. Running them manually beforehand is redundant unless you are debugging a specific failure or running an isolated check.
+
+If any check fails or emits warnings, investigate and fix it before responding to the user.
 
 Additionally, whenever you make changes to the codebase, **you must update `CHANGELOG.md`** under the `## [Unreleased]` section with concise bullet points categorized under standard Keep a Changelog headings (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`).
 
@@ -111,5 +113,14 @@ Whenever preparing or publishing a new tagged release or cutting a new version:
 - **Pre-Release Requirement**: Record and commit the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
 - **Verify the Release Tag Matches `package.json`**: Confirm the release tag (e.g. `v2.6.1`) matches the `version` field in `package.json`; `.github/workflows/release.yml` enforces this and fails the release on a mismatch.
 - **Update the Action Fallback Version**: Bump the pinned `npx --yes nanos-lint@<version>` fallback version in `action.yml` to the version being released.
+
+---
+
+## 6. Branch and Issue Management Guidelines
+
+- **Do Not Close Issues**: Issues must NOT be manually closed during development. They will be closed after the PR is merged into `master`.
+- **Pull Requests and Merges**: Do not open a PR or merge `dev` to `master` until explicitly instructed by the user.
+- **Commit and Push Per Issue**: Commit and push to `dev` between handling each issue and at the end of the tasks.
+
 
 
