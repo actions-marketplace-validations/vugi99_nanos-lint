@@ -112,4 +112,13 @@ Whenever preparing or publishing a new tagged release or cutting a new version:
 - **Verify the Release Tag Matches `package.json`**: Confirm the release tag (e.g. `v2.6.1`) matches the `version` field in `package.json`; `.github/workflows/release.yml` enforces this and fails the release on a mismatch.
 - **Update the Action Fallback Version**: Bump the pinned `npx --yes nanos-lint@<version>` fallback version in `action.yml` to the version being released.
 
+---
+
+## 6. Branch and Issue Management Guidelines
+
+- **Do Not Close Issues**: Issues must NOT be manually closed during development. They will be closed after the PR is merged into `master`.
+- **Pull Requests and Merges**: Do not open a PR or merge `dev` to `master` until explicitly instructed by the user.
+- **Commit and Push Per Issue**: Commit and push to `dev` between handling each issue and at the end of the tasks.
+
+
 

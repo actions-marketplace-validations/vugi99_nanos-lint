@@ -117,3 +117,4 @@ export async function resolveLuaLSVersion(version?: string): Promise<string> {
   }
   return sanitized;
 }
+

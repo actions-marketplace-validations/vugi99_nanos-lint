@@ -56,3 +56,4 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
 
   throw new Error(`Unsupported platform: ${platform}`);
 }
+

@@ -61,10 +61,49 @@ export function readAnnotationsMetadata(cacheDir: string = getAnnotationsCacheDi
     if (typeof parsed?.commitId === "string" && typeof parsed?.lastChecked === "string") {
       return parsed;
     }
+    try {
+      fs.unlinkSync(metaPath);
+      logger.warn(`[annotations] Stale or invalid annotations metadata at ${metaPath} purged.`);
+    } catch (unlinkErr) {
+      logger.debug(`[annotations] Failed to unlink invalid metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`);
+    }
   } catch (err) {
     logger.debug(`Failed to parse annotations metadata: ${err instanceof Error ? err.message : String(err)}`);
+    try {
+      fs.unlinkSync(metaPath);
+      logger.warn(`[annotations] Corrupted annotations metadata at ${metaPath} purged.`);
+    } catch (unlinkErr) {
+      logger.debug(`[annotations] Failed to unlink corrupted metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`);
+    }
   }
   return null;
+}
+
+/**
+ * Verifies that an annotations file exists, is a regular file, is of non-trivial size (>= 1000 bytes),
+ * and begins with valid Lua comments or nanos world definitions.
+ */
+export function isAnnotationsValid(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) {
+    return false;
+  }
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size < 1000) {
+      return false;
+    }
+    const fd = fs.openSync(filePath, "r");
+    const buffer = Buffer.alloc(256);
+    const bytesRead = fs.readSync(fd, buffer, 0, 256, 0);
+    fs.closeSync(fd);
+    const header = buffer.toString("utf-8", 0, bytesRead).trimStart();
+    return header.startsWith("--") || header.includes("nanos world");
+  } catch (err) {
+    logger.debug(
+      `[annotations] Annotation validation failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return false;
+  }
 }
 
 export async function fetchLatestCommitId(): Promise<string | null> {
@@ -311,7 +350,7 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
 
   // 3. Bundled with package (release distribution)
   const bundled = path.join(getPackageRoot(), "annotations.lua");
-  if (fs.existsSync(bundled)) {
+  if (fs.existsSync(bundled) && isAnnotationsValid(bundled)) {
     return bundled;
   }
 
@@ -321,8 +360,18 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
   const metadata = readAnnotationsMetadata(cacheDir);
   const { dateStr } = getTodayDateString();
 
+  // If cached file exists but is corrupted or empty, purge it
+  if (fs.existsSync(cachedAnnotationsFile) && !isAnnotationsValid(cachedAnnotationsFile)) {
+    logger.warn("[annotations] Cached annotations.lua is corrupted or empty. Purging and refreshing...");
+    try {
+      fs.unlinkSync(cachedAnnotationsFile);
+    } catch (err) {
+      logger.warn(`[annotations] Failed to remove corrupted cached annotations: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // If already checked today and the file exists, return immediately without network call
-  if (metadata && metadata.lastChecked === dateStr && fs.existsSync(cachedAnnotationsFile)) {
+  if (metadata && metadata.lastChecked === dateStr && fs.existsSync(cachedAnnotationsFile) && isAnnotationsValid(cachedAnnotationsFile)) {
     return cachedAnnotationsFile;
   }
 
@@ -330,7 +379,7 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
   const latestCommitId = await fetchLatestCommitId();
 
   if (latestCommitId) {
-    if (metadata && metadata.commitId === latestCommitId && fs.existsSync(cachedAnnotationsFile)) {
+    if (metadata && metadata.commitId === latestCommitId && fs.existsSync(cachedAnnotationsFile) && isAnnotationsValid(cachedAnnotationsFile)) {
       // No changes upstream: update last checked date
       updateLastCheckedDate(latestCommitId, cacheDir);
       return cachedAnnotationsFile;
@@ -341,7 +390,7 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
   }
 
   // If GitHub API could not be reached (offline or rate limit):
-  if (fs.existsSync(cachedAnnotationsFile)) {
+  if (fs.existsSync(cachedAnnotationsFile) && isAnnotationsValid(cachedAnnotationsFile)) {
     try {
       updateLastCheckedDate(metadata?.commitId || "unknown", cacheDir);
     } catch (err) {
@@ -350,10 +399,16 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
     return cachedAnnotationsFile;
   }
 
-  // Cold cache and API failed: try downloading raw file directly
+  // Cold cache or corrupted cache and API failed: try downloading raw file directly
   try {
     return await downloadAndCacheAnnotations("unknown", cacheDir, options);
   } catch (err) {
+    // If offline and download fails, check if bundled annotations exist in package root
+    if (fs.existsSync(bundled) && isAnnotationsValid(bundled)) {
+      logger.info("[annotations] Network offline and cache unavailable. Falling back to bundled annotations.");
+      return bundled;
+    }
+
     const isFsError =
       Boolean(
         err &&

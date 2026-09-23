@@ -72,8 +72,20 @@ export function readLuaLSMetadata(baseCacheDir: string = getBaseLuaLSCacheDir())
     ) {
       return parsed;
     }
+    try {
+      fs.unlinkSync(metaPath);
+      logger.warn(`[luals] Stale or invalid LuaLS metadata at ${metaPath} purged.`);
+    } catch (unlinkErr) {
+      logger.debug(`[luals] Failed to unlink invalid metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`);
+    }
   } catch (err) {
     logger.debug(`[luals] Failed to parse LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`);
+    try {
+      fs.unlinkSync(metaPath);
+      logger.warn(`[luals] Corrupted LuaLS metadata at ${metaPath} purged.`);
+    } catch (unlinkErr) {
+      logger.debug(`[luals] Failed to unlink corrupted metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`);
+    }
   }
   return null;
 }
@@ -222,3 +234,4 @@ export function findExistingLuaLSDir(
 
   return null;
 }
+

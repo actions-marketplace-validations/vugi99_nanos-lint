@@ -74,6 +74,7 @@ export async function resolveLuaLSBinary(
     const cachedPath = path.join(cachedDir, info.binaryRelativePath);
     const completeMarker = path.join(cachedDir, ".complete");
 
+    let wasCorrupted = false;
     if (fs.existsSync(cachedPath)) {
       if (fs.existsSync(completeMarker)) {
         try {
@@ -87,6 +88,7 @@ export async function resolveLuaLSBinary(
           );
         }
       }
+      wasCorrupted = true;
       if (!options?.quiet) {
         logger.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
       }
@@ -154,11 +156,21 @@ export async function resolveLuaLSBinary(
     }
 
     // Download and cache explicit version
-    return await downloadAndExtractLuaLS(
-      resolvedVersion,
-      getCacheDir(resolvedVersion, baseCacheDir),
-      options
-    );
+    try {
+      return await downloadAndExtractLuaLS(
+        resolvedVersion,
+        getCacheDir(resolvedVersion, baseCacheDir),
+        options
+      );
+    } catch (err) {
+      if (wasCorrupted) {
+        throw new Error(
+          `Cached LuaLS binary at '${cachedPath}' is corrupted (failed execution/size check) and cannot be re-downloaded while offline. Please connect to the internet to repair or run 'nanos-lint clean-cache'.`,
+          { cause: err }
+        );
+      }
+      throw err;
+    }
   }
 
   // 3. Default/latest version: Weekly cache check & auto-cleanup
@@ -217,11 +229,14 @@ export async function resolveLuaLSBinary(
   const targetCacheDir = getCacheDir(targetVersion, baseCacheDir);
   const targetBinaryPath = path.join(targetCacheDir, info.binaryRelativePath);
   const completeMarker = path.join(targetCacheDir, ".complete");
-
-  if (fs.existsSync(completeMarker) && isBinaryValid(targetBinaryPath)) {
-    // Already downloaded and valid; clean up any older versions
-    cleanupOldCachedLuaLSVersions(targetVersion, baseCacheDir);
-    return targetBinaryPath;
+  let wasCorrupted = false;
+  if (fs.existsSync(targetBinaryPath)) {
+    if (fs.existsSync(completeMarker) && isBinaryValid(targetBinaryPath)) {
+      // Already downloaded and valid; clean up any older versions
+      cleanupOldCachedLuaLSVersions(targetVersion, baseCacheDir);
+      return targetBinaryPath;
+    }
+    wasCorrupted = true;
   }
 
   // Check PATH as fallback before downloading if offline/unreachable
@@ -241,7 +256,18 @@ export async function resolveLuaLSBinary(
   }
 
   // Download and extract latest LuaLS
-  const downloadedBinary = await downloadAndExtractLuaLS(targetVersion, targetCacheDir, options);
+  let downloadedBinary: string;
+  try {
+    downloadedBinary = await downloadAndExtractLuaLS(targetVersion, targetCacheDir, options);
+  } catch (err) {
+    if (wasCorrupted) {
+      throw new Error(
+        `Cached LuaLS binary at '${targetBinaryPath}' is corrupted (failed execution/size check) and cannot be re-downloaded while offline. Please connect to the internet to repair or run 'nanos-lint clean-cache'.`,
+        { cause: err }
+      );
+    }
+    throw err;
+  }
 
   // If update is found, download latest LuaLS to replace the older one, remove the older one from cache afterwards
   cleanupOldCachedLuaLSVersions(targetVersion, baseCacheDir);
@@ -539,3 +565,4 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
   walk(absPath);
   return count;
 }
+
