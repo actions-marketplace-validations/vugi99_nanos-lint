@@ -155,6 +155,54 @@ jobs:
 
           tar -czf "release-builds/nanos-lint-${TAG_NAME}-linux-x64.tar.gz" -C pkg-linux .
 
+          # 3. macOS arm64 (Apple Silicon) Package
+          mkdir -p pkg-macos-arm64/bin pkg-macos-arm64/templates pkg-macos-arm64/dist
+          curl -fsSL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-darwin-arm64.tar.gz" -o luals-macos-arm64.tar.gz
+          tar -xzf luals-macos-arm64.tar.gz -C pkg-macos-arm64-luals 2>/dev/null || (mkdir -p pkg-macos-arm64-luals && tar -xzf luals-macos-arm64.tar.gz -C pkg-macos-arm64-luals)
+          cp -r pkg-macos-arm64-luals/bin/* pkg-macos-arm64/bin/
+          cp -r pkg-macos-arm64-luals/locale pkg-macos-arm64-luals/meta pkg-macos-arm64-luals/script pkg-macos-arm64-luals/main.lua pkg-macos-arm64/ 2>/dev/null || true
+          cp -r dist/. pkg-macos-arm64/dist/
+          cp annotations.lua pkg-macos-arm64/annotations.lua
+          cp -r templates/. pkg-macos-arm64/templates/
+          cp package.json README.md LICENSE pkg-macos-arm64/
+
+          # Create macOS arm64 shell launcher
+          cat << 'EOF' > pkg-macos-arm64/nanos-lint
+          #!/usr/bin/env bash
+          DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          exec node "$DIR/dist/cli.js" "$@"
+          EOF
+          chmod +x pkg-macos-arm64/nanos-lint
+
+          # Verify macOS arm64 distribution launcher
+          ./pkg-macos-arm64/nanos-lint --help > /dev/null
+
+          tar -czf "release-builds/nanos-lint-${TAG_NAME}-macos-arm64.tar.gz" -C pkg-macos-arm64 .
+
+          # 4. macOS x64 (Intel) Package
+          mkdir -p pkg-macos-x64/bin pkg-macos-x64/templates pkg-macos-x64/dist
+          curl -fsSL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-darwin-x64.tar.gz" -o luals-macos-x64.tar.gz
+          tar -xzf luals-macos-x64.tar.gz -C pkg-macos-x64-luals 2>/dev/null || (mkdir -p pkg-macos-x64-luals && tar -xzf luals-macos-x64.tar.gz -C pkg-macos-x64-luals)
+          cp -r pkg-macos-x64-luals/bin/* pkg-macos-x64/bin/
+          cp -r pkg-macos-x64-luals/locale pkg-macos-x64-luals/meta pkg-macos-x64-luals/script pkg-macos-x64-luals/main.lua pkg-macos-x64/ 2>/dev/null || true
+          cp -r dist/. pkg-macos-x64/dist/
+          cp annotations.lua pkg-macos-x64/annotations.lua
+          cp -r templates/. pkg-macos-x64/templates/
+          cp package.json README.md LICENSE pkg-macos-x64/
+
+          # Create macOS x64 shell launcher
+          cat << 'EOF' > pkg-macos-x64/nanos-lint
+          #!/usr/bin/env bash
+          DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          exec node "$DIR/dist/cli.js" "$@"
+          EOF
+          chmod +x pkg-macos-x64/nanos-lint
+
+          # Verify macOS x64 distribution launcher
+          ./pkg-macos-x64/nanos-lint --help > /dev/null
+
+          tar -czf "release-builds/nanos-lint-${TAG_NAME}-macos-x64.tar.gz" -C pkg-macos-x64 .
+
       - name: Create GitHub Release
         if: steps.tag.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v3
@@ -164,6 +212,8 @@ jobs:
           files: |
             release-builds/nanos-lint-*-windows-x64.zip
             release-builds/nanos-lint-*-linux-x64.tar.gz
+            release-builds/nanos-lint-*-macos-arm64.tar.gz
+            release-builds/nanos-lint-*-macos-x64.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true

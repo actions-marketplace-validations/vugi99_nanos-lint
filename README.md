@@ -17,7 +17,7 @@ A dedicated, fast linter and type-checker for **[nanos world](https://nanos-worl
 - **Zero-Install Local CLI**: Run directly via `npx nanos-lint [path]` without installing anything.
 - **Native GitHub Action**: Use `vugi99/nanos-lint` directly in CI workflows with inline GitHub PR annotations.
 - **Workspace Config Merging**: Fully respects local `.luarc.json` files, merging your project globals and disabled diagnostics on top of the nanos API.
-- **Cross-Platform**: Works on **Windows x64** and **Linux amd64** (plus macOS). Automatically downloads and caches platform LuaLS binaries.
+- **Cross-Platform**: Works on **Windows x64**, **Linux (x64, arm64)**, and **macOS (Apple Silicon arm64, Intel x64)**. Automatically downloads and caches platform LuaLS binaries.
 - **Modern Node.js Runtime**: Built targeting Node.js (>= 24) with zero runtime dependencies.
 
 ---
@@ -178,8 +178,10 @@ Pre-packaged release bundles containing the platform's `lua-language-server` bin
 
 - `nanos-lint-<version>-windows-x64.zip`
 - `nanos-lint-<version>-linux-x64.tar.gz`
+- `nanos-lint-<version>-macos-arm64.tar.gz` (Apple Silicon)
+- `nanos-lint-<version>-macos-x64.tar.gz` (Intel)
 
-These bundles are fully self-contained and ready for offline CI/CD environments with Node.js installed, eliminating the need to download LuaLS or annotations at runtime. Simply extract the archive and run `./nanos-lint` (Linux) or `nanos-lint.cmd` (Windows).
+These bundles are fully self-contained and ready for offline CI/CD environments with Node.js installed, eliminating the need to download LuaLS or annotations at runtime. Simply extract the archive and run `./nanos-lint` (Linux & macOS) or `nanos-lint.cmd` (Windows).
 
 ---
 

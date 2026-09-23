@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Pre-packaged standalone macOS release archives (`nanos-lint-<version>-macos-arm64.tar.gz` for Apple Silicon and `nanos-lint-<version>-macos-x64.tar.gz` for Intel) bundling platform LuaLS binaries, vendored annotations, and shell launchers in `.github/workflows/release.yml`.
+- `macos-latest` runner to the GitHub Actions CI test matrix in `.github/workflows/ci.yml`.
+- Documentation in `README.md` for standalone macOS release distributions and cross-platform architecture support.
+
+### Changed
+- Updated `AGENTS.md` guidelines instructing agents to systematically update `CHANGELOG.md` under `## [Unreleased]` after making changes, and to review, verify, and promote unreleased entries when preparing and publishing releases.
+
 ## [2.6.1] - 2026-09-23
 
 ### Added

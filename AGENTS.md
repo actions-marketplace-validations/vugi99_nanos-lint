@@ -22,7 +22,7 @@ This document outlines the architectural principles, codebase structure, develop
 1. **Zero-Dependency Runtime for End Users**:
    - The compiled package published to npm and packaged in release bundles must not require any external runtime `node_modules`. All utility functions must rely on Node.js built-ins (`node:fs`, `node:path`, `node:child_process`, `node:os`, `node:util`).
 2. **First-Class Cross-Platform Support**:
-   - Must execute identically on **Windows x64** and **Linux amd64** (plus macOS).
+   - Must execute identically on **Windows x64**, **Linux (x64, arm64)**, and **macOS (Apple Silicon arm64, Intel x64)**.
    - Paths inside `.luarc.json` and URI schemes must be properly normalized (forward slashes, handling of Windows drive letters like `C:/`).
    - LuaLS binary downloading and extraction must use cross-platform extraction (`tar` with PowerShell `Expand-Archive` fallback on Windows).
 3. **Respect Workspace Configurations**:
@@ -82,14 +82,20 @@ These quality gates are automated in `.githooks/pre-commit` (configured via `git
 
 If any of the above commands fail or emit warnings, investigate and fix them before responding to the user.
 
+Additionally, whenever you make changes to the codebase, **you must update `CHANGELOG.md`** under the `## [Unreleased]` section with concise bullet points categorized under standard Keep a Changelog headings (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`).
+
 ---
 
 ## 5. Releases & Changelog Maintenance
 
-Whenever publishing a new tagged release or cutting a new version:
+### Continuous Maintenance (After Every Change)
+- **Always update `CHANGELOG.md` after making changes**: Any modification to the codebase (features, bug fixes, performance improvements, documentation, CI workflows, or internal tooling) must be documented in `CHANGELOG.md` under the `## [Unreleased]` section before completing your work.
+- **Standardized Categories**: Group changes strictly under Keep a Changelog 1.1.0 categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or `Security`.
 
-- **Update `CHANGELOG.md`**: Maintain documentation adhering strictly to [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-- **Standardized Categories**: Group changes under `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or `Security`.
-- **Pre-Release Requirement**: Record the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
+### Release Preparation & Publishing
+Whenever preparing or publishing a new tagged release or cutting a new version:
+- **Review and verify `CHANGELOG.md`**: Check that all unreleased changes since the previous release are accurately recorded under `## [Unreleased]`.
+- **Promote Unreleased to Version Header**: Move all unreleased changes under a new version heading strictly adhering to [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (e.g. `## [X.Y.Z] - YYYY-MM-DD`), and restore an empty `## [Unreleased]` section above it.
+- **Pre-Release Requirement**: Record and commit the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
 
 
