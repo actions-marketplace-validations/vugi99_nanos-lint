@@ -80,9 +80,11 @@ export function readAnnotationsMetadata(cacheDir: string = getAnnotationsCacheDi
   return null;
 }
 
+export const MIN_ANNOTATIONS_SIZE_BYTES = 1000;
+
 /**
- * Verifies that an annotations file exists, is a regular file, is of non-trivial size (>= 1000 bytes),
- * and begins with valid Lua comments or nanos world definitions.
+ * Verifies that an annotations file exists, is a regular file, is of non-trivial size (>= MIN_ANNOTATIONS_SIZE_BYTES),
+ * and begins with valid LuaLS metadata or nanos world definitions.
  */
 export function isAnnotationsValid(filePath: string): boolean {
   if (!fs.existsSync(filePath)) {
@@ -90,15 +92,19 @@ export function isAnnotationsValid(filePath: string): boolean {
   }
   try {
     const stat = fs.statSync(filePath);
-    if (!stat.isFile() || stat.size < 1000) {
+    if (!stat.isFile() || stat.size < MIN_ANNOTATIONS_SIZE_BYTES) {
       return false;
     }
     const fd = fs.openSync(filePath, "r");
-    const buffer = Buffer.alloc(256);
-    const bytesRead = fs.readSync(fd, buffer, 0, 256, 0);
+    const buffer = Buffer.alloc(512);
+    const bytesRead = fs.readSync(fd, buffer, 0, 512, 0);
     fs.closeSync(fd);
     const header = buffer.toString("utf-8", 0, bytesRead).trimStart();
-    return header.startsWith("--") || header.includes("nanos world");
+    return (
+      header.startsWith("---@meta") ||
+      header.includes("nanos world") ||
+      header.includes("nanos-world")
+    );
   } catch (err) {
     logger.debug(
       `[annotations] Annotation validation failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`
@@ -129,8 +135,19 @@ export async function fetchLatestCommitId(): Promise<string | null> {
   return null;
 }
 
-export async function fetchRawAnnotationsContent(): Promise<string> {
-  const res = await fetch(RAW_ANNOTATIONS_URL, {
+/**
+ * Returns raw annotations URL, pinned to commit SHA if provided and valid.
+ */
+export function getRawAnnotationsUrl(commitSha?: string): string {
+  if (commitSha && /^[0-9a-fA-F]{7,40}$/.test(commitSha)) {
+    return `https://raw.githubusercontent.com/${DOCGEN_REPO}/${commitSha}/annotations.lua`;
+  }
+  return RAW_ANNOTATIONS_URL;
+}
+
+export async function fetchRawAnnotationsContent(commitSha?: string): Promise<string> {
+  const url = getRawAnnotationsUrl(commitSha);
+  const res = await fetch(url, {
     headers: { "User-Agent": "nanos-lint" },
     signal: AbortSignal.timeout(15000),
   });
@@ -142,7 +159,7 @@ export async function fetchRawAnnotationsContent(): Promise<string> {
     );
   }
   const text = await res.text();
-  if (!text || text.length < 1000) {
+  if (!text || text.length < MIN_ANNOTATIONS_SIZE_BYTES) {
     throw new AnnotationsError(
       "Downloaded annotations.lua appears truncated or invalid",
       "ERR_ANNOTATIONS_INVALID",
@@ -239,7 +256,7 @@ export async function downloadAndCacheAnnotations(
     }
 
     // Step 1: Download annotations text
-    const content = await fetchRawAnnotationsContent();
+    const content = await fetchRawAnnotationsContent(commitId);
     const tempAnnotationsPath = path.join(tempDir, ANNOTATIONS_FILENAME);
     fs.writeFileSync(tempAnnotationsPath, content, "utf-8");
 
@@ -259,7 +276,7 @@ export async function downloadAndCacheAnnotations(
       existingMeta &&
       existingMeta.commitId === commitId &&
       fs.existsSync(finalAnnotationsPath) &&
-      fs.statSync(finalAnnotationsPath).size >= 1000
+      isAnnotationsValid(finalAnnotationsPath)
     ) {
       return finalAnnotationsPath;
     }
@@ -329,6 +346,73 @@ export interface ResolveAnnotationsOptions {
   quiet?: boolean;
 }
 
+function validateCustomAnnotationsPath(filePath: string, source: "custom" | "env"): string {
+  const resolved = path.resolve(filePath);
+  if (!fs.existsSync(resolved)) {
+    if (source === "custom") {
+      throw new AnnotationsError(
+        `Custom annotations file not found: ${resolved}`,
+        "ERR_ANNOTATIONS_NOT_FOUND",
+        "Verify that the path specified in --annotations exists and is accessible."
+      );
+    } else {
+      throw new AnnotationsError(
+        `Annotations file specified in environment not found: ${resolved}`,
+        "ERR_ANNOTATIONS_ENV_NOT_FOUND",
+        "Verify that the path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS exists."
+      );
+    }
+  }
+
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile()) {
+    throw new AnnotationsError(
+      source === "custom"
+        ? `Custom annotations path is not a file: ${resolved}`
+        : `Annotations path specified in environment is not a file: ${resolved}`,
+      "ERR_ANNOTATIONS_NOT_A_FILE",
+      source === "custom"
+        ? "Verify that the path specified in --annotations points to a regular file, not a directory."
+        : "Verify that the path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS points to a regular file, not a directory."
+    );
+  }
+
+  if (stat.size === 0) {
+    throw new AnnotationsError(
+      source === "custom"
+        ? `Custom annotations file is empty: ${resolved}`
+        : `Annotations file specified in environment is empty: ${resolved}`,
+      "ERR_ANNOTATIONS_INVALID",
+      source === "custom"
+        ? "Verify that the path specified in --annotations is a valid non-empty Lua annotations file."
+        : "Verify that the path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS is a valid non-empty Lua annotations file."
+    );
+  }
+
+  try {
+    const fd = fs.openSync(resolved, "r");
+    const buffer = Buffer.alloc(Math.min(stat.size, 512));
+    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    fs.closeSync(fd);
+    if (buffer.subarray(0, bytesRead).includes(0)) {
+      throw new AnnotationsError(
+        source === "custom"
+          ? `Custom annotations file appears to be a binary file: ${resolved}`
+          : `Annotations file specified in environment appears to be a binary file: ${resolved}`,
+        "ERR_ANNOTATIONS_INVALID",
+        "Verify that the annotations file is a valid Lua text annotations file."
+      );
+    }
+  } catch (err) {
+    if (err instanceof AnnotationsError) {
+      throw err;
+    }
+    // Ignore read errors
+  }
+
+  return resolved;
+}
+
 /**
  * Resolves the nanos world annotations.lua definitions file path.
  * Resolution precedence:
@@ -340,29 +424,13 @@ export interface ResolveAnnotationsOptions {
 export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}): Promise<string> {
   // 1. CLI custom path
   if (options.customPath) {
-    const resolved = path.resolve(options.customPath);
-    if (!fs.existsSync(resolved)) {
-      throw new AnnotationsError(
-        `Custom annotations file not found: ${resolved}`,
-        "ERR_ANNOTATIONS_NOT_FOUND",
-        "Verify that the path specified in --annotations exists and is accessible."
-      );
-    }
-    return resolved;
+    return validateCustomAnnotationsPath(options.customPath, "custom");
   }
 
   // 2. Environment variable
   const envPath = process.env.NANOS_ANNOTATIONS_PATH || process.env.NANOS_ANNOTATIONS;
   if (envPath) {
-    const resolved = path.resolve(envPath);
-    if (!fs.existsSync(resolved)) {
-      throw new AnnotationsError(
-        `Annotations file specified in environment not found: ${resolved}`,
-        "ERR_ANNOTATIONS_ENV_NOT_FOUND",
-        "Verify that the path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS exists."
-      );
-    }
-    return resolved;
+    return validateCustomAnnotationsPath(envPath, "env");
   }
 
   // 3. Bundled with package (release distribution)
