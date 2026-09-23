@@ -10,6 +10,7 @@ import {
   resolveLuaLSBinary,
   findExistingLuaLSDir,
   isBinaryValid,
+  isBinaryRunnable,
   runLuaLSCheck,
   downloadAndExtractLuaLS,
   limitDownloadStream,
@@ -28,6 +29,7 @@ import {
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
+import crypto from "node:crypto";
 import { Readable } from "node:stream";
 import { gzipSync } from "node:zlib";
 
@@ -329,6 +331,39 @@ describe("luals utilities", () => {
         fs.unlinkSync(tempFakeBin);
       }
     });
+
+    it("returns false instead of throwing when the path cannot be inspected", () => {
+      const tempBin = path.join(os.tmpdir(), `test-stat-fail-${Date.now()}.bin`);
+      fs.writeFileSync(tempBin, Buffer.alloc(100_005));
+      const statSpy = vi.spyOn(fs, "statSync").mockImplementation(() => {
+        throw new Error("EIO: i/o error");
+      });
+      try {
+        expect(isBinaryValid(tempBin)).toBe(false);
+      } finally {
+        statSpy.mockRestore();
+        fs.unlinkSync(tempBin);
+      }
+    });
+  });
+
+  describe("isBinaryRunnable", () => {
+    it("returns false for a non-existent path or a directory", () => {
+      expect(isBinaryRunnable("/path/to/nonexistent/bin")).toBe(false);
+      expect(isBinaryRunnable(os.tmpdir())).toBe(false);
+    });
+
+    it("returns false for a file that does not run or reports no version", () => {
+      const tempFile = path.join(os.tmpdir(), `test-runnable-${Date.now()}.bin`);
+      // Deliberately below the downloaded-archive size floor: the size heuristic
+      // must not decide the outcome here.
+      fs.writeFileSync(tempFile, "not a lua-language-server");
+      try {
+        expect(isBinaryRunnable(tempFile)).toBe(false);
+      } finally {
+        fs.unlinkSync(tempFile);
+      }
+    });
   });
 
   describe("countCheckedFiles", () => {
@@ -435,6 +470,50 @@ describe("luals utilities", () => {
         fs.unlinkSync(tempBin);
       }
     });
+
+    it("rejects a LUALS_BIN pointing at an unrelated executable (Issue #26)", async () => {
+      const origBin = process.env.LUALS_BIN;
+      process.env.LUALS_BIN = process.execPath;
+      try {
+        // The Node.js binary runs fine but reports "v24.x.y", not a LuaLS release.
+        await expect(resolveLuaLSBinary()).rejects.toThrow(
+          /LUALS_BIN.*not a runnable LuaLS binary/
+        );
+      } finally {
+        if (origBin !== undefined) {
+          process.env.LUALS_BIN = origBin;
+        } else {
+          delete process.env.LUALS_BIN;
+        }
+      }
+    });
+
+    it.skipIf(process.platform === "win32")(
+      "accepts a thin wrapper script for LUALS_BIN when it reports a version (Issue #26)",
+      async () => {
+        const origBin = process.env.LUALS_BIN;
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-wrapper-"));
+        const wrapper = path.join(tempDir, "lua-language-server");
+        try {
+          // Deliberately far below the 100 KB floor applied to downloaded
+          // archives: Homebrew/mason-style installations are wrapper scripts.
+          fs.writeFileSync(wrapper, "#!/bin/sh\necho 3.19.1\n", { mode: 0o755 });
+
+          expect(isBinaryRunnable(wrapper)).toBe(true);
+          expect(isBinaryValid(wrapper)).toBe(false);
+
+          process.env.LUALS_BIN = wrapper;
+          await expect(resolveLuaLSBinary()).resolves.toBe(wrapper);
+        } finally {
+          if (origBin !== undefined) {
+            process.env.LUALS_BIN = origBin;
+          } else {
+            delete process.env.LUALS_BIN;
+          }
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      }
+    );
   });
 
   describe("runLuaLSCheck", () => {
@@ -692,6 +771,32 @@ describe("luals utilities", () => {
         fs.writeFileSync(filePath, "nanos-lint-test");
         const hash = computeFileSha256(filePath);
         expect(hash).toMatch(/^[a-f0-9]{64}$/);
+      } finally {
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("computeFileSha256 hashes empty and multi-chunk files in bounded memory (Issue #18/#19)", () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-hash-chunks-"));
+      try {
+        const emptyFile = path.join(tempTarget, "empty.bin");
+        fs.writeFileSync(emptyFile, "");
+        expect(computeFileSha256(emptyFile)).toBe(
+          crypto.createHash("sha256").digest("hex")
+        );
+
+        // ~3 MiB of non-repeating bytes plus a partial final chunk, so a read
+        // that re-hashes the same buffer or drops a chunk changes the digest.
+        const payload = Buffer.alloc(3 * 1024 * 1024 + 12_345);
+        for (let i = 0; i < payload.length; i++) {
+          payload[i] = (i * 31 + 7) % 256;
+        }
+        const chunkedFile = path.join(tempTarget, "chunked.bin");
+        fs.writeFileSync(chunkedFile, payload);
+
+        expect(computeFileSha256(chunkedFile)).toBe(
+          crypto.createHash("sha256").update(payload).digest("hex")
+        );
       } finally {
         fs.rmSync(tempTarget, { recursive: true, force: true });
       }
