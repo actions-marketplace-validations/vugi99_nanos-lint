@@ -13,6 +13,11 @@ export default defineConfig({
     "jsonc-parser": "jsonc-parser/lib/esm/main.js",
   },
   deps: {
+    // "nanos-lint" produces a standalone distribution with zero runtime dependencies.
+    // "is-safe-filename" is an internal transitive runtime dependency of "env-paths@4.0.0".
+    // When using "onlyBundle", tsdown / Rolldown requires transitive sub-dependencies
+    // to be explicitly declared so they are inlined into the bundle rather than left
+    // as external module imports.
     alwaysBundle: ["commander", "jsonc-parser", "env-paths", "is-safe-filename"],
     onlyBundle: ["commander", "jsonc-parser", "env-paths", "is-safe-filename"],
   },

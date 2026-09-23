@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved offline diagnostics in `resolveLuaLSBinary()` providing clear remediation hints (`nanos-lint clean-cache`) when cached binaries fail execution checks and cannot be re-downloaded.
 - Enabled `noUncheckedIndexedAccess` and `noImplicitOverride` in `tsconfig.json` for safer array/dictionary index access and explicit inheritance semantics.
 - Enforced async, promise safety, and strict equality guardrails in `eslint.config.mjs` (`@typescript-eslint/no-floating-promises`, `@typescript-eslint/await-thenable`, `@typescript-eslint/no-misused-promises`, `eqeqeq`, and `prefer-const`).
+- Documented transitive runtime dependency `is-safe-filename` (from `env-paths@4.0.0`) in `tsdown.config.ts`, explaining why it is inlined into the zero-dependency bundle.
 
 ### Fixed
 - Duplicate releases: pushing a release commit to `master` and its tag produced two qualifying CI runs, so the release ran twice and the second `npm publish` failed with a 409. The release job now only runs for tag-triggered CI, skips a tag whose GitHub release already exists, and skips `npm publish` when the version is already published.
