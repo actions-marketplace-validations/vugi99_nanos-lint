@@ -40,13 +40,27 @@ export function isAllowedDownloadUrl(urlString: string): boolean {
   }
 }
 
+/** Chunk size used when hashing an archive, so a 150 MB asset is never buffered whole. */
+const HASH_CHUNK_SIZE_BYTES = 1024 * 1024;
+
 /**
- * Calculates the SHA-256 hash of a file on disk.
+ * Calculates the SHA-256 hash of a file on disk in bounded memory.
  */
 export function computeFileSha256(filePath: string): string {
   const hash = crypto.createHash("sha256");
-  const buffer = fs.readFileSync(filePath);
-  hash.update(buffer);
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(HASH_CHUNK_SIZE_BYTES);
+    let position = 0;
+    let bytesRead = fs.readSync(fd, buffer, 0, buffer.length, position);
+    while (bytesRead > 0) {
+      hash.update(buffer.subarray(0, bytesRead));
+      position += bytesRead;
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, position);
+    }
+  } finally {
+    fs.closeSync(fd);
+  }
   return hash.digest("hex");
 }
 
@@ -244,8 +258,11 @@ export async function downloadAndExtractLuaLS(
         );
       }
 
+      // Audit trail only: the digest is recorded so a downloaded asset can be
+      // compared out of band. It is not checked against a pinned value, because
+      // upstream publishes no signed checksums (see SECURITY.md).
       const archiveSha256 = computeFileSha256(archivePath);
-      logger.info(`[luals] Verified archive SHA-256: ${archiveSha256}`);
+      logger.info(`[luals] Downloaded ${info.assetName} (SHA-256 ${archiveSha256})`);
 
       if (!options?.quiet) {
         logger.info(`[luals] Extracting to ${destDir}...`);
