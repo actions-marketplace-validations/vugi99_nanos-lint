@@ -35,7 +35,7 @@ This document outlines the architectural principles, codebase structure, develop
 
 ```
 nanos-lint/
-├── .github/workflows/       # CI, CD Release, and Annotations Sync workflows
+├── .github/workflows/       # CI and CD release workflows
 ├── .githooks/               # Git hooks (pre-commit quality gates)
 ├── action.yml               # GitHub Action composite definition
 ├── bin/nanos-lint.js        # Executable CLI entrypoint (#!/usr/bin/env node)
@@ -51,7 +51,9 @@ nanos-lint/
 │   ├── pass/                # Valid nanos world Lua fixtures (must pass with 0 errors)
 │   ├── fail/                # Invalid Lua fixtures (must produce expected diagnostics)
 │   ├── unit/                # Vitest unit tests
-│   └── integration/         # Vitest integration tests with live LuaLS execution
+│   ├── integration/         # Vitest integration tests with live LuaLS execution
+│   ├── global-setup.ts      # Vitest global setup: prepares one isolated cache and downloads the shared LuaLS binary/annotations exactly once per run
+│   └── helpers/             # Shared live-test fixtures, isolated-cache setup, and the LuaLS download counter
 ├── AGENTS.md                # This guideline document
 ├── CHANGELOG.md             # Keep a Changelog 1.1.0 version history
 ├── README.md                # User-facing documentation
@@ -78,11 +80,23 @@ npm run build
 npm run test:coverage
 ```
 
-These quality gates are automated in `.githooks/pre-commit` (configured via `git config core.hooksPath .githooks`), running on every `git commit`.
+These quality gates are automated in `.githooks/pre-commit`. The hook is installed by the `prepare` npm script (run automatically by `npm install`), which executes `git config core.hooksPath .githooks`; because that setting is repo-local git config, a fresh clone does not carry it. The hook therefore runs on every `git commit` only after dependencies have been installed at least once. `.gitattributes` forces LF endings for `.githooks/**` and shell scripts so the hook also works on Windows (Git for Windows).
 
 If any of the above commands fail or emit warnings, investigate and fix them before responding to the user.
 
 Additionally, whenever you make changes to the codebase, **you must update `CHANGELOG.md`** under the `## [Unreleased]` section with concise bullet points categorized under standard Keep a Changelog headings (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`).
+
+### Offline Test Mode
+
+By default, `npm test` and `npm run test:coverage` run the full suite, including the live LuaLS integration tests. `tests/global-setup.ts` downloads a single shared LuaLS binary (and the annotations file) **exactly once per test run** into an isolated temporary cache; no developer or CI cache outside that directory is read or written.
+
+Setting `NANOS_LIVE_TESTS=0` skips all live tests, performs no network access, and disables the coverage thresholds (the offline subset cannot meet them); the run prints a warning. Use it when working offline:
+
+```bash
+NANOS_LIVE_TESTS=0 npm run test:coverage
+```
+
+Any other value (or leaving `NANOS_LIVE_TESTS` unset) requires the live tests to work: if the shared binary cannot be resolved, the test run fails loudly instead of silently skipping tests.
 
 ---
 
@@ -97,5 +111,7 @@ Whenever preparing or publishing a new tagged release or cutting a new version:
 - **Review and verify `CHANGELOG.md`**: Check that all unreleased changes since the previous release are accurately recorded under `## [Unreleased]`.
 - **Promote Unreleased to Version Header**: Move all unreleased changes under a new version heading strictly adhering to [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (e.g. `## [X.Y.Z] - YYYY-MM-DD`), and restore an empty `## [Unreleased]` section above it.
 - **Pre-Release Requirement**: Record and commit the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
+- **Verify the Release Tag Matches `package.json`**: Confirm the release tag (e.g. `v2.6.1`) matches the `version` field in `package.json`; `.github/workflows/release.yml` enforces this and fails the release on a mismatch.
+- **Update the Action Fallback Version**: Bump the pinned `npx --yes nanos-lint@<version>` fallback version in `action.yml` to the version being released.
 
 

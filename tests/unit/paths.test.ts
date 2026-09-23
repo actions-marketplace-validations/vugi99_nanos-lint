@@ -4,6 +4,16 @@ import { getCacheDir, FALLBACK_LUALS_VERSION } from "../../src/luals.js";
 import path from "node:path";
 
 describe("system paths resolution via env-paths", () => {
+  it("resolves every path inside the isolated per-run test cache root", () => {
+    // Hermeticity canary: the Vitest harness relocates the platform cache and
+    // temp directories into a throw-away root, so no test can read or write the
+    // developer's real ~/.cache/nanos-lint.
+    const testRoot = process.env.NANOS_TEST_CACHE_ROOT;
+    expect(testRoot, "Vitest global setup must provide an isolated cache root").toBeTruthy();
+    expect(systemPaths.cache.startsWith(testRoot as string)).toBe(true);
+    expect(systemPaths.temp.startsWith(testRoot as string)).toBe(true);
+  });
+
   it("resolves system paths structure with expected properties", () => {
     expect(systemPaths).toBeDefined();
     expect(typeof systemPaths.cache).toBe("string");

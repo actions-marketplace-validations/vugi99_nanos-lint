@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,14 +15,16 @@ import {
   runLuaLSCheck,
   countCheckedFiles,
   resolveLuaLSBinary,
+  FALLBACK_LUALS_VERSION,
 } from "../../src/luals.js";
-import { runCLI, createProgram } from "../../src/cli.js";
+import { runCLI } from "../../src/cli.js";
+import * as lualsModule from "../../src/luals.js";
+import * as annotationsModule from "../../src/annotations.js";
+import { getSharedLuaLSBinary, isLiveTestsEnabled, seedCachedLuaLS } from "../helpers/live.js";
+
+const liveTestsEnabled = isLiveTestsEnabled();
 
 describe("Regression tests for audit review issues", () => {
-  beforeAll(async () => {
-    // Ensure LuaLS is resolved once before tests so subsequent calls reuse the cached binary
-    await resolveLuaLSBinary("latest", { quiet: true });
-  }, 120000);
   describe("Issue 1: Hard failure on missing target or failed LuaLS check", () => {
     it("throws an error when targetPath does not exist", async () => {
       const missingTarget = path.join(os.tmpdir(), "nanos-non-existent-target-12345");
@@ -68,24 +70,35 @@ describe("Regression tests for audit review issues", () => {
   });
 
   describe("Issue 3: -i/--ignore does not swallow positional target path", () => {
-    it("preserves positional path when --ignore precedes it", () => {
-      const program = createProgram();
-      let capturedPath: string | undefined;
-      let capturedIgnore: string[] | undefined;
+    it("preserves the positional path when --ignore precedes it", async () => {
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck").mockResolvedValue({
+        passed: true,
+        totalProblems: 0,
+        totalErrors: 0,
+        totalWarnings: 0,
+        totalFiles: 1,
+        totalFilesChecked: 1,
+        diagnostics: {},
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-      program
-        .command("test-check [path]")
-        .option("-i, --ignore <pattern>", "ignore pattern", (val, prev: string[] = []) => prev.concat(val))
-        .action((targetPath: string = ".", opts: { ignore?: string[] }) => {
-          capturedPath = targetPath;
-          capturedIgnore = opts.ignore;
-        });
+      try {
+        // Simulates: check --ignore some_dir tests/pass/character.lua
+        const code = await runCLI(["check", "--ignore", "some_dir", "tests/pass/character.lua"]);
+        expect(code).toBe(0);
 
-      // Simulating: check --ignore some_dir specific_file.lua
-      program.parse(["test-check", "--ignore", "some_dir", "specific_file.lua"], { from: "user" });
-
-      expect(capturedPath).toBe("specific_file.lua");
-      expect(capturedIgnore).toEqual(["some_dir"]);
+        expect(checkSpy).toHaveBeenCalledTimes(1);
+        const [targetPath, , options] = checkSpy.mock.calls[0];
+        expect(targetPath).toBe("tests/pass/character.lua");
+        expect(options.ignore).toEqual(["some_dir"]);
+      } finally {
+        annotSpy.mockRestore();
+        checkSpy.mockRestore();
+        logSpy.mockRestore();
+      }
     });
   });
 
@@ -328,10 +341,11 @@ describe("Regression tests for audit review issues", () => {
     });
   });
 
-  describe("Issue 4: --quiet suppresses progress output", () => {
+  describe.skipIf(!liveTestsEnabled)("Issue 4: --quiet suppresses progress output", () => {
     it("resolveLuaLSBinary with quiet=true suppresses [luals] console.log output", async () => {
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       try {
+        await getSharedLuaLSBinary();
         await resolveLuaLSBinary("latest", { quiet: true });
         const calls = logSpy.mock.calls.map((c) => c.join(" "));
         const hasLualsLog = calls.some((msg) => msg.includes("[luals]"));
@@ -381,7 +395,7 @@ describe("Regression tests for audit review issues", () => {
     });
   });
 
-  describe("Finding N1: Atomic and race-safe download and extraction", () => {
+  describe.skipIf(!liveTestsEnabled)("Finding N1: Atomic and race-safe download and extraction", () => {
     it("safely handles concurrent download/extraction to the same target directory", async () => {
       const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n1-race-"));
       try {
@@ -390,8 +404,8 @@ describe("Regression tests for audit review issues", () => {
 
         // Run 2 concurrent extractions to the exact same targetDir
         const [bin1, bin2] = await Promise.all([
-          downloadAndExtractLuaLS("latest", targetDir, { quiet: true }),
-          downloadAndExtractLuaLS("latest", targetDir, { quiet: true }),
+          downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
+          downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
         ]);
 
         expect(bin1).toBe(bin2);
@@ -425,7 +439,7 @@ describe("Regression tests for audit review issues", () => {
       }
     });
 
-    it("detects and repairs corrupted targetDir when downloadAndExtractLuaLS is invoked", async () => {
+    it.skipIf(!liveTestsEnabled)("detects and repairs corrupted targetDir when downloadAndExtractLuaLS is invoked", async () => {
       const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n2-repair-"));
       try {
         const { downloadAndExtractLuaLS, isBinaryValid } = await import("../../src/luals.js");
@@ -435,7 +449,9 @@ describe("Regression tests for audit review issues", () => {
         const binaryName = process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
         fs.writeFileSync(path.join(binSubdir, binaryName), "corrupted truncated file");
 
-        const repairedBin = await downloadAndExtractLuaLS("latest", corruptDir, { quiet: true });
+        const repairedBin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, corruptDir, {
+          quiet: true,
+        });
         expect(isBinaryValid(repairedBin)).toBe(true);
         expect(fs.existsSync(path.join(corruptDir, ".complete"))).toBe(true);
       } finally {
@@ -474,15 +490,28 @@ describe("Regression tests for audit review issues", () => {
   });
 
   describe("Review issues 3 & 5: LuaLS cache probe, .complete marker validation, and failed promotion cleanup", () => {
-    it("probes and reuses legacy cache directory when present", async () => {
-      const { resolveLuaLSBinary, getLegacyCacheDir, FALLBACK_LUALS_VERSION } = await import("../../src/luals.js");
-      const legacyDir = getLegacyCacheDir(FALLBACK_LUALS_VERSION);
-      expect(typeof legacyDir).toBe("string");
-      expect(legacyDir.length).toBeGreaterThan(0);
+    it.skipIf(!liveTestsEnabled)("reuses an existing valid cache entry without any network access", async () => {
+      const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cache-reuse-"));
+      const originalFetch = globalThis.fetch;
+      const fetchMock = vi.fn(() => {
+        throw new Error("network access is not allowed when a valid cache entry exists");
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-      // Verify resolveLuaLSBinary completes and returns a valid executable
-      const resolved = await resolveLuaLSBinary(FALLBACK_LUALS_VERSION, { quiet: true });
-      expect(fs.existsSync(resolved)).toBe(true);
+      try {
+        const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+        const resolved = await resolveLuaLSBinary(FALLBACK_LUALS_VERSION, {
+          quiet: true,
+          cacheDir: baseCacheDir,
+        });
+
+        expect(resolved).toBe(seeded);
+        expect(fs.existsSync(resolved)).toBe(true);
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+        fs.rmSync(baseCacheDir, { recursive: true, force: true });
+      }
     });
 
     it("does not accept cached directory if .complete marker is missing or has mismatched version", async () => {
@@ -526,7 +555,7 @@ describe("Regression tests for audit review issues", () => {
       }
     });
 
-    it("cleans up broken destDir when atomic promotion fails", async () => {
+    it.skipIf(!liveTestsEnabled)("cleans up broken destDir when atomic promotion fails", async () => {
       const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-promo-fail-"));
       try {
         const { downloadAndExtractLuaLS } = await import("../../src/luals.js");
@@ -549,7 +578,7 @@ describe("Regression tests for audit review issues", () => {
 
         try {
           await expect(
-            downloadAndExtractLuaLS("latest", targetDir, { quiet: true })
+            downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true })
           ).rejects.toThrow(/EPERM/);
           expect(threw).toBe(true);
 

@@ -12,26 +12,38 @@ import { logger } from "../../src/logger.js";
 describe("cli module flag and command parsing", () => {
   it("prints help and returns 0 on --help and -h", async () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const code1 = await runCLI(["--help"]);
-    expect(code1).toBe(0);
-    expect(spy).toHaveBeenCalled();
+    try {
+      const code1 = await runCLI(["--help"]);
+      expect(code1).toBe(0);
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining("Usage: nanos-lint"));
 
-    const code2 = await runCLI(["-h"]);
-    expect(code2).toBe(0);
-    expect(spy).toHaveBeenCalled();
-    spy.mockRestore();
+      // Clear between invocations so the second assertion cannot be satisfied by
+      // the first call's output.
+      spy.mockClear();
+
+      const code2 = await runCLI(["-h"]);
+      expect(code2).toBe(0);
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining("Usage: nanos-lint"));
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("prints version and returns 0 on --version and -v", async () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
-    const code1 = await runCLI(["--version"]);
-    expect(code1).toBe(0);
-    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/nanos-lint v\d+\.\d+\.\d+/));
+    try {
+      const code1 = await runCLI(["--version"]);
+      expect(code1).toBe(0);
+      expect(spy).toHaveBeenCalledWith(expect.stringMatching(/nanos-lint v\d+\.\d+\.\d+/));
 
-    const code2 = await runCLI(["-v"]);
-    expect(code2).toBe(0);
-    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/nanos-lint v\d+\.\d+\.\d+/));
-    spy.mockRestore();
+      spy.mockClear();
+
+      const code2 = await runCLI(["-v"]);
+      expect(code2).toBe(0);
+      expect(spy).toHaveBeenCalledWith(expect.stringMatching(/nanos-lint v\d+\.\d+\.\d+/));
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("handles help and version subcommands", async () => {
@@ -394,6 +406,91 @@ describe("cli module flag and command parsing", () => {
       expect(logger.getLevel()).toBe("info");
       logSpy.mockRestore();
       logger.setLevel("warn");
+    });
+
+    it("silences the diagnosis report only with --log-level=silent", async () => {
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck");
+      const failingResult = {
+        passed: false,
+        totalProblems: 1,
+        totalErrors: 1,
+        totalWarnings: 0,
+        totalFiles: 1,
+        totalFilesChecked: 1,
+        diagnostics: {
+          "file:///test.lua": [
+            {
+              code: "err",
+              message: "m",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              severity: 1 as const,
+            },
+          ],
+        },
+      };
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        checkSpy.mockResolvedValue(failingResult);
+        expect(await runCLI(["check", ".", "-l", "silent"])).toBe(1);
+        expect(logSpy).not.toHaveBeenCalled();
+        expect(checkSpy).toHaveBeenCalledTimes(1);
+
+        logSpy.mockClear();
+        expect(await runCLI(["check", ".", "-l", "error"])).toBe(1);
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("test.lua"));
+
+        logSpy.mockClear();
+        expect(await runCLI(["check", ".", "--quiet"])).toBe(1);
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("test.lua"));
+      } finally {
+        logger.setLevel("warn");
+        annotSpy.mockRestore();
+        checkSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it("silences init, clean-cache and version subcommand output with --log-level=silent", async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cli-silent-"));
+      const dummyAnnotations = path.join(tempDir, "source-annotations.lua");
+      fs.writeFileSync(dummyAnnotations, "-- dummy annotations", "utf-8");
+
+      const origAnnotationsPath = process.env.NANOS_ANNOTATIONS_PATH;
+      process.env.NANOS_ANNOTATIONS_PATH = dummyAnnotations;
+
+      const cleanSpy = vi.spyOn(pathsModule, "cleanCache").mockReturnValue(null);
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        expect(await runCLI(["init", tempDir, "-l", "silent"])).toBe(0);
+        expect(logSpy).not.toHaveBeenCalled();
+        expect(fs.existsSync(path.join(tempDir, ".luarc.json"))).toBe(true);
+
+        expect(await runCLI(["clean-cache", "-l", "silent"])).toBe(0);
+        expect(logSpy).not.toHaveBeenCalled();
+
+        expect(await runCLI(["version", "-l", "silent"])).toBe(0);
+        expect(logSpy).not.toHaveBeenCalled();
+
+        // Without silent the same commands keep printing their result.
+        logSpy.mockClear();
+        expect(await runCLI(["version"])).toBe(0);
+        expect(logSpy).toHaveBeenCalledWith(expect.stringMatching(/nanos-lint v\d+\.\d+\.\d+/));
+      } finally {
+        logger.setLevel("warn");
+        if (origAnnotationsPath !== undefined) {
+          process.env.NANOS_ANNOTATIONS_PATH = origAnnotationsPath;
+        } else {
+          delete process.env.NANOS_ANNOTATIONS_PATH;
+        }
+        fs.rmSync(tempDir, { recursive: true, force: true });
+        cleanSpy.mockRestore();
+        logSpy.mockRestore();
+      }
     });
   });
 });

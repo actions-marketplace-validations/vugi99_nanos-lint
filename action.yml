@@ -47,19 +47,30 @@ runs:
   using: 'composite'
   steps:
     - name: Setup Node.js
-      uses: actions/setup-node@v7
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: '24'
 
+    # The ISO week in the cache key is what makes the entry refresh: with
+    # `luals-version: latest` the resolved LuaLS build changes over time, and a
+    # static key would always hit exactly and therefore never save a newer binary.
+    # The restore-keys below are prefixes, so a new week still reuses the entries
+    # written by previous weeks (and by other pinned versions) as a warm start.
+    # This step is unconditionally cheap (a single `date` call), even with cache: false.
+    - name: Compute cache week
+      id: cacheweek
+      shell: bash
+      run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
     - name: Cache LuaLS binary and annotations
       if: ${{ inputs.cache != 'false' }}
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           ~/.cache/nanos-lint
           ~/AppData/Local/nanos-lint
           ~/Library/Caches/nanos-lint
-        key: nanos-lint-${{ runner.os }}-${{ runner.arch }}-${{ inputs.luals-version }}
+        key: nanos-lint-${{ runner.os }}-${{ runner.arch }}-${{ inputs.luals-version }}-${{ steps.cacheweek.outputs.week }}
         restore-keys: |
           nanos-lint-${{ runner.os }}-${{ runner.arch }}-${{ inputs.luals-version }}-
           nanos-lint-${{ runner.os }}-${{ runner.arch }}-
@@ -104,10 +115,16 @@ runs:
           ARGS+=("--quiet")
         fi
 
+        # `dist/` is gitignored, so a `uses: vugi99/nanos-lint@<ref>` consumer never
+        # receives it and always falls through to the pinned npx install below. The
+        # first branch only applies to a local checkout (`uses: ./`) or a vendored
+        # copy that ran `npm run build`.
         if [ -f "$ACTION_PATH/dist/cli.js" ]; then
           node "$ACTION_PATH/dist/cli.js" "${ARGS[@]}"
         else
-          npx --yes nanos-lint@^2.6.1 "${ARGS[@]}"
+          # Exact version on purpose: a floating range could run a different
+          # minor/patch than the tag the caller pinned (e.g. nanos-lint@v2.6.1
+          # running 2.9.x). This pin must be updated together with "version" in
+          # package.json whenever a new release is cut.
+          npx --yes nanos-lint@2.6.1 "${ARGS[@]}"
         fi
-
-

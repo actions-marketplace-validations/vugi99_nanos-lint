@@ -1,0 +1,10 @@
+# Normalize line endings on commit; keep hook/shell scripts LF so they can be
+# executed by Git for Windows (`sh`) without a `\r` shebang failure.
+* text=auto
+*.sh text eol=lf
+.githooks/** text eol=lf
+.github/workflows/*.yml text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.zip binary
+*.tar.gz binary

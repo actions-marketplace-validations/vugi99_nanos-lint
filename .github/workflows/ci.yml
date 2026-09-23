@@ -26,32 +26,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-latest, windows-latest, macos-latest, macos-26-intel, ubuntu-slim, ubuntu-26.04-arm ]
+        # No 1-vCPU "ubuntu-slim" runner here: it has a 15-minute hard job limit,
+        # so a slow live LuaLS run would time out and silently block releases
+        # (release.yml only fires once this workflow concludes with success).
+        os: [ ubuntu-latest, windows-latest, macos-latest, macos-26-intel, ubuntu-26.04-arm ]
         node: [ 24, 26 ]
+    # CI explicitly requires the live LuaLS/annotations tests instead of skipping
+    # them: the harness downloads the shared LuaLS binary exactly once per run.
+    env:
+      NANOS_LIVE_TESTS: "1"
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
           cache: 'npm'
 
+      # The ISO week in the cache key makes the entry refresh every week: the LuaLS
+      # binary and annotations are downloaded at runtime, so a key that never changes
+      # would be restored forever and never saved again. The restore-keys below are
+      # prefixes, so a fresh week still starts from the previous weeks' entries
+      # (most specific prefix first).
+      - name: Compute cache week
+        id: cacheweek
+        shell: bash
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
       - name: Cache LuaLS binary and annotations
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/nanos-lint
             ~/AppData/Local/nanos-lint
             ~/Library/Caches/nanos-lint
-          key: nanos-cache-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/luals.ts', 'src/annotations.ts') }}
+          key: nanos-cache-${{ runner.os }}-${{ runner.arch }}-${{ steps.cacheweek.outputs.week }}-${{ hashFiles('src/luals.ts', 'src/annotations.ts') }}
           restore-keys: |
             nanos-cache-${{ runner.os }}-${{ runner.arch }}-
-            luals-${{ runner.os }}-${{ runner.arch }}-
             nanos-cache-${{ runner.os }}-
-            luals-${{ runner.os }}-
 
       - name: Install dependencies
         run: npm ci
@@ -87,4 +102,3 @@ jobs:
             exit 1
           fi
           echo "Both bin/nanos-lint.js and dist/cli.js failed as expected on failing fixtures."
-

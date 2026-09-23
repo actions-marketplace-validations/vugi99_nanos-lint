@@ -3,20 +3,23 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { resolveWorkspaceConfig, getPackageRoot, initWorkspace } from "../../src/config.js";
-import { runLuaLSCheck, resolveLuaLSBinary } from "../../src/luals.js";
-import { resolveAnnotations } from "../../src/annotations.js";
+import { runLuaLSCheck } from "../../src/luals.js";
+import {
+  getSharedAnnotations,
+  getSharedLuaLSBinary,
+  isLiveTestsEnabled,
+} from "../helpers/live.js";
 
-describe("LuaLS live integration tests", () => {
+describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
   const root = getPackageRoot();
   const passDir = path.join(root, "tests", "pass");
   const failDir = path.join(root, "tests", "fail");
 
   beforeAll(async () => {
-    // Ensure LuaLS and annotations are downloaded and available before running integration tests
-    await Promise.all([
-      resolveLuaLSBinary(),
-      resolveAnnotations({ quiet: true }),
-    ]);
+    // The global setup already downloaded both fixtures exactly once for this
+    // run; these calls are cache hits and simply guarantee they are ready
+    // before the first live check starts.
+    await Promise.all([getSharedLuaLSBinary(), getSharedAnnotations()]);
   }, 120000);
 
   it("passes cleanly on valid nanos world test suite", async () => {

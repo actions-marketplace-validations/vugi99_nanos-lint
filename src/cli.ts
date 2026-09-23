@@ -23,6 +23,18 @@ function getVersionString(): string {
   }
 }
 
+/**
+ * Writes command results (reports, confirmations) to stdout unless the user
+ * asked for complete silence with `--log-level=silent`. Unlike logger.info()
+ * this is not gated by the `warn` default level, so the report is always shown
+ * by default while `--quiet`/`--log-level=error` still suppress only progress.
+ */
+function writeOutput(message: string): void {
+  if (logger.isOutputEnabled()) {
+    console.log(message);
+  }
+}
+
 export function collectIgnorePatterns(val: string, prev?: string[]): string[] {
   const parts = val
     .split(/[\r\n,]+/)
@@ -164,7 +176,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
 
       const output = formatReport(result, checkOptions.format, process.cwd());
       if (output) {
-        console.log(output);
+        writeOutput(output);
       }
 
       if (!result.passed && checkOptions.failOnError) {
@@ -187,7 +199,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
         force: opts.force,
         annotationsPath,
       });
-      console.log(`[init] Initialized nanos world LuaLS configuration: ${created}`);
+      writeOutput(`[init] Initialized nanos world LuaLS configuration: ${created}`);
       setExitCode(0);
     });
 
@@ -197,9 +209,9 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`)
     .action(async (version?: string, opts?: { lualsVersion?: string }) => {
       const ver = version || opts?.lualsVersion || DEFAULT_LUALS_VERSION;
-      console.log(`[luals] Downloading LuaLS ${ver}...`);
+      writeOutput(`[luals] Downloading LuaLS ${ver}...`);
       const bin = await resolveLuaLSBinary(ver);
-      console.log(`[luals] Ready at: ${bin}`);
+      writeOutput(`[luals] Ready at: ${bin}`);
       setExitCode(0);
     });
 
@@ -211,13 +223,13 @@ export function createProgram(options?: CreateProgramOptions): Command {
       try {
         const cleared = cleanCache();
         if (cleared) {
-          console.log(`[cache] Cleared cache at: ${cleared}`);
+          writeOutput(`[cache] Cleared cache at: ${cleared}`);
         } else {
-          console.log(`[cache] Cache is already empty (${systemPaths.cache})`);
+          writeOutput(`[cache] Cache is already empty (${systemPaths.cache})`);
         }
         setExitCode(0);
       } catch (err) {
-        console.error(
+        logger.error(
           `[cache] Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`
         );
         setExitCode(1);
@@ -228,7 +240,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .command("version")
     .description("Show version information")
     .action(() => {
-      console.log(getVersionString());
+      writeOutput(getVersionString());
       setExitCode(0);
     });
 

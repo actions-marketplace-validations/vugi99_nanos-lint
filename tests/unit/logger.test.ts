@@ -77,11 +77,24 @@ describe("logger module", () => {
       expect(l.getLevel()).toBe("debug");
     });
 
-    it("reads LOG_LEVEL from process.env if NANOS_LOG_LEVEL is not set", () => {
+    it("ignores the generic LOG_LEVEL environment variable", () => {
       delete process.env.NANOS_LOG_LEVEL;
       process.env.LOG_LEVEL = "info";
       const l = new Logger();
-      expect(l.getLevel()).toBe("info");
+      // LOG_LEVEL is commonly set by CI images for unrelated tooling and must
+      // never silently change nanos-lint's verbosity.
+      expect(l.getLevel()).toBe("warn");
+    });
+
+    it("reports whether command output is enabled", () => {
+      const l = new Logger("warn");
+      expect(l.isOutputEnabled()).toBe(true);
+
+      l.setLevel("error");
+      expect(l.isOutputEnabled()).toBe(true);
+
+      l.setLevel("silent");
+      expect(l.isOutputEnabled()).toBe(false);
     });
 
     it("allows updating log level via setLevel", () => {

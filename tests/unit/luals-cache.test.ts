@@ -11,11 +11,13 @@ import {
   cleanupOldCachedLuaLSVersions,
   fetchLatestLuaLSVersionFromGitHub,
   resolveLuaLSBinary,
-  getCacheDir,
   getPlatformInfo,
   FALLBACK_LUALS_VERSION,
   type LuaLSMetadata,
 } from "../../src/luals.js";
+import { isLiveTestsEnabled, seedCachedLuaLS } from "../helpers/live.js";
+
+const liveTestsEnabled = isLiveTestsEnabled();
 
 describe("LuaLS weekly cache check and version management", () => {
   let tempBaseDir: string;
@@ -117,13 +119,11 @@ describe("LuaLS weekly cache check and version management", () => {
       fs.mkdirSync(v2Dir, { recursive: true });
       fs.writeFileSync(path.join(v2Dir, ".complete"), "different-version");
 
-      // Version 3: unparseable version name
-      const v3Dir = path.join(tempBaseDir, "../invalid");
-      try {
-        fs.mkdirSync(v3Dir, { recursive: true });
-      } catch (err) {
-        console.warn(`Failed to create invalid dir: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      // Version 3: unparseable version name (kept inside tempBaseDir so no stray
+      // directory is ever created outside the test's own temporary directory)
+      const v3Dir = path.join(tempBaseDir, "invalid version");
+      fs.mkdirSync(v3Dir, { recursive: true });
+      fs.writeFileSync(path.join(v3Dir, ".complete"), "invalid version");
 
       // File instead of dir:
       fs.writeFileSync(path.join(tempBaseDir, "metadata.json"), "{}");
@@ -133,19 +133,12 @@ describe("LuaLS weekly cache check and version management", () => {
       expect(listCachedLuaLSVersions(tempBaseDir)).toEqual([]);
     });
 
-    it("lists valid version when functional binary and complete marker exist", () => {
-      const realCacheDir = getCacheDir(FALLBACK_LUALS_VERSION);
-      const info = getPlatformInfo(FALLBACK_LUALS_VERSION);
-      const realBin = path.join(realCacheDir, info.binaryRelativePath);
+    it.skipIf(!liveTestsEnabled)("lists valid version when functional binary and complete marker exist", async () => {
+      const seeded = await seedCachedLuaLS(tempBaseDir, FALLBACK_LUALS_VERSION);
+      expect(fs.existsSync(seeded)).toBe(true);
 
-      if (fs.existsSync(realBin)) {
-        const destVerDir = path.join(tempBaseDir, FALLBACK_LUALS_VERSION);
-        fs.cpSync(realCacheDir, destVerDir, { recursive: true });
-        fs.writeFileSync(path.join(destVerDir, ".complete"), FALLBACK_LUALS_VERSION);
-
-        const versions = listCachedLuaLSVersions(tempBaseDir);
-        expect(versions).toContain(FALLBACK_LUALS_VERSION);
-      }
+      const versions = listCachedLuaLSVersions(tempBaseDir);
+      expect(versions).toContain(FALLBACK_LUALS_VERSION);
     });
 
     it("cleanupOldCachedLuaLSVersions removes older versions but preserves keepVersion, files, and dot dirs", () => {
@@ -268,160 +261,247 @@ describe("LuaLS weekly cache check and version management", () => {
     });
   });
 
-  describe("resolveLuaLSBinary weekly caching behavior", () => {
-    it("reuses cached latest version when lastCheckedWeek matches current week without calling fetch", async () => {
-      const currentWeek = getIsoWeek();
-      const existing = path.join(getCacheDir(FALLBACK_LUALS_VERSION));
-      if (!fs.existsSync(existing)) {
-        return;
-      }
-
-      // Ensure metadata has currentWeek
-      writeLuaLSMetadata({
-        lastCheckedWeek: currentWeek,
-        latestVersion: FALLBACK_LUALS_VERSION,
-        lastCheckedDate: "2026-09-23",
-      });
-
-      const origFetch = globalThis.fetch;
-      const fetchMock = vi.fn();
-      globalThis.fetch = fetchMock;
-
+  describe.skipIf(!liveTestsEnabled)("resolveLuaLSBinary weekly caching behavior", () => {
+    /**
+     * Runs `fn` against a throw-away LuaLS cache base directory. Nothing is ever
+     * read from or written to the shared system cache: `cacheDir` is injected
+     * into `resolveLuaLSBinary`, so the developer's real cache stays untouched.
+     */
+    async function withIsolatedCache<T>(fn: (baseCacheDir: string) => Promise<T>): Promise<T> {
+      const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-luals-resolve-"));
       try {
-        const bin = await resolveLuaLSBinary("latest", { quiet: true });
-        expect(typeof bin).toBe("string");
-        expect(fs.existsSync(bin)).toBe(true);
-        // fetch should NOT have been called because week matches
-        expect(fetchMock).not.toHaveBeenCalled();
+        return await fn(baseCacheDir);
       } finally {
-        globalThis.fetch = origFetch;
+        fs.rmSync(baseCacheDir, { recursive: true, force: true });
       }
+    }
+
+    function mockFetch(impl: (url: string) => Promise<unknown>): () => void {
+      const originalFetch = globalThis.fetch;
+      const spy = vi.fn((url: string | URL | Request) => impl(String(url)));
+      globalThis.fetch = spy as unknown as typeof fetch;
+      return () => {
+        globalThis.fetch = originalFetch;
+      };
+    }
+
+    it("reuses the cached latest version without calling fetch when lastCheckedWeek matches the current week", async () => {
+      await withIsolatedCache(async (baseCacheDir) => {
+        const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+        writeLuaLSMetadata(
+          {
+            lastCheckedWeek: getIsoWeek(),
+            latestVersion: FALLBACK_LUALS_VERSION,
+            lastCheckedDate: "2026-09-23",
+          },
+          baseCacheDir
+        );
+
+        let fetchCalls = 0;
+        const restoreFetch = mockFetch(() => {
+          fetchCalls += 1;
+          return Promise.reject(new Error("fetch must not be called when the week matches"));
+        });
+
+        try {
+          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          expect(bin).toBe(seeded);
+          expect(fs.existsSync(bin)).toBe(true);
+          expect(fetchCalls).toBe(0);
+        } finally {
+          restoreFetch();
+        }
+      });
     });
 
-    it("triggers check and updates metadata when lastCheckedWeek is from a previous week", async () => {
-      const pastWeek = "2026-W01";
-      writeLuaLSMetadata({
-        lastCheckedWeek: pastWeek,
-        latestVersion: FALLBACK_LUALS_VERSION,
-        lastCheckedDate: "2026-01-01",
+    it("triggers a weekly check and updates metadata when lastCheckedWeek is from a previous week", async () => {
+      await withIsolatedCache(async (baseCacheDir) => {
+        await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+        writeLuaLSMetadata(
+          {
+            lastCheckedWeek: "2026-W01",
+            latestVersion: FALLBACK_LUALS_VERSION,
+            lastCheckedDate: "2026-01-01",
+          },
+          baseCacheDir
+        );
+
+        const requestedUrls: string[] = [];
+        const restoreFetch = mockFetch((url) => {
+          requestedUrls.push(url);
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ tag_name: `v${FALLBACK_LUALS_VERSION}` }),
+          });
+        });
+
+        try {
+          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          expect(typeof bin).toBe("string");
+          expect(fs.existsSync(bin)).toBe(true);
+
+          // The GitHub release API was consulted exactly once and no archive was downloaded.
+          expect(requestedUrls.filter((u) => u.includes("api.github.com"))).toHaveLength(1);
+          expect(requestedUrls.some((u) => u.includes("/download/"))).toBe(false);
+
+          const updated = readLuaLSMetadata(baseCacheDir);
+          expect(updated?.lastCheckedWeek).toBe(getIsoWeek());
+          expect(updated?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
+        } finally {
+          restoreFetch();
+        }
       });
-
-      const origFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ tag_name: `v${FALLBACK_LUALS_VERSION}` }),
-      });
-
-      try {
-        const bin = await resolveLuaLSBinary("latest", { quiet: true });
-        expect(typeof bin).toBe("string");
-
-        const updated = readLuaLSMetadata();
-        expect(updated?.lastCheckedWeek).toBe(getIsoWeek());
-      } finally {
-        globalThis.fetch = origFetch;
-      }
     });
 
-    it("falls back to existing cached version when network check fails during a new week", async () => {
-      const pastWeek = "2026-W01";
-      writeLuaLSMetadata({
-        lastCheckedWeek: pastWeek,
-        latestVersion: FALLBACK_LUALS_VERSION,
-        lastCheckedDate: "2026-01-01",
+    it("falls back to the existing cached version when the network check fails during a new week", async () => {
+      await withIsolatedCache(async (baseCacheDir) => {
+        const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+        writeLuaLSMetadata(
+          {
+            lastCheckedWeek: "2026-W01",
+            latestVersion: FALLBACK_LUALS_VERSION,
+            lastCheckedDate: "2026-01-01",
+          },
+          baseCacheDir
+        );
+
+        const restoreFetch = mockFetch(() => Promise.reject(new Error("Offline")));
+        try {
+          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          expect(bin).toBe(seeded);
+
+          const updated = readLuaLSMetadata(baseCacheDir);
+          expect(updated?.lastCheckedWeek).toBe(getIsoWeek());
+          expect(updated?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
+        } finally {
+          restoreFetch();
+        }
       });
-
-      const origFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Offline"));
-
-      try {
-        const bin = await resolveLuaLSBinary("latest", { quiet: true });
-        expect(typeof bin).toBe("string");
-        expect(fs.existsSync(bin)).toBe(true);
-
-        const updated = readLuaLSMetadata();
-        expect(updated?.lastCheckedWeek).toBe(getIsoWeek());
-        expect(updated?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
-      } finally {
-        globalThis.fetch = origFetch;
-      }
     });
 
-    it("falls back to FALLBACK_LUALS_VERSION when network fails and no cached versions exist", async () => {
-      const origFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Offline without cache"));
+    it("targets FALLBACK_LUALS_VERSION and surfaces the network error when nothing is cached", async () => {
+      await withIsolatedCache(async (baseCacheDir) => {
+        const requestedUrls: string[] = [];
+        const restoreFetch = mockFetch((url) => {
+          requestedUrls.push(url);
+          return Promise.reject(new Error("Offline without cache"));
+        });
 
-      try {
-        // Calling resolveLuaLSBinary with explicit version avoids network and resolves fallback
-        const bin = await resolveLuaLSBinary(FALLBACK_LUALS_VERSION, { quiet: true });
-        expect(typeof bin).toBe("string");
-        expect(fs.existsSync(bin)).toBe(true);
-      } finally {
-        globalThis.fetch = origFetch;
-      }
+        try {
+          await expect(
+            resolveLuaLSBinary("latest", {
+              quiet: true,
+              cacheDir: baseCacheDir,
+              // Force the network path: otherwise the shared test cache (probed as
+              // the legacy cache location) legitimately satisfies the request.
+              reuseExisting: false,
+            })
+          ).rejects.toThrow(/Offline without cache/);
+        } finally {
+          restoreFetch();
+        }
+
+        // The fallback version was selected and used for the (failed) download attempt.
+        expect(readLuaLSMetadata(baseCacheDir)?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
+        expect(
+          requestedUrls.some((url) =>
+            url.includes(`/download/${FALLBACK_LUALS_VERSION}/lua-language-server-`)
+          )
+        ).toBe(true);
+      });
     });
 
-    it("returns targetBinaryPath and cleans up older versions when onlineTag is already cached and valid", async () => {
-      writeLuaLSMetadata({
-        lastCheckedWeek: "2026-W01",
-        latestVersion: FALLBACK_LUALS_VERSION,
-        lastCheckedDate: "2026-01-01",
-      });
+    it("returns the cached binary and cleans up older versions when the online tag is already cached", async () => {
+      await withIsolatedCache(async (baseCacheDir) => {
+        const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+        await seedCachedLuaLS(baseCacheDir, "3.19.0");
+        writeLuaLSMetadata(
+          {
+            lastCheckedWeek: "2026-W01",
+            latestVersion: FALLBACK_LUALS_VERSION,
+            lastCheckedDate: "2026-01-01",
+          },
+          baseCacheDir
+        );
 
-      const origFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ tag_name: `v${FALLBACK_LUALS_VERSION}` }),
-      });
+        const restoreFetch = mockFetch(() =>
+          Promise.resolve({
+            ok: true,
+            json: async () => ({ tag_name: `v${FALLBACK_LUALS_VERSION}` }),
+          })
+        );
 
-      try {
-        const bin = await resolveLuaLSBinary("latest", { quiet: true });
-        expect(typeof bin).toBe("string");
-        expect(fs.existsSync(bin)).toBe(true);
-      } finally {
-        globalThis.fetch = origFetch;
-      }
+        try {
+          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          expect(bin).toBe(seeded);
+          expect(fs.existsSync(bin)).toBe(true);
+          // The stale version directory was purged after the weekly check.
+          expect(fs.existsSync(path.join(baseCacheDir, "3.19.0"))).toBe(false);
+        } finally {
+          restoreFetch();
+        }
+      });
     });
 
-    it("falls back to cachedVersions[0] when metadata.latestVersion is invalid during current week", async () => {
-      const currentWeek = getIsoWeek();
-      writeLuaLSMetadata({
-        lastCheckedWeek: currentWeek,
-        latestVersion: "99.99.99-nonexistent",
-        lastCheckedDate: "2026-09-23",
+    it("falls back to the newest cached version when metadata.latestVersion is invalid during the current week", async () => {
+      await withIsolatedCache(async (baseCacheDir) => {
+        const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+        writeLuaLSMetadata(
+          {
+            lastCheckedWeek: getIsoWeek(),
+            latestVersion: "99.99.99-nonexistent",
+            lastCheckedDate: "2026-09-23",
+          },
+          baseCacheDir
+        );
+
+        let fetchCalls = 0;
+        const restoreFetch = mockFetch(() => {
+          fetchCalls += 1;
+          return Promise.reject(new Error("fetch must not be called during the current week"));
+        });
+
+        try {
+          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          expect(bin).toBe(seeded);
+          expect(fetchCalls).toBe(0);
+        } finally {
+          restoreFetch();
+        }
       });
-
-      const origFetch = globalThis.fetch;
-      const fetchMock = vi.fn();
-      globalThis.fetch = fetchMock;
-
-      try {
-        const bin = await resolveLuaLSBinary("latest", { quiet: true });
-        expect(typeof bin).toBe("string");
-        expect(fs.existsSync(bin)).toBe(true);
-        expect(fetchMock).not.toHaveBeenCalled();
-      } finally {
-        globalThis.fetch = origFetch;
-      }
     });
 
-    it("falls back to cachedVersions[0] when metadata.latestVersion is invalid and network fails on new week", async () => {
-      writeLuaLSMetadata({
-        lastCheckedWeek: "2026-W01",
-        latestVersion: "99.99.99-nonexistent",
-        lastCheckedDate: "2026-01-01",
+    it("falls back to the newest cached version when metadata.latestVersion is invalid and the network fails", async () => {
+      await withIsolatedCache(async (baseCacheDir) => {
+        const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+        writeLuaLSMetadata(
+          {
+            lastCheckedWeek: "2026-W01",
+            latestVersion: "99.99.99-nonexistent",
+            lastCheckedDate: "2026-01-01",
+          },
+          baseCacheDir
+        );
+
+        const requestedUrls: string[] = [];
+        const restoreFetch = mockFetch((url) => {
+          requestedUrls.push(url);
+          return Promise.reject(new Error("Network failed"));
+        });
+
+        try {
+          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          expect(bin).toBe(seeded);
+
+          const updated = readLuaLSMetadata(baseCacheDir);
+          expect(updated?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
+          // The cached version was reused instead of attempting a download.
+          expect(requestedUrls.some((u) => u.includes("/download/"))).toBe(false);
+        } finally {
+          restoreFetch();
+        }
       });
-
-      const origFetch = globalThis.fetch;
-      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network failed"));
-
-      try {
-        const bin = await resolveLuaLSBinary("latest", { quiet: true });
-        expect(typeof bin).toBe("string");
-        expect(fs.existsSync(bin)).toBe(true);
-      } finally {
-        globalThis.fetch = origFetch;
-      }
     });
   });
+
 });

@@ -4,7 +4,7 @@
 [![npm version](https://img.shields.io/npm/v/nanos-lint.svg)](https://www.npmjs.com/package/nanos-lint)
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D24-brightgreen.svg)](https://nodejs.org/)
 [![Lua Version](https://img.shields.io/badge/Lua-5.4.9-blue.svg)](https://www.lua.org/manual/5.4/)
-[![LuaLS Version](https://img.shields.io/badge/LuaLS-3.19.1-brightgreen.svg)](https://github.com/LuaLS/lua-language-server)
+[![LuaLS Version](https://img.shields.io/badge/LuaLS-latest-brightgreen.svg)](https://github.com/LuaLS/lua-language-server)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A dedicated, fast linter and type-checker for **[nanos world](https://nanos-world.com/)** Lua scripts powered by the **[Lua Language Server (LuaLS)](https://github.com/LuaLS/lua-language-server)**.
@@ -17,7 +17,7 @@ A dedicated, fast linter and type-checker for **[nanos world](https://nanos-worl
 - **Zero-Install Local CLI**: Run directly via `npx nanos-lint [path]` without installing anything.
 - **Native GitHub Action**: Use `vugi99/nanos-lint` directly in CI workflows with inline GitHub PR annotations.
 - **Workspace Config Merging**: Fully respects local `.luarc.json` files, merging your project globals and disabled diagnostics on top of the nanos API.
-- **Cross-Platform**: Works on **Windows x64**, **Linux (x64, arm64)**, and **macOS (Apple Silicon arm64, Intel x64)**. Automatically downloads and caches platform LuaLS binaries.
+- **Cross-Platform**: Works on **Windows x64**, **Linux (x64, arm64)**, and **macOS (Apple Silicon arm64, Intel x64)**. Automatically downloads and caches platform LuaLS binaries, defaulting to the latest LuaLS release and falling back to 3.19.1 when offline.
 - **Modern Node.js Runtime**: Built targeting Node.js (>= 24) with zero runtime dependencies.
 
 ---
@@ -103,6 +103,8 @@ jobs:
 | `quiet` | Suppress progress messages | `false` |
 | `cache` | Whether to cache the LuaLS binary and annotations across workflow runs | `true` |
 
+When caching is enabled, the cache key rolls over each ISO week, so a freshly downloaded LuaLS binary is actually persisted under the new week's key; in the meantime the previous week's entry is restored from the cache.
+
 When running inside GitHub Actions, `nanos-lint` automatically outputs **workflow annotations** (`::error` / `::warning`) that appear inline on PR diffs.
 
 ---
@@ -114,8 +116,8 @@ nanos-lint [command] [options] [path]
 
 COMMANDS:
   check [path]             Check a workspace or Lua file (default)
-  init [path]              Scaffold a .luarc.json configuration in the workspace (copies definitions to .nanos-lint/)
-  download-luals [version] Download and cache the LuaLS binary
+  init [path]              Scaffold a .luarc.json configuration in the workspace (copies definitions to .nanos-lint/; supports --annotations <path>)
+  download-luals [version] Download and cache the LuaLS binary (the version can also be passed via --luals-version <ver>)
   clean-cache, clean       Clear the nanos-lint cache directory
   help, --help, -h         Show help message
   version, --version, -v   Show version information
@@ -123,14 +125,17 @@ COMMANDS:
 OPTIONS:
   -i, --ignore <pattern>   Files or directories to ignore (supports globs, repeatable, comma/newline-separated)
   -l, --log-level <level>  Logging level: error, warn, info, debug, silent (default: warn)
+                           silent suppresses all output, including the final report (only the exit code remains)
+                           error and warn (the default) suppress progress messages but still print the report
+                           debug adds diagnostic tracing
   --checklevel=<level>     Minimum diagnostic level: Error, Warning, Information, Hint (default: Warning)
   --config=<path>          Path to custom .luarc.json configuration file
-  --annotations=<path>     Path to custom annotations.lua file
+  --annotations=<path>     Path to custom annotations.lua file (applies to both check and init)
   --format=<format>        Output format: pretty, json, github (default: pretty)
   --github                 Output in GitHub Actions format (shortcut for --format=github)
-  --luals-version=<ver>    Version of LuaLS to use (default: latest)
+  --luals-version=<ver>    Version of LuaLS to use (default: latest, falling back to 3.19.1 when offline)
   --no-fail                Do not exit with code 1 if diagnostics are found
-  --quiet                  Suppress progress output (alias for --log-level=error)
+  --quiet                  Suppress progress output only (equivalent to --log-level=error; the report is still printed)
   -f, --force              (init command only) Overwrite existing .luarc.json
 ```
 
@@ -144,6 +149,8 @@ OPTIONS:
 | `GITHUB_TOKEN` | GitHub personal access token used for authenticated GitHub API requests (avoids unauthenticated rate limits) |
 | `NO_COLOR` | Disables ANSI color output when set to any non-empty value |
 | `FORCE_COLOR` | Forces ANSI color output even in non-TTY environments |
+
+Only `NANOS_LOG_LEVEL` controls the logging level; a generic `LOG_LEVEL` environment variable is intentionally not read, because CI images commonly set it.
 
 ---
 
@@ -209,6 +216,9 @@ npm run build
 
 # Run Vitest test suite with coverage (unit + live LuaLS integration tests)
 npm run test:coverage
+
+# Offline: skip live LuaLS tests, perform no network access, disable coverage thresholds
+NANOS_LIVE_TESTS=0 npm run test:coverage
 ```
 
 See [AGENTS.md](AGENTS.md) for development philosophy and quality gate requirements.

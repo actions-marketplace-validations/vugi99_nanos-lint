@@ -182,10 +182,13 @@ describe("config module", () => {
     it("stays linear on slash-heavy input that would be quadratic for /\\/+$/", () => {
       // A trailing-slash regex has to retry its repetition at every offset when the
       // string does not end with a slash, which is quadratic in the input length.
+      // The budget is deliberately generous (a quadratic implementation needs
+      // minutes for 100k characters) so the assertion cannot flake on a slow or
+      // loaded CI runner, while still failing on a real complexity regression.
       const pathological = "/".repeat(100_000) + "!";
       const started = Date.now();
       expect(stripTrailingSlashes(pathological)).toBe(pathological);
-      expect(Date.now() - started).toBeLessThan(1000);
+      expect(Date.now() - started).toBeLessThan(5000);
     });
 
     it("keeps CLI ignore expansion working for patterns with trailing slashes", () => {
@@ -199,10 +202,11 @@ describe("config module", () => {
     });
 
     it("merges pathological CLI ignore patterns quickly (js/polynomial-redos regression)", () => {
+      // Same generous budget rationale as the stripTrailingSlashes test above.
       const pathological = ["/".repeat(100_000) + "!", "/".repeat(50_000) + "\\"];
       const started = Date.now();
       const merged = mergeConfigs({}, {}, "C:/mock/definitions", { cliIgnore: pathological });
-      expect(Date.now() - started).toBeLessThan(2000);
+      expect(Date.now() - started).toBeLessThan(5000);
       expect(merged.files?.exclude).toContain(pathological[0]);
     });
 
