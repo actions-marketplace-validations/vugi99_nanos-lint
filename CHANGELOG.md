@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cleaned up redundant `diagnostics.globals` singletons in `templates/.luarc.json` that are already declared as global tables in `annotations.lua`.
 - Configured nanos package lookup paths (`Shared/?.lua`, `Client/?.lua`, `Server/?.lua`) and mapped `"Package.Require": "require"` via `runtime.special` in `templates/.luarc.json`.
 - Promoted `redefined-local`, `unused-local`, and `unused-vararg` diagnostics from `Hint` to `Warning` in `templates/.luarc.json`.
+- Updated `AGENTS.md` guidelines noting that running checks manually before committing is unnecessary because the full quality suite runs automatically in the pre-commit hook.
 
 ### Fixed
 - Fixed legacy cache path collision on Linux where `getLegacyCacheDir` resolved to the same directory as the primary cache, preventing redundant probes in `findExistingLuaLSDir` and respecting `reuseExisting: false` in `resolveLuaLSBinary`.

@@ -82,7 +82,9 @@ npm run test:coverage
 
 These quality gates are automated in `.githooks/pre-commit`, which the `prepare` npm script installs via `git config core.hooksPath .githooks`. That setting is repo-local, so a fresh clone only runs the hook after `npm install`. `.gitattributes` keeps hook and shell scripts on LF so it also works on Windows.
 
-If any of the above commands fail or emit warnings, investigate and fix them before responding to the user.
+There is no need to manually run all checks before committing because those checks are already included in and executed by the pre-commit hook on every commit. Running them manually beforehand is redundant unless you are debugging a specific failure or running an isolated check.
+
+If any check fails or emits warnings, investigate and fix it before responding to the user.
 
 Additionally, whenever you make changes to the codebase, **you must update `CHANGELOG.md`** under the `## [Unreleased]` section with concise bullet points categorized under standard Keep a Changelog headings (`Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, `Security`).
 
