@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Exported helper `findExistingLuaLSDir()` in `src/luals.ts` to discover pre-installed LuaLS directories in primary cache, legacy cache, or bundled distributions.
 - `reuseExisting` option in `DownloadOptions` for `downloadAndExtractLuaLS()`, enabling reuse of existing platform binaries without network download.
 - Pre-packaged standalone macOS release archives (`nanos-lint-<version>-macos-arm64.tar.gz` for Apple Silicon and `nanos-lint-<version>-macos-x64.tar.gz` for Intel) bundling platform LuaLS binaries, vendored annotations, and shell launchers in `.github/workflows/release.yml`.
-- `macos-latest` runner to the GitHub Actions CI test matrix in `.github/workflows/ci.yml`.
+- `macos-latest`, `macos-26-intel`, `ubuntu-slim`, and `ubuntu-26.04-arm` runners to the GitHub Actions CI test matrix in `.github/workflows/ci.yml`.
+- Architecture-aware cache keys (`${{ runner.os }}-${{ runner.arch }}`) in `.github/workflows/ci.yml` and `action.yml` preventing cross-architecture cache collisions between x64 and arm64 runners.
 - Documentation in `README.md` for standalone macOS release distributions, `-l, --log-level` option, and `NANOS_LOG_LEVEL` environment variable.
 
 ### Changed

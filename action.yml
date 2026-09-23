@@ -59,10 +59,10 @@ runs:
           ~/.cache/nanos-lint
           ~/AppData/Local/nanos-lint
           ~/Library/Caches/nanos-lint
-        key: nanos-lint-${{ runner.os }}-${{ inputs.luals-version }}
+        key: nanos-lint-${{ runner.os }}-${{ runner.arch }}-${{ inputs.luals-version }}
         restore-keys: |
-          nanos-lint-${{ runner.os }}-${{ inputs.luals-version }}-
-          nanos-lint-${{ runner.os }}-
+          nanos-lint-${{ runner.os }}-${{ runner.arch }}-${{ inputs.luals-version }}-
+          nanos-lint-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Run nanos-lint
       shell: bash
