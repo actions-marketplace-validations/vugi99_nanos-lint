@@ -309,9 +309,12 @@ export async function downloadAndExtractLuaLS(
       );
     }
 
-    // Verify that the real path does not escape the extraction directory
+    // Verify that the real path does not escape the extraction directory. Both
+    // sides are canonicalized, because the extraction directory itself can be
+    // reached through symlinks (for example `/var` -> `/private/var` on macOS,
+    // where `os.tmpdir()` lives), which would otherwise reject every download.
     const realBinaryPath = fs.realpathSync(tempBinaryPath);
-    const resolvedTemp = path.resolve(tempDir);
+    const resolvedTemp = fs.realpathSync(tempDir);
     if (!realBinaryPath.startsWith(resolvedTemp + path.sep) && realBinaryPath !== resolvedTemp) {
       throw new LuaLSError(
         `Extracted binary path escapes extraction directory: ${realBinaryPath}`,

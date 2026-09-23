@@ -756,6 +756,45 @@ describe("luals utilities", () => {
         fs.rmSync(tempTarget, { recursive: true, force: true });
       }
     });
+
+    it.skipIf(!liveTestsEnabled)(
+      "extracts into a destination reached through a symlinked directory",
+      async () => {
+        // `os.tmpdir()` is reached through a symlink on macOS (`/var` ->
+        // `/private/var`), so the extraction directory must be canonicalized on
+        // both sides of the escape check or every download is rejected.
+        const realBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-linked-dest-"));
+        const linkBase = `${realBase}-link`;
+        const seedBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-linked-seed-"));
+        try {
+          try {
+            fs.symlinkSync(realBase, linkBase, process.platform === "win32" ? "junction" : "dir");
+          } catch (err) {
+            // Creating links can require elevated privileges on some Windows setups.
+            void err;
+          }
+
+          await seedCachedLuaLS(seedBase, FALLBACK_LUALS_VERSION);
+          const targetDir = path.join(linkBase, FALLBACK_LUALS_VERSION);
+
+          const bin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, {
+            quiet: true,
+            cacheDir: seedBase,
+          });
+
+          expect(bin.startsWith(linkBase)).toBe(true);
+          expect(fs.existsSync(bin)).toBe(true);
+        } finally {
+          try {
+            fs.unlinkSync(linkBase);
+          } catch (err) {
+            void err;
+          }
+          fs.rmSync(realBase, { recursive: true, force: true });
+          fs.rmSync(seedBase, { recursive: true, force: true });
+        }
+      }
+    );
   });
 
   describe("getLegacyCacheDir", () => {

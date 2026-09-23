@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Repaired the Issue #20 archive-planted symlink regression test, which aborted while extracting an intentionally fake archive before reaching the symlink guard it asserts on.
 - Repaired the Issue #17 traversal regression test, which a discoverable valid LuaLS installation (such as the shared live-test fixture) could legitimately satisfy, so the poisoned `metadata.json` path was never exercised deterministically.
 - Sanitize `metadata.json` `latestVersion` with `sanitizeLuaLSVersion()` and enforce cache boundary checks before resolving cached binary paths, preventing path traversal and arbitrary binary execution outside the cache tree (#17).
+- Canonicalize both the extracted binary and the extraction directory before the directory-escape check, so a cache path reached through symlinks (such as macOS `os.tmpdir()` under `/var` -> `/private/var`) no longer rejects every download (#20).
 - Enforce 120s timeout and stream LuaLS archive downloads directly to disk with a 150 MB upper bound, preventing indefinite process hangs and out-of-memory exhaustion (#18).
 - Enforce HTTPS GitHub host allowlisting on download URLs and redirects, audit-log archive SHA-256 checksums, and document the binary verification model in `SECURITY.md` (#19).
 - Harden tar extraction with `--no-same-owner --no-same-permissions` on POSIX and validate extracted binary path against symlinks and directory escapes before chmod or execution (#20).
