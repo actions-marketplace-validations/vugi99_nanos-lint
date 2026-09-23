@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated all `catch` blocks across `src/annotations.ts`, `src/cli.ts`, `src/config.ts`, `src/luals.ts`, `src/reporter.ts`, and `src/types.ts` to log errors at appropriate log levels (`debug`, `warn`, or `error`), ensuring no errors are silently swallowed.
 - `downloadAndExtractLuaLS()` now automatically reuses existing local LuaLS installations when available instead of repeatedly re-downloading archives from GitHub, reducing test suite execution time by ~85%.
 - Updated `AGENTS.md` guidelines instructing agents to systematically update `CHANGELOG.md` under `## [Unreleased]` after making changes, and to review, verify, and promote unreleased entries when preparing and publishing releases.
+- Migrated `eslint.config.mjs` from deprecated `tseslint.config()` to ESLint core's native `defineConfig()` from `eslint/config`.
 
 ## [2.6.1] - 2026-09-23
 
