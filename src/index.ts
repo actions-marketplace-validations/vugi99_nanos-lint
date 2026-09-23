@@ -6,4 +6,5 @@ export * from "./cli.js";
 export * from "./paths.js";
 export * from "./annotations.js";
 export * from "./logger.js";
+export * from "./errors.js";
 

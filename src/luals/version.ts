@@ -1,4 +1,5 @@
 import { logger } from "../logger.js";
+import { LuaLSError } from "../errors.js";
 
 export const FALLBACK_LUALS_VERSION = "3.19.1";
 export const DEFAULT_LUALS_VERSION = "latest";
@@ -111,8 +112,10 @@ export async function resolveLuaLSVersion(version?: string): Promise<string> {
   }
   const sanitized = sanitizeLuaLSVersion(version);
   if (!sanitized) {
-    throw new Error(
-      `Invalid LuaLS version: "${version}". Expected a release tag such as "3.19.1", or "latest".`
+    throw new LuaLSError(
+      `Invalid LuaLS version: "${version}". Expected a release tag such as "3.19.1", or "latest".`,
+      "ERR_LUALS_INVALID_VERSION",
+      "Provide a valid release tag like '3.19.1' or use 'latest'."
     );
   }
   return sanitized;

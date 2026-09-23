@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Centralized typed error hierarchy in `src/errors.ts` (`NanosLintError`, `ConfigError`, `LuaLSError`, `AnnotationsError`, `CacheError`) providing structured error codes and actionable remediation hints for users and programmatic consumers (#12).
+- Enhanced CLI error reporting formatting `NanosLintError` failures with clean error messages and remediation hints (`hint: ...`) without raw stack traces unless running with `--log-level=debug` or `DEBUG` (#12).
+- Dedicated unit test suite `tests/unit/errors.test.ts` testing error classes, codes, call sites, and CLI formatting (#12).
 - Exported validator `isAnnotationsValid()` in `src/annotations.ts` verifying file existence, minimum size (>= 1000 bytes), and valid Lua headers.
 - Dedicated unit test suite `tests/unit/cache-corruption.test.ts` covering automated self-healing across corrupted annotations, malformed metadata, broken binaries, and legacy cache states.
 

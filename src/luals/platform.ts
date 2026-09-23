@@ -1,5 +1,6 @@
 import path from "node:path";
 import { FALLBACK_LUALS_VERSION } from "./version.js";
+import { LuaLSError } from "../errors.js";
 
 export interface PlatformInfo {
   platform: "win32" | "linux" | "darwin";
@@ -21,7 +22,11 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
         binaryRelativePath: path.join("bin", "lua-language-server.exe"),
       };
     }
-    throw new Error(`Unsupported Windows architecture: ${arch}. Supported: x64`);
+    throw new LuaLSError(
+      `Unsupported Windows architecture: ${arch}. Supported: x64`,
+      "ERR_LUALS_UNSUPPORTED_ARCH",
+      "LuaLS provides pre-built binaries for Windows x64. Use a compatible system or set LUALS_BIN to a custom binary."
+    );
   }
 
   if (platform === "linux") {
@@ -41,7 +46,11 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
         binaryRelativePath: path.join("bin", "lua-language-server"),
       };
     }
-    throw new Error(`Unsupported Linux architecture: ${arch}. Supported: x64, arm64`);
+    throw new LuaLSError(
+      `Unsupported Linux architecture: ${arch}. Supported: x64, arm64`,
+      "ERR_LUALS_UNSUPPORTED_ARCH",
+      "LuaLS provides pre-built binaries for Linux x64 and arm64. Use LUALS_BIN to specify a custom build."
+    );
   }
 
   if (platform === "darwin") {
@@ -54,6 +63,10 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
     };
   }
 
-  throw new Error(`Unsupported platform: ${platform}`);
+  throw new LuaLSError(
+    `Unsupported platform: ${platform}`,
+    "ERR_LUALS_UNSUPPORTED_PLATFORM",
+    "LuaLS provides pre-built binaries for Windows, Linux, and macOS. Use LUALS_BIN to specify a custom build."
+  );
 }
 

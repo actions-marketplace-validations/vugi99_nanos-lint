@@ -7,6 +7,7 @@ import { getPackageRoot } from "../config.js";
 import { systemPaths } from "../paths.js";
 import { fileUriToPath } from "../types.js";
 import type { CheckOptions, CheckResult, DiagnosticReport, LuaRCConfig } from "../types.js";
+import { LuaLSError } from "../errors.js";
 import {
   DEFAULT_LUALS_VERSION,
   FALLBACK_LUALS_VERSION,
@@ -164,8 +165,10 @@ export async function resolveLuaLSBinary(
       );
     } catch (err) {
       if (wasCorrupted) {
-        throw new Error(
+        throw new LuaLSError(
           `Cached LuaLS binary at '${cachedPath}' is corrupted (failed execution/size check) and cannot be re-downloaded while offline. Please connect to the internet to repair or run 'nanos-lint clean-cache'.`,
+          "ERR_LUALS_CORRUPTED_CACHE",
+          "Connect to the internet to repair the corrupted binary or run 'nanos-lint clean-cache'.",
           { cause: err }
         );
       }
@@ -261,8 +264,10 @@ export async function resolveLuaLSBinary(
     downloadedBinary = await downloadAndExtractLuaLS(targetVersion, targetCacheDir, options);
   } catch (err) {
     if (wasCorrupted) {
-      throw new Error(
+      throw new LuaLSError(
         `Cached LuaLS binary at '${targetBinaryPath}' is corrupted (failed execution/size check) and cannot be re-downloaded while offline. Please connect to the internet to repair or run 'nanos-lint clean-cache'.`,
+        "ERR_LUALS_CORRUPTED_CACHE",
+        "Connect to the internet to repair the corrupted binary or run 'nanos-lint clean-cache'.",
         { cause: err }
       );
     }
@@ -282,7 +287,11 @@ export async function runLuaLSCheck(
 ): Promise<CheckResult> {
   const absoluteTarget = path.resolve(targetPath);
   if (!fs.existsSync(absoluteTarget)) {
-    throw new Error(`Target path does not exist: ${targetPath}`);
+    throw new LuaLSError(
+      `Target path does not exist: ${targetPath}`,
+      "ERR_TARGET_NOT_FOUND",
+      "Verify that the target path exists and is accessible."
+    );
   }
 
   const binary =
@@ -354,12 +363,17 @@ export async function runLuaLSCheck(
   if (!parseSucceeded) {
     const cacheHint = `(Cache location: ${getCacheDir()})`;
     if (execError) {
-      throw new Error(
-        `LuaLS check failed to execute or produce diagnostic output: ${execError instanceof Error ? execError.message : String(execError)}. ${cacheHint}`
+      throw new LuaLSError(
+        `LuaLS check failed to execute or produce diagnostic output: ${execError instanceof Error ? execError.message : String(execError)}. ${cacheHint}`,
+        "ERR_LUALS_EXECUTION",
+        "Inspect the debug log with --log-level=debug or run 'nanos-lint clean-cache' to re-fetch LuaLS.",
+        { cause: execError }
       );
     }
-    throw new Error(
-      `LuaLS check failed to produce diagnostic output at: ${checkOutPath}. ${cacheHint}`
+    throw new LuaLSError(
+      `LuaLS check failed to produce diagnostic output at: ${checkOutPath}. ${cacheHint}`,
+      "ERR_LUALS_NO_OUTPUT",
+      "Ensure the temporary directory is writable and sufficient disk space is available."
     );
   }
 

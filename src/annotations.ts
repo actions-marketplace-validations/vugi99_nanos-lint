@@ -4,6 +4,7 @@ import os from "node:os";
 import { systemPaths } from "./paths.js";
 import { getPackageRoot } from "./config.js";
 import { logger } from "./logger.js";
+import { AnnotationsError } from "./errors.js";
 
 export const DOCGEN_REPO = "nanos-world/vscode-extension";
 export const DOCGEN_BRANCH = "docgen-output";
@@ -134,11 +135,19 @@ export async function fetchRawAnnotationsContent(): Promise<string> {
     signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) {
-    throw new Error(`Failed to download annotations.lua: ${res.status} ${res.statusText}`);
+    throw new AnnotationsError(
+      `Failed to download annotations.lua: ${res.status} ${res.statusText}`,
+      "ERR_ANNOTATIONS_DOWNLOAD",
+      "Verify your internet connection and that GitHub raw endpoints are accessible."
+    );
   }
   const text = await res.text();
   if (!text || text.length < 1000) {
-    throw new Error("Downloaded annotations.lua appears truncated or invalid");
+    throw new AnnotationsError(
+      "Downloaded annotations.lua appears truncated or invalid",
+      "ERR_ANNOTATIONS_INVALID",
+      "Retry downloading or pass a local annotations file via --annotations <path>."
+    );
   }
   return text;
 }
@@ -333,7 +342,11 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
   if (options.customPath) {
     const resolved = path.resolve(options.customPath);
     if (!fs.existsSync(resolved)) {
-      throw new Error(`Custom annotations file not found: ${resolved}`);
+      throw new AnnotationsError(
+        `Custom annotations file not found: ${resolved}`,
+        "ERR_ANNOTATIONS_NOT_FOUND",
+        "Verify that the path specified in --annotations exists and is accessible."
+      );
     }
     return resolved;
   }
@@ -343,7 +356,11 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
   if (envPath) {
     const resolved = path.resolve(envPath);
     if (!fs.existsSync(resolved)) {
-      throw new Error(`Annotations file specified in environment not found: ${resolved}`);
+      throw new AnnotationsError(
+        `Annotations file specified in environment not found: ${resolved}`,
+        "ERR_ANNOTATIONS_ENV_NOT_FOUND",
+        "Verify that the path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS exists."
+      );
     }
     return resolved;
   }
@@ -423,13 +440,17 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
         /permission denied|read-only|no space left/i.test(err.message));
 
     if (isFsError) {
-      throw new Error(
+      throw new AnnotationsError(
         `Failed to resolve nanos world API annotations due to a filesystem error: ${err instanceof Error ? err.message : String(err)}. Please check directory permissions or pass a custom file with --annotations.`,
+        "ERR_ANNOTATIONS_FS",
+        "Check directory permissions for the cache directory or specify --annotations <path>.",
         { cause: err }
       );
     }
-    throw new Error(
+    throw new AnnotationsError(
       `Failed to resolve nanos world API annotations. Please check your network connection or pass a custom file with --annotations. (${err instanceof Error ? err.message : String(err)})`,
+      "ERR_ANNOTATIONS_NETWORK",
+      "Check your network connection, run 'nanos-lint warmup' when online, or specify --annotations <path>.",
       { cause: err }
     );
   }

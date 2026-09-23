@@ -5,6 +5,7 @@ import { parse, stripComments, type ParseError, printParseErrorCode } from "json
 import { systemPaths } from "./paths.js";
 import { logger } from "./logger.js";
 import type { LuaRCConfig } from "./types.js";
+import { ConfigError } from "./errors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,10 +75,26 @@ export function parseJsonc<T = unknown>(text: string): T {
 
 export function loadConfigFile(filePath: string): LuaRCConfig {
   if (!fs.existsSync(filePath)) {
-    throw new Error(`Configuration file not found: ${filePath}`);
+    throw new ConfigError(
+      `Configuration file not found: ${filePath}`,
+      "ERR_CONFIG_NOT_FOUND",
+      "Ensure the configuration file path is correct or run 'nanos-lint init' to generate a default config."
+    );
   }
   const content = fs.readFileSync(filePath, "utf-8");
-  return parseJsonc<LuaRCConfig>(content);
+  try {
+    return parseJsonc<LuaRCConfig>(content);
+  } catch (err) {
+    if (err instanceof ConfigError) {
+      throw err;
+    }
+    throw new ConfigError(
+      `Failed to parse configuration file at ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
+      "ERR_CONFIG_PARSE",
+      "Check your .luarc.json syntax or run 'nanos-lint init --force' to scaffold a clean template.",
+      { cause: err }
+    );
+  }
 }
 
 /**
@@ -333,15 +350,21 @@ export interface InitWorkspaceOptions {
 export function initWorkspace(workspacePath: string, options?: InitWorkspaceOptions): string {
   const targetFile = path.join(workspacePath, ".luarc.json");
   if (fs.existsSync(targetFile) && !options?.force) {
-    throw new Error(`.luarc.json already exists at ${targetFile}. Use --force to overwrite.`);
+    throw new ConfigError(
+      `.luarc.json already exists at ${targetFile}. Use --force to overwrite.`,
+      "ERR_CONFIG_EXISTS",
+      "Pass --force to overwrite the existing .luarc.json file."
+    );
   }
 
   const template = loadConfigFile(getDefaultTemplatePath());
   const sourceAnnotations = options?.annotationsPath || getDefaultAnnotationsPath();
 
   if (!fs.existsSync(sourceAnnotations)) {
-    throw new Error(
-      `Definitions file not found at ${sourceAnnotations}. Make sure annotations have been downloaded or pass a valid file with --annotations.`
+    throw new ConfigError(
+      `Definitions file not found at ${sourceAnnotations}. Make sure annotations have been downloaded or pass a valid file with --annotations.`,
+      "ERR_ANNOTATIONS_NOT_FOUND",
+      "Run 'nanos-lint warmup' to download annotations or provide --annotations <path>."
     );
   }
 

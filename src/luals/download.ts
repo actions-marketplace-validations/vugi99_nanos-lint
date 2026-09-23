@@ -6,6 +6,7 @@ import { logger } from "../logger.js";
 import { DEFAULT_LUALS_VERSION, resolveLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { findExistingLuaLSDir, getBaseLuaLSCacheDir, getCacheDir } from "./cache.js";
+import { LuaLSError } from "../errors.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -137,7 +138,15 @@ export async function downloadAndExtractLuaLS(
       }
 
       if (!response || !response.body) {
-        throw lastErr || new Error(`Failed to download ${url}`);
+        if (lastErr instanceof LuaLSError) {
+          throw lastErr;
+        }
+        throw new LuaLSError(
+          `Failed to download LuaLS from ${url}${lastErr ? `: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}` : ""}`,
+          "ERR_LUALS_DOWNLOAD",
+          "Check your network connection or specify a custom binary with LUALS_BIN.",
+          { cause: lastErr }
+        );
       }
 
       const arrayBuffer = await response.arrayBuffer();
@@ -188,10 +197,18 @@ export async function downloadAndExtractLuaLS(
 
     // Verify file exists, has non-trivial size, and is valid executable before promotion
     if (!fs.existsSync(tempBinaryPath) || fs.statSync(tempBinaryPath).size < 100_000) {
-      throw new Error(`Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`);
+      throw new LuaLSError(
+        `Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`,
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space."
+      );
     }
     if (!isBinaryValid(tempBinaryPath)) {
-      throw new Error(`Extracted LuaLS binary at ${tempBinaryPath} is invalid or non-functional.`);
+      throw new LuaLSError(
+        `Extracted LuaLS binary at ${tempBinaryPath} is invalid or non-functional.`,
+        "ERR_LUALS_INVALID_BINARY",
+        "Run 'nanos-lint clean-cache' to remove corrupted downloads or set LUALS_BIN to a custom binary."
+      );
     }
 
     // Write .complete marker in tempDir before promotion

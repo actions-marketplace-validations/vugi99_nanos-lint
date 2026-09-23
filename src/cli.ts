@@ -8,6 +8,7 @@ import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./lual
 import { cleanCache, systemPaths } from "./paths.js";
 import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
+import { ConfigError, NanosLintError } from "./errors.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
 
 function getVersionString(): string {
@@ -141,7 +142,11 @@ export function createProgram(options?: CreateProgramOptions): Command {
       if (opts.config) {
         const resolvedConfig = path.resolve(opts.config);
         if (!fs.existsSync(resolvedConfig)) {
-          throw new Error(`Configuration file not found: ${resolvedConfig}`);
+          throw new ConfigError(
+            `Configuration file not found: ${resolvedConfig}`,
+            "ERR_CONFIG_NOT_FOUND",
+            "Verify the path passed to --config exists and is readable."
+          );
         }
       }
 
@@ -291,9 +296,24 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
     if (err instanceof CommanderError) {
       return err.exitCode;
     }
+    if (err instanceof NanosLintError) {
+      logger.error(`error: ${err.message}`);
+      if (err.remedy) {
+        logger.error(`hint: ${err.remedy}`);
+      }
+      if ((logger.getLevel() === "debug" || process.env.DEBUG) && err.stack) {
+        logger.error(err.stack);
+        if (err.cause) {
+          logger.error(
+            `cause: ${err.cause instanceof Error ? err.cause.stack || err.cause.message : String(err.cause)}`
+          );
+        }
+      }
+      return 1;
+    }
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`error: ${message}`);
-    if (process.env.DEBUG && err instanceof Error && err.stack) {
+    if ((logger.getLevel() === "debug" || process.env.DEBUG) && err instanceof Error && err.stack) {
       logger.error(err.stack);
     }
     return 1;
