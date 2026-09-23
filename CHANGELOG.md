@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Cache status and inspection command (`nanos-lint cache status`, `cache info`, and `cache-status`) with human-readable terminal output and `--json` export displaying cached LuaLS binaries, annotations commit SHA, metadata freshness, and disk usage (#14).
+- Cache inspection and sizing utilities (`getCacheStatus`, `formatCacheStatusPretty`, `getDirectorySize`, `formatBytes`) exported in `src/cache-status.ts` and `src/paths.ts` (#14).
+- Dedicated unit test suite `tests/unit/cache-status.test.ts` verifying disk size calculation, byte formatting, empty and populated cache reporting, and CLI subcommands (#14).
 - Dedicated warmup / download CLI command (`nanos-lint warmup` and alias `download`) pre-fetching and caching both the LuaLS binary and nanos world annotations for air-gapped CI and Docker build pipelines (#13).
 - Centralized typed error hierarchy in `src/errors.ts` (`NanosLintError`, `ConfigError`, `LuaLSError`, `AnnotationsError`, `CacheError`) providing structured error codes and actionable remediation hints for users and programmatic consumers (#12).
 - Enhanced CLI error reporting formatting `NanosLintError` failures with clean error messages and remediation hints (`hint: ...`) without raw stack traces unless running with `--log-level=debug` or `DEBUG` (#12).

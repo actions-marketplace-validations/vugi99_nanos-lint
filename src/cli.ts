@@ -6,6 +6,7 @@ import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.
 import { resolveAnnotations, readAnnotationsMetadata } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
+import { getCacheStatus, formatCacheStatusPretty } from "./cache-status.js";
 import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
 import { ConfigError, NanosLintError } from "./errors.js";
@@ -239,25 +240,69 @@ export function createProgram(options?: CreateProgramOptions): Command {
       setExitCode(0);
     });
 
+  const handleCleanCache = (): void => {
+    try {
+      const cleared = cleanCache();
+      if (cleared) {
+        writeOutput(`[cache] Cleared cache at: ${cleared}`);
+      } else {
+        writeOutput(`[cache] Cache is already empty (${systemPaths.cache})`);
+      }
+      setExitCode(0);
+    } catch (err) {
+      logger.error(
+        `[cache] Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`
+      );
+      setExitCode(1);
+    }
+  };
+
+  const handleCacheStatus = (opts?: { json?: boolean }): void => {
+    const report = getCacheStatus();
+    if (opts?.json) {
+      writeOutput(JSON.stringify(report, null, 2));
+    } else {
+      writeOutput(formatCacheStatusPretty(report));
+    }
+    setExitCode(0);
+  };
+
+  const cacheCmd = program
+    .command("cache")
+    .description("Inspect or manage the nanos-lint cache")
+    .option("--json", "Output cache state in JSON format");
+
+  cacheCmd
+    .command("status", { isDefault: true })
+    .alias("info")
+    .description("Show cache status, installed versions, and disk usage")
+    .option("--json", "Output cache state in JSON format")
+    .action((opts: { json?: boolean }, cmd: Command) => {
+      const json = opts?.json || (cmd.parent ? Boolean(cmd.parent.opts()?.json) : false);
+      handleCacheStatus({ json });
+    });
+
+  cacheCmd
+    .command("clean")
+    .description("Clear the nanos-lint cache")
+    .action(() => {
+      handleCleanCache();
+    });
+
+  program
+    .command("cache-status")
+    .description("Show cache status, installed versions, and disk usage")
+    .option("--json", "Output cache state in JSON format")
+    .action((opts: { json?: boolean }) => {
+      handleCacheStatus(opts);
+    });
+
   program
     .command("clean-cache")
     .alias("clean")
     .description("Clear the nanos-lint cache")
     .action(() => {
-      try {
-        const cleared = cleanCache();
-        if (cleared) {
-          writeOutput(`[cache] Cleared cache at: ${cleared}`);
-        } else {
-          writeOutput(`[cache] Cache is already empty (${systemPaths.cache})`);
-        }
-        setExitCode(0);
-      } catch (err) {
-        logger.error(
-          `[cache] Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`
-        );
-        setExitCode(1);
-      }
+      handleCleanCache();
     });
 
   program
@@ -276,6 +321,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
 Examples:
   $ npx nanos-lint
   $ npx nanos-lint warmup
+  $ npx nanos-lint cache status
   $ npx nanos-lint check ./my-package
   $ npx nanos-lint check . --checklevel=Error
   $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"

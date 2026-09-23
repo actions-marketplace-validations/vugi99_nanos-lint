@@ -125,6 +125,8 @@ COMMANDS:
   check [path]             Check a workspace or Lua file (default)
   init [path]              Scaffold a .luarc.json configuration in the workspace (copies definitions to .nanos-lint/; supports --annotations <path>)
   warmup, download         Pre-fetch and cache both LuaLS binary and annotations for offline execution
+  cache status, cache info Show cache status, installed versions, and disk usage (supports --json)
+  cache-status             Alias for cache status
   download-luals [version] Download and cache the LuaLS binary (the version can also be passed via --luals-version <ver>)
   clean-cache, clean       Clear the nanos-lint cache directory
   help, --help, -h         Show help message
