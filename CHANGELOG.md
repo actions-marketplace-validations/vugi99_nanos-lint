@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-09-23
+
 ### Added
 - Centralized logger module (`src/logger.ts`) providing configurable log levels (`error`, `warn`, `info`, `debug`, `silent`) with default level `"warn"`.
 - `-l, --log-level <level>` CLI parameter on root and `check` command and `NANOS_LOG_LEVEL` environment variable to configure the application log level.
@@ -36,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `src/logger.ts` reads only `NANOS_LOG_LEVEL`, no longer a bare `LOG_LEVEL`.
 - CI matrix: dropped the 1-vCPU `ubuntu-slim` runner; Linux x64 stays covered by `ubuntu-latest`.
 - Cache keys in `.github/workflows/ci.yml` and `action.yml` include the ISO week so entries refresh, and the dead restore-key prefixes were fixed.
-- `action.yml` falls back to the exact `npx --yes nanos-lint@2.6.1` instead of the `^2.6.1` range.
+- `action.yml` falls back to the exact released version (`npx --yes nanos-lint@2.7.0`) instead of the `^2.6.1` range.
 - Tests modernized: vacuous/conditional assertions replaced, missing fixtures asserted instead of skipped, `mockClear()` between flag variants, and the `-i/--ignore` test drives the real CLI.
 - `README.md` documents the test-suite variables and the shared download; the runtime environment variable table links to them.
 
