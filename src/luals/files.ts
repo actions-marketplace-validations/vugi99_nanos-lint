@@ -88,8 +88,8 @@ function isPatternWithinBudget(pattern: string): boolean {
  * Backslashes are accepted as separators so Windows-authored `.luarc.json`
  * files keep working, and trailing slashes are dropped so `vendor/` behaves
  * exactly like `vendor`. Patterns that cannot be matched (`""`, `"."`, NUL
- * bytes, oversized input, or non-string JSON values) are rejected instead of
- * being handed to `glob`.
+ * bytes, oversized input, absolute paths, or non-string JSON values) are
+ * rejected instead of being handed to `glob`.
  */
 function normalizePattern(pattern: unknown): string | null {
   if (typeof pattern !== "string") {
@@ -100,11 +100,27 @@ function normalizePattern(pattern: unknown): string | null {
     !normalized ||
     normalized === "." ||
     normalized.length > MAX_PATTERN_LENGTH ||
-    normalized.includes("\0")
+    normalized.includes("\0") ||
+    isAbsolutePattern(normalized)
   ) {
     return null;
   }
   return normalized;
+}
+
+/** Drive-letter prefixes, recognized on every platform (not just Windows). */
+const WINDOWS_ABSOLUTE_PATTERN = /^[A-Za-z]:\//;
+
+/**
+ * `workspace.ignoreDir` / `files.exclude` entries are workspace-relative in
+ * LuaLS, and `glob` matches ignore patterns against walk-relative paths. An
+ * absolute entry is therefore unusable, and `glob` anchors it on some platforms
+ * but not others (a macOS `/var` -> `/private/var` walk root or a Windows drive
+ * letter behave differently again), so it is skipped to keep one `.luarc.json`
+ * behaving identically on Linux, macOS and Windows.
+ */
+function isAbsolutePattern(normalized: string): boolean {
+  return path.posix.isAbsolute(normalized) || WINDOWS_ABSOLUTE_PATTERN.test(normalized);
 }
 
 /**

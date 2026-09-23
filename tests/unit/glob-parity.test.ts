@@ -82,6 +82,11 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
     ],
     ["a nested ignoreDir path", () => ({ workspace: { ignoreDir: ["deep/nested"] } })],
     ["ignoreDir overriding the defaults", () => ({ workspace: { ignoreDir: ["node_modules"] } })],
+    [
+      "an absolute ignoreDir path",
+      (tree) => ({ workspace: { ignoreDir: [path.join(tree, "vendor")] } }),
+    ],
+    ["an absolute exclude pattern", (tree) => ({ files: { exclude: [`${path.join(tree, "vendor")}/**`] } })],
     ["a basename exclude pattern", () => ({ files: { exclude: ["*.bak"] } })],
     ["a leading-globstar exclude pattern", () => ({ files: { exclude: ["**/nested/**"] } })],
     ["a leading-globstar directory pattern", () => ({ files: { exclude: ["**/deep/**"] } })],
@@ -142,17 +147,6 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
       expect(countCheckedFiles(root, configPath)).toBe(CUSTOM_IGNORE_LUA_FILES - NESTED_LUA_FILES);
     });
 
-    it("honors an absolute ignoreDir path inside the workspace", () => {
-      const configPath = writeConfig("absolute-ignore", {
-        workspace: { ignoreDir: [path.join(root, "vendor")] },
-      });
-
-      // Legacy compared the absolute string against relative paths; glob anchors
-      // the pattern to the walk root, so the directory is now excluded.
-      expect(legacyCountCheckedFiles(root, configPath)).toBe(CUSTOM_IGNORE_LUA_FILES);
-      expect(countCheckedFiles(root, configPath)).toBe(CUSTOM_IGNORE_LUA_FILES - VENDOR_LUA_FILES);
-    });
-
     it("honors a ./ prefix in exclude patterns", () => {
       const configPath = writeConfig("dot-slash", { files: { exclude: ["./vendor/**"] } });
 
@@ -207,6 +201,25 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
       } finally {
         fs.rmSync(linkParent, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe("absolute patterns (#27)", () => {
+    it("skips absolute ignoreDir and exclude entries on every platform", () => {
+      // glob anchors absolute ignore patterns on some platforms but not others
+      // (macOS `/var` -> `/private/var`, Windows drive letters), so they are
+      // rejected everywhere to keep the same `.luarc.json` behaving identically.
+      const ignoreDirConfig = writeConfig("absolute-ignore", {
+        workspace: {
+          ignoreDir: [path.join(root, "vendor"), "C:/somewhere/vendor", "/etc/lua"],
+        },
+      });
+      expect(countCheckedFiles(root, ignoreDirConfig)).toBe(CUSTOM_IGNORE_LUA_FILES);
+
+      const excludeConfig = writeConfig("absolute-exclude", {
+        files: { exclude: [`${path.join(root, "vendor")}/**`, "D:/tmp/**"] },
+      });
+      expect(countCheckedFiles(root, excludeConfig)).toBe(TOTAL_LUA_FILES);
     });
   });
 
