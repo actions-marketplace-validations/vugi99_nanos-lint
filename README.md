@@ -218,17 +218,16 @@ cd nanos-lint
 # Install dependencies
 npm install
 
-# Run ESLint
-npm run lint
+# Run all quality gates (recommended before commit/PR)
+npm run gates
+# Or alias
+npm run check:all
 
-# Run type check
-npm run typecheck
-
-# Build distribution bundle
-npm run build
-
-# Run Vitest test suite with coverage (unit + live LuaLS integration tests)
-npm run test:coverage
+# Run individual quality gates
+npm run lint           # ESLint
+npm run typecheck      # TypeScript typecheck
+npm run build          # Build distribution bundle
+npm run test:coverage  # Vitest unit + live LuaLS integration tests with coverage
 
 # Offline: skip live LuaLS tests, perform no network access, disable coverage thresholds
 NANOS_LIVE_TESTS=0 npm run test:coverage

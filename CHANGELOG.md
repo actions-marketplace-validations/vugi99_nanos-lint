@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Unified quality gates npm script (`npm run gates` and alias `npm run check:all`) chaining all mandatory project quality gates in sequence, simplifying pre-commit hooks and documentation (#39).
 - Hardening tests for shipped `templates/.luarc.json` (#36):
   - Unit tests in `tests/unit/config.test.ts` asserting 100% of keys in `diagnostics.severity` and `diagnostics.neededFileStatus` belong to `VALID_LUALS_DIAGNOSTIC_CODES`, merging default template emits zero dropped-key warnings, and the `$schema` URL pattern is valid.
   - Live integration test in `tests/integration/luals.test.ts` verifying the `$schema` URL is reachable (HTTP 200) and returns valid JSON.

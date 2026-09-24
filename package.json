@@ -43,6 +43,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "gates": "npm run lint && npm run typecheck && npm run build && npm run test:coverage",
+    "check:all": "npm run gates",
     "prepare": "node -e \"try { require('node:child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
   "devDependencies": {
