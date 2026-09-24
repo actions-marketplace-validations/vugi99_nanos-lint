@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-09-24
+
 ### Added
 
 - Prettier code formatting quality gate (`npm run format:check` and auto-fix `npm run format:fix`) enforcing consistent code style across all TypeScript, JSON, Markdown, and YAML files, with `eslint-config-prettier` integration to disable conflicting ESLint rules (#41).
@@ -31,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Return `null` immediately in `fetchLatestCommitId()` when response exceeds limit, preventing double-read of consumed response body via `res.json()` on Node.js 24 (#30, #42).
 - Include `scripts/**/*.ts` in `tsconfig.json` and ESLint checks so quality gate tooling is typechecked and linted (#42).
 - Clarify dependency cruiser rule names and docstring coverage specifications for top-level/exported functions (#42).
+
+### Security
+
+- Dropped security support for versions < 2.8.2 in SECURITY.md.
 
 ## [2.8.1] - 2026-09-24
 
