@@ -127,62 +127,101 @@ describe("concurrent cache access (#7)", () => {
   });
 
   it("serializes separate processes on the same lock file", async () => {
-    const dir = makeTempDir("nanos-lock-multiprocess-");
-    const lockPath = path.join(dir, "shared.lock");
-    const logPath = path.join(dir, "critical.log");
-    const workerScript = path.join(dir, "worker.mjs");
-    const lockUrl = pathToFileURL(path.join(repoRoot, "src", "lock.ts")).href;
+    // The overlap verdict is taken inside the critical section (exclusive-create marker
+    // plus an owner-token read-back) rather than from a shared append log: Windows file
+    // writes from sibling processes are not a reliable ordering signal, so a log-based
+    // nesting check reports false overlaps under load.
+    const rounds = 2;
+    const ids = ["a", "b", "c", "d", "e", "f"];
 
-    fs.writeFileSync(
-      workerScript,
-      [
-        'import fs from "node:fs";',
-        `import { withFileLock } from ${JSON.stringify(lockUrl)};`,
-        "const [lockPath, logPath, id] = process.argv.slice(2);",
-        "await withFileLock(lockPath, async () => {",
-        "  fs.appendFileSync(logPath, `start-${id}\\n`);",
-        "  await new Promise((resolve) => setTimeout(resolve, 40));",
-        "  fs.appendFileSync(logPath, `end-${id}\\n`);",
-        '}, { label: "worker" });',
-      ].join("\n"),
-      "utf-8",
-    );
+    for (let round = 0; round < rounds; round++) {
+      const dir = makeTempDir(`nanos-lock-multiprocess-${round}-`);
+      const lockPath = path.join(dir, "shared.lock");
+      const markerPath = path.join(dir, "critical.marker");
+      const logPath = path.join(dir, "critical.log");
+      const workerScript = path.join(dir, "worker.mjs");
+      const lockUrl = pathToFileURL(path.join(repoRoot, "src", "lock.ts")).href;
 
-    const workers = await Promise.all(
-      ["a", "b", "c", "d"].map(async (id) => {
-        try {
-          const { stderr } = await execFileAsync(
-            process.execPath,
-            ["--import", "tsx", workerScript, lockPath, logPath, id],
-            { cwd: repoRoot, timeout: 60_000 },
-          );
-          return stderr;
-        } catch (err) {
-          throw new Error(
-            `worker ${id} failed: ${err instanceof Error ? err.message : String(err)}`,
-            { cause: err },
-          );
-        }
-      }),
-    );
-    expect(workers.every((stderr) => typeof stderr === "string")).toBe(true);
+      fs.writeFileSync(
+        workerScript,
+        [
+          'import fs from "node:fs";',
+          `import { withFileLock } from ${JSON.stringify(lockUrl)};`,
+          "const [lockPath, markerPath, logPath, reportPath, id] = process.argv.slice(2);",
+          "const notes = [];",
+          "let token = null;",
+          "await withFileLock(lockPath, async () => {",
+          "  token = JSON.parse(fs.readFileSync(lockPath, 'utf-8')).token;",
+          "  fs.appendFileSync(logPath, `start-${id}\\n`);",
+          "  try {",
+          "    fs.writeFileSync(markerPath, `${id}:${token}`, { flag: 'wx' });",
+          "  } catch {",
+          "    notes.push('marker-exists:' + (fs.existsSync(markerPath) ? fs.readFileSync(markerPath, 'utf-8') : '?'));",
+          "  }",
+          "  await new Promise((resolve) => setTimeout(resolve, 30));",
+          "  if (fs.existsSync(markerPath)) {",
+          "    const owner = fs.readFileSync(markerPath, 'utf-8');",
+          "    if (owner.startsWith(`${id}:`)) fs.unlinkSync(markerPath);",
+          "    else notes.push('marker-stolen-by:' + owner);",
+          "  }",
+          "  const current = JSON.parse(fs.readFileSync(lockPath, 'utf-8')).token;",
+          "  if (current !== token) notes.push('lock-token-changed:' + token + '->' + current);",
+          "  fs.appendFileSync(logPath, `end-${id}\\n`);",
+          '}, { label: "worker" });',
+          "fs.writeFileSync(reportPath, JSON.stringify({ id, pid: process.pid, token, notes }));",
+        ].join("\n"),
+        "utf-8",
+      );
 
-    const events = fs.readFileSync(logPath, "utf-8").trim().split("\n");
-    expect(events).toHaveLength(8);
-    expect(new Set(events.filter((line) => line.startsWith("start-"))).size).toBe(4);
-    const open: string[] = [];
-    for (const event of events) {
-      const [kind, id] = event.split("-");
-      if (kind === "start") {
-        expect(open).toHaveLength(0);
-        open.push(id!);
-      } else {
-        expect(open.pop()).toBe(id);
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          const reportPath = path.join(dir, `report-${id}.json`);
+          try {
+            const { stderr } = await execFileAsync(
+              process.execPath,
+              ["--import", "tsx", workerScript, lockPath, markerPath, logPath, reportPath, id],
+              { cwd: repoRoot, timeout: 60_000 },
+            );
+            return {
+              id,
+              stderr,
+              report: JSON.parse(fs.readFileSync(reportPath, "utf-8")) as {
+                notes: string[];
+                token: string;
+              },
+            };
+          } catch (err) {
+            throw new Error(
+              `worker ${id} failed: ${err instanceof Error ? err.message : String(err)}`,
+              { cause: err },
+            );
+          }
+        }),
+      );
+
+      const diagnostics = results
+        .map(
+          (result) =>
+            `${result.id}: ${result.report.notes.join(", ")}${result.stderr.trim() ? ` [stderr] ${result.stderr.trim()}` : ""}`,
+        )
+        .join("\n");
+      const overlaps = results.flatMap((result) => result.report.notes);
+      expect(overlaps, `overlapping critical sections in round ${round}:\n${diagnostics}`).toEqual(
+        [],
+      );
+      expect(results.every((result) => result.report.token !== null)).toBe(true);
+      expect(new Set(results.map((result) => result.report.token)).size).toBe(ids.length);
+      expect(fs.existsSync(markerPath)).toBe(false);
+      expect(fs.existsSync(lockPath)).toBe(false);
+
+      const log = fs.readFileSync(logPath, "utf-8").trim().split("\n");
+      expect(log, `unbalanced critical-section log:\n${diagnostics}`).toHaveLength(ids.length * 2);
+      for (const id of ids) {
+        expect(log.filter((line) => line === `start-${id}`)).toHaveLength(1);
+        expect(log.filter((line) => line === `end-${id}`)).toHaveLength(1);
       }
     }
-    expect(open).toHaveLength(0);
-    expect(fs.existsSync(lockPath)).toBe(false);
-  }, 120000);
+  }, 180000);
 
   it("reclaims a lock whose owner process is gone", async () => {
     const lockPath = path.join(makeTempDir("nanos-lock-dead-"), "stale.lock");
@@ -193,9 +232,30 @@ describe("concurrent cache access (#7)", () => {
     expect(isLockStale(lockPath)).toBe(true);
 
     await expect(
-      withFileLock(lockPath, () => "recovered", { timeoutMs: 2000, staleMs: 50 }),
+      withFileLock(lockPath, () => "recovered", {
+        timeoutMs: 2000,
+        staleMs: 50,
+        reclaimGraceMs: 0,
+      }),
     ).resolves.toBe("recovered");
     expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("does not reclaim an abandoned-looking lock before the grace period elapses", async () => {
+    const lockPath = path.join(makeTempDir("nanos-lock-grace-"), "fresh.lock");
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 999_999, createdAt: Date.now(), token: "fresh-orphan" }),
+    );
+
+    await expect(
+      withFileLock(lockPath, () => "stolen", {
+        timeoutMs: 250,
+        staleMs: 0,
+        reclaimGraceMs: 60_000,
+      }),
+    ).rejects.toThrow(/Timed out after 250ms/);
+    expect(fs.existsSync(lockPath)).toBe(true);
   });
 
   it("reclaims an expired lock whose recorded pid is still alive", async () => {
@@ -212,6 +272,73 @@ describe("concurrent cache access (#7)", () => {
     await expect(
       withFileLock(lockPath, () => "recovered", { timeoutMs: 2000, staleMs: 50 }),
     ).resolves.toBe("recovered");
+  });
+
+  it("treats a Windows create failure on an existing lock as contention", async () => {
+    // Windows reports EPERM/EACCES/EBUSY instead of EEXIST while another process is
+    // deleting or swapping the lock file; that must not surface as a hard failure.
+    const lockPath = path.join(makeTempDir("nanos-lock-contended-"), "contended.lock");
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: 999_999, createdAt: Date.now() - 60_000, token: "orphan" }),
+    );
+    const realOpenSync = fs.openSync;
+    let injected = false;
+    const openSpy = vi.spyOn(fs, "openSync").mockImplementation(((
+      ...args: Parameters<typeof fs.openSync>
+    ) => {
+      if (!injected && String(args[0]) === lockPath) {
+        injected = true;
+        const err = new Error("EPERM: operation not permitted") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      }
+      return realOpenSync(...args);
+    }) as typeof fs.openSync);
+
+    try {
+      await expect(
+        withFileLock(lockPath, () => "acquired", {
+          timeoutMs: 2000,
+          staleMs: 50,
+          reclaimGraceMs: 0,
+        }),
+      ).resolves.toBe("acquired");
+      expect(injected).toBe(true);
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  it("propagates create failures that are not contention", async () => {
+    const lockPath = path.join(makeTempDir("nanos-lock-create-error-"), "broken.lock");
+    const openSpy = vi.spyOn(fs, "openSync").mockImplementation((() => {
+      const err = new Error("ENOENT: no such file or directory") as NodeJS.ErrnoException;
+      err.code = "ENOENT";
+      throw err;
+    }) as typeof fs.openSync);
+
+    try {
+      await expect(withFileLock(lockPath, () => "never")).rejects.toThrow(/ENOENT/);
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  it("reclaims an old lock whose metadata was never written completely", async () => {
+    const lockPath = path.join(makeTempDir("nanos-lock-garbage-"), "truncated.lock");
+    fs.writeFileSync(lockPath, '{"pid":');
+    const old = (Date.now() - 60_000) / 1000;
+    fs.utimesSync(lockPath, old, old);
+
+    await expect(
+      withFileLock(lockPath, () => "recovered", {
+        timeoutMs: 2000,
+        staleMs: 50,
+        reclaimGraceMs: 0,
+      }),
+    ).resolves.toBe("recovered");
+    expect(fs.existsSync(lockPath)).toBe(false);
   });
 
   it("times out instead of hanging on a fresh lock held by a live process", async () => {

@@ -12,6 +12,14 @@ export const DEFAULT_LOCK_POLL_INTERVAL_MS = 25;
 const MAX_LOCK_POLL_INTERVAL_MS = 500;
 /** Default rename attempts used to absorb transient Windows file-lock errors. */
 const DEFAULT_RENAME_RETRIES = 5;
+/**
+ * A dead-looking lock is only reclaimed once it is at least this old. A single liveness
+ * verdict (which can be wrong on Windows, where a live sibling may be reported as gone)
+ * must never be enough to break a freshly created lock.
+ */
+export const DEFAULT_RECLAIM_GRACE_MS = 1_000;
+/** Create failures that mean "the lock is there / being swapped", not "cannot lock". */
+const CONTENDED_CREATE_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
 /** Error codes raised when an antivirus, indexer or reader briefly holds a file. */
 const TRANSIENT_RENAME_CODES = new Set(["EBUSY", "EPERM", "EACCES", "ENOTEMPTY"]);
 
@@ -20,6 +28,8 @@ export interface FileLockOptions {
   timeoutMs?: number;
   /** Milliseconds after which an unreleased lock is reclaimed. Defaults to 120s. */
   staleMs?: number;
+  /** Minimum age before an abandoned-looking lock may be reclaimed. Defaults to 1s. */
+  reclaimGraceMs?: number;
   /** Base backoff between acquisition attempts. Defaults to 25ms. */
   pollIntervalMs?: number;
   /** Human-readable owner description used in log messages. */
@@ -117,10 +127,74 @@ function tryCreateLockFile(lockPath: string, token: string): boolean {
     }
     return true;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException)?.code === "EEXIST") {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "EEXIST") {
+      return false;
+    }
+    // Windows reports EPERM/EACCES/EBUSY instead of EEXIST while another process is
+    // deleting or swapping the lock file, so an existing path means contention.
+    if (typeof code === "string" && CONTENDED_CREATE_CODES.has(code) && fs.existsSync(lockPath)) {
+      logger.debug(
+        `[lock] Creating ${lockPath} failed with ${code} while the lock exists; treating it as contention.`,
+      );
       return false;
     }
     throw err;
+  }
+}
+
+/** Returns the age of a lock file in milliseconds, from its metadata or its mtime. */
+function lockAgeMs(lockPath: string): number {
+  const metadata = readLockMetadata(lockPath);
+  if (typeof metadata?.createdAt === "number") {
+    return Math.max(0, Date.now() - metadata.createdAt);
+  }
+  try {
+    return Math.max(0, Date.now() - fs.statSync(lockPath).mtimeMs);
+  } catch (err) {
+    logger.debug(
+      `[lock] Could not read the age of ${lockPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/** Confirms that a lock file still carries the token written by this process. */
+function ownsLockFile(lockPath: string, token: string): boolean {
+  return readLockMetadata(lockPath)?.token === token;
+}
+
+/**
+ * Deletes an abandoned lock, but only when the owner token is still the one the staleness
+ * decision was based on: without that check a lock created by another process between the
+ * check and the unlink would be removed, letting two processes into the critical section.
+ */
+function reclaimAbandonedLock(lockPath: string, staleMs: number, label: string): boolean {
+  const observed = readLockMetadata(lockPath);
+  const observedToken = observed?.token ?? null;
+  if (!isLockStale(lockPath, staleMs)) {
+    return false;
+  }
+  if ((readLockMetadata(lockPath)?.token ?? null) !== observedToken) {
+    logger.debug(`[lock] ${label} lock at ${lockPath} changed owner; leaving it alone.`);
+    return false;
+  }
+  const ageMs = Math.round(lockAgeMs(lockPath));
+  const reason =
+    typeof observed?.pid === "number" && !isProcessAlive(observed.pid)
+      ? `owner pid ${observed.pid} is gone`
+      : `expired after ${ageMs}ms`;
+  try {
+    fs.unlinkSync(lockPath);
+    logger.warn(
+      `[lock] Reclaimed abandoned ${label} lock at ${lockPath} (${reason}, token ${observedToken ?? "none"}).`,
+    );
+    return true;
+  } catch (err) {
+    logger.debug(
+      `[lock] Could not remove stale ${label} lock: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
   }
 }
 
@@ -137,6 +211,7 @@ function nextPollDelay(attempt: number, baseMs: number): number {
 async function acquireFileLock(lockPath: string, options: FileLockOptions): Promise<string> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
   const staleMs = options.staleMs ?? DEFAULT_LOCK_STALE_MS;
+  const reclaimGraceMs = options.reclaimGraceMs ?? DEFAULT_RECLAIM_GRACE_MS;
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_LOCK_POLL_INTERVAL_MS;
   const label = options.label ?? path.basename(lockPath);
   const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -146,18 +221,20 @@ async function acquireFileLock(lockPath: string, options: FileLockOptions): Prom
 
   for (let attempt = 0; ; attempt++) {
     if (tryCreateLockFile(lockPath, token)) {
-      return token;
+      if (ownsLockFile(lockPath, token)) {
+        return token;
+      }
+      // Another process reclaimed our file in the microseconds after creation; back off
+      // instead of entering the critical section without a lock we still own.
+      logger.debug(`[lock] Lost the ${label} lock right after creating it; retrying.`);
     }
     if (isLockStale(lockPath, staleMs)) {
-      logger.warn(`[lock] Reclaiming abandoned ${label} lock at ${lockPath}.`);
-      try {
-        fs.unlinkSync(lockPath);
-      } catch (err) {
-        logger.debug(
-          `[lock] Could not remove stale ${label} lock: ${err instanceof Error ? err.message : String(err)}`,
-        );
+      // A stale-looking lock that is younger than the grace period is left alone: the
+      // liveness verdict behind it may be transient, but the deadline below must still
+      // be honoured so a waiter can never spin here past its timeout.
+      if (lockAgeMs(lockPath) >= reclaimGraceMs && reclaimAbandonedLock(lockPath, staleMs, label)) {
+        continue;
       }
-      continue;
     }
     if (Date.now() >= deadline) {
       throw new Error(
