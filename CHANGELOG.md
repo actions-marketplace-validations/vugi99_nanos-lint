@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Drop ineffective LuaLS binary and annotations `actions/cache` step and week computation from CI workflow, which were never read or written by the isolated test suite (#29).
 - Cap `annotations.lua` download size (10 MB via `MAX_ANNOTATIONS_SIZE_BYTES`) and commit JSON response (1 MB via `MAX_COMMIT_JSON_SIZE_BYTES`) before buffering in memory, rejecting over-large responses with `ERR_ANNOTATIONS_TOO_LARGE` and remediation naming `--annotations <path>` (#30).
 - Bound decompressed archive size (500 MB via `MAX_DECOMPRESSED_SIZE_BYTES`) and member count (10,000 via `MAX_ARCHIVE_MEMBER_COUNT`) during LuaLS archive inspection before and after extraction, rejecting archives with symlink/hardlink members, directory escapes, or excessive members/size with `ERR_LUALS_EXTRACT` (#31).
+- Return `null` immediately in `fetchLatestCommitId()` when response exceeds limit, preventing double-read of consumed response body via `res.json()` on Node.js 24 (#30, #42).
+- Include `scripts/**/*.ts` in `tsconfig.json` and ESLint checks so quality gate tooling is typechecked and linted (#42).
+- Clarify dependency cruiser rule names and docstring coverage specifications for top-level/exported functions (#42).
 
 ## [2.8.1] - 2026-09-24
 

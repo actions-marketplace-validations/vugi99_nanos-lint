@@ -158,6 +158,8 @@ export function inspectZipMembers(archivePath: string): {
     const commentLen = buf.readUInt16LE(offset + 32);
     const externalAttributes = buf.readUInt32LE(offset + 38);
 
+    // Check unixMode from the central directory record. Post-extraction lstat verification
+    // on the target binary path provides defense-in-depth against mismatched local headers.
     const unixMode = (externalAttributes >>> 16) & 0o170000;
     if (unixMode === 0o120000) {
       throw new LuaLSError(

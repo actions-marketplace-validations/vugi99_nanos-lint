@@ -28,7 +28,7 @@ async function readBoundedResponseBody(
   res: Response,
   maxBytes: number,
   onExceeded: (bytes: number, reason: "header" | "stream") => never | void,
-): Promise<string> {
+): Promise<string | null> {
   const lengthHeader = res.headers?.get?.("content-length");
   if (lengthHeader) {
     const declared = parseInt(lengthHeader, 10);
@@ -37,7 +37,7 @@ async function readBoundedResponseBody(
         await res.body.cancel().catch(() => {});
       }
       onExceeded(declared, "header");
-      return "";
+      return null;
     }
   }
 
@@ -56,7 +56,7 @@ async function readBoundedResponseBody(
           await res.body.cancel().catch(() => {});
         }
         onExceeded(total, "stream");
-        return "";
+        return null;
       }
       chunks.push(buf);
     }
@@ -68,7 +68,7 @@ async function readBoundedResponseBody(
     const len = Buffer.byteLength(text, "utf-8");
     if (len > maxBytes) {
       onExceeded(len, "stream");
-      return "";
+      return null;
     }
     return text;
   }
@@ -88,19 +88,22 @@ export async function fetchLatestCommitId(): Promise<string | null> {
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
-      let exceeded = false;
       const rawJson = await readBoundedResponseBody(res, MAX_COMMIT_JSON_SIZE_BYTES, (bytes) => {
-        exceeded = true;
         logger.warn(
           `GitHub commits response exceeded size limit of ${MAX_COMMIT_JSON_SIZE_BYTES} bytes (${bytes} bytes)`,
         );
       });
-      if (exceeded) return null;
-      if (!rawJson && typeof res.json === "function") {
+      if (rawJson === null) {
+        return null;
+      }
+      if (!rawJson && !res.bodyUsed && typeof res.json === "function") {
         const data = (await res.json()) as { sha?: string };
         if (typeof data.sha === "string" && /^[0-9a-fA-F]{7,40}$/.test(data.sha)) {
           return data.sha;
         }
+        return null;
+      }
+      if (!rawJson) {
         return null;
       }
       const data = JSON.parse(rawJson) as { sha?: string };

@@ -20,6 +20,12 @@
     "isolatedModules": true,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "tsdown.config.ts", "vitest.config.ts"],
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "tsdown.config.ts",
+    "vitest.config.ts"
+  ],
   "exclude": ["node_modules", "dist", "vendor"]
 }

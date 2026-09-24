@@ -2,10 +2,14 @@
 
 # Project Quality Gates Pre-Commit Hook
 #
-# 1. Lint the codebase (must have 0 errors and 0 warnings)
-# 2. Type-check TypeScript (must produce 0 type errors)
-# 3. Build distribution bundle
-# 4. Run all Vitest unit and live LuaLS integration tests (must be 100% passing)
+# 1. Check code formatting with Prettier (format:check)
+# 2. Lint the codebase (lint, 0 errors and 0 warnings)
+# 3. Check architecture and dependency boundaries (lint:deps)
+# 4. Check comment density limit (lint:comments)
+# 5. Check docstring coverage (lint:docstrings)
+# 6. Type-check TypeScript (typecheck, 0 type errors)
+# 7. Build distribution bundle (build)
+# 8. Run all Vitest unit and live LuaLS integration tests (test:coverage, 100% passing)
 
 set -e
 

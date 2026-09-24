@@ -316,9 +316,22 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
     const config = loadConfigFile(templatePath);
     expect(config.$schema).toBeDefined();
 
-    const response = await fetch(config.$schema!, {
-      signal: AbortSignal.timeout(15000),
-    });
+    let response: Response | undefined;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await fetch(config.$schema!, {
+          signal: AbortSignal.timeout(15000),
+        });
+        if (response.ok) break;
+      } catch (err) {
+        lastErr = err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)));
+    }
+    if (!response) {
+      throw lastErr ?? new Error("Failed to fetch schema.json after retries");
+    }
     expect(response.status).toBe(200);
 
     const bodyText = await response.text();

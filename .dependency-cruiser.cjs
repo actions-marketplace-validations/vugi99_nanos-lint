@@ -56,7 +56,7 @@ module.exports = {
       name: "tsdown-bundle-boundary",
       severity: "error",
       comment:
-        "Modules in src/ must only import Node built-ins or whitelisted bundled packages (commander, jsonc-parser, env-paths, glob) and never dev tooling.",
+        "Modules in src/ must only import Node built-ins or whitelisted bundled packages (commander, jsonc-parser, env-paths, glob) and never dev tooling. (Transitive runtime dependencies are inlined by tsdown per tsdown.config.ts alwaysBundle).",
       from: {
         path: "^src/",
       },
@@ -103,7 +103,7 @@ module.exports = {
       name: "permissive-license-only",
       severity: "error",
       comment:
-        "Restrict all dependencies to an approved permissive license whitelist compatible with MIT (MIT, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, Unlicense, CC0-1.0, BlueOak-1.0.0) and forbid copyleft, viral, or non-commercial licenses.",
+        "Restrict imported production and direct dev dependencies to an approved permissive license whitelist compatible with MIT (MIT, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, Unlicense, CC0-1.0, BlueOak-1.0.0) and forbid copyleft, viral, or non-commercial licenses.",
       from: {},
       to: {
         dependencyTypes: ["npm", "npm-dev"],
@@ -112,7 +112,7 @@ module.exports = {
       },
     },
     {
-      name: "architectural-layering",
+      name: "architectural-layering-reporter",
       severity: "error",
       comment:
         "src/reporter.ts must not import execution runners (src/luals/runner.ts, src/luals/download.ts).",
@@ -124,7 +124,7 @@ module.exports = {
       },
     },
     {
-      name: "architectural-layering",
+      name: "architectural-layering-foundations",
       severity: "error",
       comment:
         "Foundational modules (src/types.ts, src/errors.ts, src/logger.ts, src/paths.ts) must not import src/cli.ts or src/luals/runner.ts.",

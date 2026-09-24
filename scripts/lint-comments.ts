@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { globSync } from "glob";
 
@@ -134,7 +135,7 @@ export function analyzeCommentDensity(filePath: string, content: string): FileCo
 }
 
 export function runCommentLint(): boolean {
-  const files = globSync("{src,tests}/**/*.ts", {
+  const files = globSync("{src,tests,scripts}/**/*.ts", {
     ignore: ["**/*.d.ts", "**/node_modules/**"],
   }).map((f) => f.replace(/\\/g, "/"));
 
@@ -175,8 +176,6 @@ export function runCommentLint(): boolean {
   console.log("\n[SUCCESS] All files satisfy comment density requirements.");
   return true;
 }
-
-import { fileURLToPath } from "node:url";
 
 const isMain =
   process.argv[1] &&

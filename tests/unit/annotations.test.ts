@@ -706,15 +706,20 @@ describe("annotations management and date-based caching", () => {
 
       // Case 1: content-length header exceeds limit
       const cancelMock = vi.fn().mockResolvedValue(undefined);
+      const jsonMock1 = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Body is unusable: Body has already been read"));
       globalThis.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         headers: new Headers({ "content-length": String(2 * 1024 * 1024) }),
         body: { cancel: cancelMock },
+        json: jsonMock1,
       } as unknown as Response);
 
       let result = await fetchLatestCommitId();
       expect(result).toBeNull();
       expect(cancelMock).toHaveBeenCalled();
+      expect(jsonMock1).not.toHaveBeenCalled();
 
       // Case 2: streamed body exceeds limit
       async function* generateCommitChunks() {
@@ -725,23 +730,49 @@ describe("annotations management and date-based caching", () => {
       const stream = generateCommitChunks();
       const cancelMock2 = vi.fn().mockResolvedValue(undefined);
       (stream as unknown as { cancel: () => Promise<void> }).cancel = cancelMock2;
+      const jsonMock2 = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Body is unusable: Body has already been read"));
 
       globalThis.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         headers: new Headers(),
         body: stream,
+        json: jsonMock2,
       } as unknown as Response);
 
       result = await fetchLatestCommitId();
       expect(result).toBeNull();
       expect(cancelMock2).toHaveBeenCalled();
+      expect(jsonMock2).not.toHaveBeenCalled();
 
       // Case 3: text() exceeds limit
+      const jsonMock3 = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Body is unusable: Body has already been read"));
       globalThis.fetch = vi.fn().mockResolvedValueOnce({
         ok: true,
         headers: new Headers(),
         text: () => Promise.resolve("a".repeat(2 * 1024 * 1024)),
+        json: jsonMock3,
       } as unknown as Response);
+
+      result = await fetchLatestCommitId();
+      expect(result).toBeNull();
+      expect(jsonMock3).not.toHaveBeenCalled();
+
+      // Case 4: Real Response instance exceeding limit
+      const largeStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(600 * 1024));
+          controller.enqueue(new Uint8Array(600 * 1024));
+          controller.close();
+        },
+      });
+      const realResponse = new Response(largeStream, {
+        headers: { "Content-Type": "application/json" },
+      });
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(realResponse);
 
       result = await fetchLatestCommitId();
       expect(result).toBeNull();

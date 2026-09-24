@@ -86,7 +86,7 @@ npm run lint:deps
 # 4. Check comment density (<= 15% limit on files >= 50 lines)
 npm run lint:comments
 
-# 5. Check docstring coverage (>= 90% function coverage per file in src/)
+# 5. Check docstring coverage (>= 90% top-level/exported function coverage per file in src/)
 npm run lint:docstrings
 
 # 6. Type-check TypeScript (must produce 0 type errors)

@@ -230,7 +230,7 @@ npm run format:check    # Prettier code formatting (auto-fix via npm run format:
 npm run lint            # ESLint
 npm run lint:deps       # Dependency architecture & license checks (dependency-cruiser)
 npm run lint:comments   # Comment density limit (<= 15%)
-npm run lint:docstrings # Docstring coverage (>= 90% per file in src/)
+npm run lint:docstrings # Docstring coverage (>= 90% top-level/exported function coverage per file in src/)
 npm run typecheck       # TypeScript typecheck
 npm run build           # Build distribution bundle
 npm run test:coverage   # Vitest unit + live LuaLS integration tests with coverage
