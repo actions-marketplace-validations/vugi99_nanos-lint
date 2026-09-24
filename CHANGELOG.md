@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Close file descriptor in a `finally` block when `fs.readSync()` throws in `isAnnotationsValid()`, preventing descriptor leaks on I/O errors (#32, #34).
 - Close file descriptor in a `finally` block when `fs.readSync()` throws during custom or environment annotations validation in `validateCustomAnnotationsPath()`.
+- Drop ineffective LuaLS binary and annotations `actions/cache` step and week computation from CI workflow, which were never read or written by the isolated test suite (#29).
 
 ## [2.8.1] - 2026-09-24
 

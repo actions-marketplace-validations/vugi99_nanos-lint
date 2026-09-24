@@ -43,24 +43,6 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: 'npm'
 
-      # The ISO week refreshes the entry; restore-keys fall back to older weeks.
-      - name: Compute cache week
-        id: cacheweek
-        shell: bash
-        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache LuaLS binary and annotations
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cache/nanos-lint
-            ~/AppData/Local/nanos-lint
-            ~/Library/Caches/nanos-lint
-          key: nanos-cache-${{ runner.os }}-${{ runner.arch }}-${{ steps.cacheweek.outputs.week }}-${{ hashFiles('src/luals/**', 'src/luals.ts', 'src/annotations.ts') }}
-          restore-keys: |
-            nanos-cache-${{ runner.os }}-${{ runner.arch }}-
-            nanos-cache-${{ runner.os }}-
-
       - name: Install dependencies
         run: npm ci
 
