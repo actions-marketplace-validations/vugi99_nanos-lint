@@ -42,7 +42,10 @@ nanos-lint/
 ├── templates/               # Default base .luarc.json template (Lua 5.4, globals)
 ├── src/
 │   ├── types.ts             # Type definitions
-│   ├── config.ts            # Configuration discovery, merging, and init
+│   ├── config.ts            # Configuration discovery, merging, realm mappings, and init
+│   ├── realms.ts            # Realm pass planning and merged realm-aware check runner
+│   ├── annotations-realms.ts # Realm split of upstream annotations.lua and its derivation cache
+│   ├── lock.ts              # Cross-process file locks and atomic file replacement
 │   ├── luals.ts             # Binary download, caching, and execution manager
 │   ├── reporter.ts          # Terminal pretty, JSON, and GitHub Actions annotation formatters
 │   ├── cli.ts               # CLI command-line parser
@@ -50,6 +53,7 @@ nanos-lint/
 ├── tests/
 │   ├── pass/                # Valid nanos world Lua fixtures (must pass with 0 errors)
 │   ├── fail/                # Invalid Lua fixtures (must produce expected diagnostics)
+│   ├── fixtures/            # Realm-aware package fixtures (realms, realms_clean, realms_custom, realms_disabled)
 │   ├── unit/                # Vitest unit tests
 │   ├── integration/         # Vitest integration tests with live LuaLS execution
 │   ├── global-setup.ts      # Vitest global setup: isolated cache + one shared LuaLS download per run
