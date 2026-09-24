@@ -93,10 +93,146 @@ export function getTarBinary(): string {
   return "tar";
 }
 
-/** Pre-inspects archive members using tar listing to enforce extraction safety constraints (#31). */
+/** Pre-inspects a ZIP archive's central directory to enforce extraction safety constraints (#31). */
+export function inspectZipMembers(archivePath: string): {
+  memberCount: number;
+  totalDeclaredSize: number;
+} {
+  const buf = fs.readFileSync(archivePath);
+  if (buf.length < 22) {
+    throw new LuaLSError(
+      "Failed to inspect release archive before extraction: archive is too small to be a valid zip",
+      "ERR_LUALS_EXTRACT",
+      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
+    );
+  }
+
+  let eocdOffset = -1;
+  const minOffset = Math.max(0, buf.length - 22 - 65535);
+  for (let i = buf.length - 22; i >= minOffset; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      const commentLen = buf.readUInt16LE(i + 20);
+      if (i + 22 + commentLen === buf.length) {
+        eocdOffset = i;
+        break;
+      }
+    }
+  }
+
+  if (eocdOffset === -1) {
+    for (let i = buf.length - 22; i >= minOffset; i--) {
+      if (buf.readUInt32LE(i) === 0x06054b50) {
+        eocdOffset = i;
+        break;
+      }
+    }
+  }
+
+  if (eocdOffset === -1) {
+    throw new LuaLSError(
+      "Failed to inspect release archive before extraction: corrupt or invalid zip archive (missing EOCD)",
+      "ERR_LUALS_EXTRACT",
+      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
+    );
+  }
+
+  const entryCount = buf.readUInt16LE(eocdOffset + 10);
+  const cdOffset = buf.readUInt32LE(eocdOffset + 16);
+
+  let offset = cdOffset;
+  let memberCount = 0;
+  let totalDeclaredSize = 0;
+
+  for (let i = 0; i < entryCount && offset + 46 <= buf.length; i++) {
+    if (buf.readUInt32LE(offset) !== 0x02014b50) {
+      throw new LuaLSError(
+        "Failed to inspect release archive before extraction: invalid central directory header",
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
+      );
+    }
+
+    const uncompressedSize = buf.readUInt32LE(offset + 24);
+    const fileNameLen = buf.readUInt16LE(offset + 28);
+    const extraLen = buf.readUInt16LE(offset + 30);
+    const commentLen = buf.readUInt16LE(offset + 32);
+    const externalAttributes = buf.readUInt32LE(offset + 38);
+
+    const unixMode = (externalAttributes >>> 16) & 0o170000;
+    if (unixMode === 0o120000) {
+      throw new LuaLSError(
+        "Archive member is a symbolic or hard link. Refusing to extract archive-planted links.",
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
+      );
+    }
+
+    const fileNameStart = offset + 46;
+    const fileNameEnd = fileNameStart + fileNameLen;
+    if (fileNameEnd > buf.length) {
+      throw new LuaLSError(
+        "Failed to inspect release archive before extraction: corrupt file name length in zip",
+        "ERR_LUALS_EXTRACT",
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
+      );
+    }
+
+    const fileName = buf.toString("utf-8", fileNameStart, fileNameEnd);
+    memberCount++;
+    totalDeclaredSize += uncompressedSize;
+    checkEscapedMember(fileName);
+
+    offset += 46 + fileNameLen + extraLen + commentLen;
+  }
+
+  checkArchiveLimits(memberCount, totalDeclaredSize);
+  return { memberCount, totalDeclaredSize };
+}
+
+/** Detects whether an archive file starts with ZIP magic bytes. */
+export function isZipArchive(archivePath: string): boolean {
+  try {
+    const fd = fs.openSync(archivePath, "r");
+    const buf = Buffer.alloc(4);
+    const bytesRead = fs.readSync(fd, buf, 0, 4, 0);
+    fs.closeSync(fd);
+    if (bytesRead < 4) return false;
+    return (
+      buf[0] === 0x50 &&
+      buf[1] === 0x4b &&
+      ((buf[2] === 0x03 && buf[3] === 0x04) ||
+        (buf[2] === 0x05 && buf[3] === 0x06) ||
+        (buf[2] === 0x07 && buf[3] === 0x08))
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Detects whether an archive file starts with GZIP magic bytes. */
+export function isGzipArchive(archivePath: string): boolean {
+  try {
+    const fd = fs.openSync(archivePath, "r");
+    const buf = Buffer.alloc(2);
+    const bytesRead = fs.readSync(fd, buf, 0, 2, 0);
+    fs.closeSync(fd);
+    return bytesRead >= 2 && buf[0] === 0x1f && buf[1] === 0x8b;
+  } catch {
+    return false;
+  }
+}
+
+/** Pre-inspects archive members using tar listing or zip directory parsing to enforce extraction safety constraints (#31). */
 export async function validateArchiveMembers(
   archivePath: string,
 ): Promise<{ memberCount: number; totalDeclaredSize: number }> {
+  if (
+    isZipArchive(archivePath) ||
+    (archivePath.toLowerCase().endsWith(".zip") && !isGzipArchive(archivePath))
+  ) {
+    return inspectZipMembers(archivePath);
+  }
+
   let memberCount = 0;
   let totalDeclaredSize = 0;
   const tarBin = getTarBinary();
@@ -131,46 +267,6 @@ export async function validateArchiveMembers(
     checkArchiveLimits(memberCount, totalDeclaredSize);
   } catch (err) {
     if (err instanceof LuaLSError) throw err;
-    if (process.platform === "win32" && archivePath.endsWith(".zip")) {
-      try {
-        const psCommand = [
-          "Add-Type -AssemblyName System.IO.Compression.FileSystem",
-          `$z = [System.IO.Compression.ZipFile]::OpenRead('${escapePowerShellSingleQuote(archivePath)}')`,
-          "try {",
-          '  foreach ($e in $z.Entries) { [Console]::WriteLine("{0}`t{1}", $e.Length, $e.FullName) }',
-          "} finally { $z.Dispose() }",
-        ].join("; ");
-        const { stdout } = await execFileAsync("powershell.exe", [
-          "-NoProfile",
-          "-Command",
-          psCommand,
-        ]);
-        memberCount = 0;
-        totalDeclaredSize = 0;
-        for (const rawLine of stdout.split(/\r?\n/)) {
-          const line = rawLine.trim();
-          if (!line) continue;
-          const tabIndex = line.indexOf("\t");
-          if (tabIndex === -1) continue;
-          const sizeStr = line.slice(0, tabIndex).trim();
-          const fullName = line.slice(tabIndex + 1).trim();
-          if (!fullName) continue;
-          memberCount++;
-          checkEscapedMember(fullName);
-          totalDeclaredSize += parseInt(sizeStr, 10) || 0;
-        }
-        checkArchiveLimits(memberCount, totalDeclaredSize);
-        return { memberCount, totalDeclaredSize };
-      } catch (psErr) {
-        if (psErr instanceof LuaLSError) throw psErr;
-        throw new LuaLSError(
-          `Failed to inspect release archive before extraction: ${psErr instanceof Error ? psErr.message : String(psErr)}`,
-          "ERR_LUALS_EXTRACT",
-          "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
-          { cause: psErr },
-        );
-      }
-    }
     throw new LuaLSError(
       `Failed to inspect release archive before extraction: ${err instanceof Error ? err.message : String(err)}`,
       "ERR_LUALS_EXTRACT",
