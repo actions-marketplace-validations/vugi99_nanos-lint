@@ -193,6 +193,18 @@ npx nanos-lint init
 npx nanos-lint init --force
 ```
 
+### File Counting and Glob Semantics
+
+The `N files checked` figure is produced by matching `workspace.ignoreDir` and `files.exclude` with the bundled `glob` engine. The v3.0.0 contract is:
+
+- **Trailing slashes and `./` prefixes** are normalized (`vendor/` behaves like `vendor`), and `\` separators are converted to `/`.
+- **Wildcards** follow standard glob semantics (`*`, `**`, `?`, `[0-9]`, `{a,b}`), including inside `workspace.ignoreDir`.
+- **Absolute entries are rejected** (with a warning). LuaLS matches patterns relative to the workspace root, and `glob` anchors absolute patterns inconsistently across platforms, so one `.luarc.json` stays portable by not supporting them.
+- **Negation prefixes (`!pattern`) are rejected** (with a warning). LuaLS uses a gitignore-style matcher without negation support, so honoring `!` here would count files LuaLS never checks.
+- **Over-budget patterns** (excessive wildcards or brace alternatives) are skipped with a warning instead of risking a slow, backtracking-heavy match. Skipping can only over-count, never hide a file.
+- **Symlinks are never followed**: symlinked `.lua` files are not counted and symlinked directories are not traversed.
+- A `workspace.ignoreDir` list in your `.luarc.json` **replaces** the built-in defaults for that file, mirroring LuaLS. The configuration handed to LuaLS is always merged with nanos-lint's defaults, so `.git`, `.vscode`, `.nanos-lint` and `node_modules` stay ignored during a check.
+
 ---
 
 ## Pre-packaged Release Distributions (Offline / CD)
