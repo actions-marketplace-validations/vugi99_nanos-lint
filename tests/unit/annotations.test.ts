@@ -13,6 +13,8 @@ import {
   getRawAnnotationsUrl,
   RAW_ANNOTATIONS_URL,
   MIN_ANNOTATIONS_SIZE_BYTES,
+  MAX_ANNOTATIONS_SIZE_BYTES,
+  MAX_COMMIT_JSON_SIZE_BYTES,
   getCachedAnnotationsFilePath,
   getAnnotationsMetadataFilePath,
   type AnnotationsMetadata,
@@ -608,6 +610,130 @@ describe("annotations management and date-based caching", () => {
       } finally {
         rootSpy.mockRestore();
       }
+    });
+
+    it("rejects annotations download early when content-length exceeds limit (Issue #30)", async () => {
+      expect(MAX_ANNOTATIONS_SIZE_BYTES).toBe(10 * 1024 * 1024);
+      expect(MAX_COMMIT_JSON_SIZE_BYTES).toBe(1024 * 1024);
+
+      const originalFetch = globalThis.fetch;
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "content-length": String(15 * 1024 * 1024) }),
+        body: { cancel: cancelMock },
+      } as unknown as Response);
+
+      try {
+        const promise = fetchRawAnnotationsContent();
+        await expect(promise).rejects.toThrow(/exceeds maximum limit/);
+        await expect(promise).rejects.toMatchObject({
+          code: "ERR_ANNOTATIONS_TOO_LARGE",
+          remedy: expect.stringContaining("--annotations <path>"),
+        });
+        expect(cancelMock).toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("rejects annotations download when streamed body exceeds limit (Issue #30)", async () => {
+      const originalFetch = globalThis.fetch;
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      const largeChunk = Buffer.alloc(2 * 1024 * 1024);
+      async function* generateChunks() {
+        for (let i = 0; i < 6; i++) {
+          yield largeChunk;
+        }
+      }
+      const stream = generateChunks();
+      (stream as unknown as { cancel: () => Promise<void> }).cancel = cancelMock;
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        body: stream,
+      } as unknown as Response);
+
+      try {
+        const promise = fetchRawAnnotationsContent();
+        await expect(promise).rejects.toThrow(/exceeded maximum allowed size/);
+        await expect(promise).rejects.toMatchObject({
+          code: "ERR_ANNOTATIONS_TOO_LARGE",
+          remedy: expect.stringContaining("--annotations <path>"),
+        });
+        expect(cancelMock).toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("rejects annotations download when buffered text exceeds limit without content-length (Issue #30)", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        text: () => Promise.resolve("x".repeat(11 * 1024 * 1024)),
+      } as unknown as Response);
+
+      try {
+        const promise = fetchRawAnnotationsContent();
+        await expect(promise).rejects.toThrow(/exceeded maximum allowed size/);
+        await expect(promise).rejects.toMatchObject({
+          code: "ERR_ANNOTATIONS_TOO_LARGE",
+          remedy: expect.stringContaining("--annotations <path>"),
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("returns null in fetchLatestCommitId when response content-length or stream exceeds limit (Issue #30)", async () => {
+      const originalFetch = globalThis.fetch;
+
+      // Case 1: content-length header exceeds limit
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ "content-length": String(2 * 1024 * 1024) }),
+        body: { cancel: cancelMock },
+      } as unknown as Response);
+
+      let result = await fetchLatestCommitId();
+      expect(result).toBeNull();
+      expect(cancelMock).toHaveBeenCalled();
+
+      // Case 2: streamed body exceeds limit
+      async function* generateCommitChunks() {
+        for (let i = 0; i < 3; i++) {
+          yield Buffer.alloc(512 * 1024);
+        }
+      }
+      const stream = generateCommitChunks();
+      const cancelMock2 = vi.fn().mockResolvedValue(undefined);
+      (stream as unknown as { cancel: () => Promise<void> }).cancel = cancelMock2;
+
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        body: stream,
+      } as unknown as Response);
+
+      result = await fetchLatestCommitId();
+      expect(result).toBeNull();
+      expect(cancelMock2).toHaveBeenCalled();
+
+      // Case 3: text() exceeds limit
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        text: () => Promise.resolve("a".repeat(2 * 1024 * 1024)),
+      } as unknown as Response);
+
+      result = await fetchLatestCommitId();
+      expect(result).toBeNull();
+
+      globalThis.fetch = originalFetch;
     });
   });
 });

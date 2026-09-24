@@ -56,31 +56,30 @@ export function readAnnotationsMetadata(cacheDir: string = getAnnotationsCacheDi
   if (!fs.existsSync(metaPath)) {
     return null;
   }
+  const purge = (reason: string) => {
+    try {
+      fs.unlinkSync(metaPath);
+      logger.warn(`[annotations] ${reason} annotations metadata at ${metaPath} purged.`);
+    } catch (err) {
+      logger.debug(`[annotations] Failed to unlink metadata: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
   try {
-    const content = fs.readFileSync(metaPath, "utf-8");
-    const parsed = JSON.parse(content) as AnnotationsMetadata;
+    const parsed = JSON.parse(fs.readFileSync(metaPath, "utf-8")) as AnnotationsMetadata;
     if (typeof parsed?.commitId === "string" && typeof parsed?.lastChecked === "string") {
       return parsed;
     }
-    try {
-      fs.unlinkSync(metaPath);
-      logger.warn(`[annotations] Stale or invalid annotations metadata at ${metaPath} purged.`);
-    } catch (unlinkErr) {
-      logger.debug(`[annotations] Failed to unlink invalid metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`);
-    }
+    purge("Stale or invalid");
   } catch (err) {
     logger.debug(`Failed to parse annotations metadata: ${err instanceof Error ? err.message : String(err)}`);
-    try {
-      fs.unlinkSync(metaPath);
-      logger.warn(`[annotations] Corrupted annotations metadata at ${metaPath} purged.`);
-    } catch (unlinkErr) {
-      logger.debug(`[annotations] Failed to unlink corrupted metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`);
-    }
+    purge("Corrupted");
   }
   return null;
 }
 
 export const MIN_ANNOTATIONS_SIZE_BYTES = 1000;
+export const MAX_ANNOTATIONS_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+export const MAX_COMMIT_JSON_SIZE_BYTES = 1024 * 1024; // 1 MB
 
 /**
  * Verifies that an annotations file exists, is a regular file, is of non-trivial size (>= MIN_ANNOTATIONS_SIZE_BYTES),
@@ -116,6 +115,58 @@ export function isAnnotationsValid(filePath: string): boolean {
   }
 }
 
+async function readBoundedResponseBody(
+  res: Response,
+  maxBytes: number,
+  onExceeded: (bytes: number, reason: "header" | "stream") => never | void
+): Promise<string> {
+  const lengthHeader = res.headers?.get?.("content-length");
+  if (lengthHeader) {
+    const declared = parseInt(lengthHeader, 10);
+    if (!isNaN(declared) && declared > maxBytes) {
+      if (typeof res.body?.cancel === "function") {
+        await res.body.cancel().catch(() => {});
+      }
+      onExceeded(declared, "header");
+      return "";
+    }
+  }
+
+  if (
+    res.body &&
+    typeof (res.body as unknown as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] ===
+      "function"
+  ) {
+    let total = 0;
+    const chunks: Buffer[] = [];
+    for await (const chunk of res.body as AsyncIterable<Uint8Array | Buffer>) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buf.length;
+      if (total > maxBytes) {
+        if (typeof res.body.cancel === "function") {
+          await res.body.cancel().catch(() => {});
+        }
+        onExceeded(total, "stream");
+        return "";
+      }
+      chunks.push(buf);
+    }
+    return Buffer.concat(chunks).toString("utf-8");
+  }
+
+  if (typeof res.text === "function") {
+    const text = await res.text();
+    const len = Buffer.byteLength(text, "utf-8");
+    if (len > maxBytes) {
+      onExceeded(len, "stream");
+      return "";
+    }
+    return text;
+  }
+
+  return "";
+}
+
 export async function fetchLatestCommitId(): Promise<string | null> {
   try {
     const headers: Record<string, string> = { "User-Agent": "nanos-lint" };
@@ -127,7 +178,20 @@ export async function fetchLatestCommitId(): Promise<string | null> {
       signal: AbortSignal.timeout(5000),
     });
     if (res.ok) {
-      const data = (await res.json()) as { sha?: string };
+      let exceeded = false;
+      const rawJson = await readBoundedResponseBody(res, MAX_COMMIT_JSON_SIZE_BYTES, (bytes) => {
+        exceeded = true;
+        logger.warn(`GitHub commits response exceeded size limit of ${MAX_COMMIT_JSON_SIZE_BYTES} bytes (${bytes} bytes)`);
+      });
+      if (exceeded) return null;
+      if (!rawJson && typeof res.json === "function") {
+        const data = (await res.json()) as { sha?: string };
+        if (typeof data.sha === "string" && /^[0-9a-fA-F]{7,40}$/.test(data.sha)) {
+          return data.sha;
+        }
+        return null;
+      }
+      const data = JSON.parse(rawJson) as { sha?: string };
       if (typeof data.sha === "string" && /^[0-9a-fA-F]{7,40}$/.test(data.sha)) {
         return data.sha;
       }
@@ -161,7 +225,19 @@ export async function fetchRawAnnotationsContent(commitSha?: string): Promise<st
       "Verify your internet connection and that GitHub raw endpoints are accessible."
     );
   }
-  const text = await res.text();
+
+  const text = await readBoundedResponseBody(res, MAX_ANNOTATIONS_SIZE_BYTES, (bytes, reason) => {
+    const msg =
+      reason === "header"
+        ? `Annotations file size (${bytes} bytes) exceeds maximum limit (${MAX_ANNOTATIONS_SIZE_BYTES} bytes)`
+        : `Annotations file download exceeded maximum allowed size of ${MAX_ANNOTATIONS_SIZE_BYTES} bytes`;
+    throw new AnnotationsError(
+      msg,
+      "ERR_ANNOTATIONS_TOO_LARGE",
+      "Specify a local annotations file via --annotations <path>."
+    );
+  });
+
   if (!text || text.length < MIN_ANNOTATIONS_SIZE_BYTES) {
     throw new AnnotationsError(
       "Downloaded annotations.lua appears truncated or invalid",
@@ -351,44 +427,30 @@ export interface ResolveAnnotationsOptions {
 
 function validateCustomAnnotationsPath(filePath: string, source: "custom" | "env"): string {
   const resolved = path.resolve(filePath);
+  const isCustom = source === "custom";
+  const targetDesc = isCustom ? "path specified in --annotations" : "path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS";
   if (!fs.existsSync(resolved)) {
-    if (source === "custom") {
-      throw new AnnotationsError(
-        `Custom annotations file not found: ${resolved}`,
-        "ERR_ANNOTATIONS_NOT_FOUND",
-        "Verify that the path specified in --annotations exists and is accessible."
-      );
-    } else {
-      throw new AnnotationsError(
-        `Annotations file specified in environment not found: ${resolved}`,
-        "ERR_ANNOTATIONS_ENV_NOT_FOUND",
-        "Verify that the path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS exists."
-      );
-    }
+    throw new AnnotationsError(
+      isCustom ? `Custom annotations file not found: ${resolved}` : `Annotations file specified in environment not found: ${resolved}`,
+      isCustom ? "ERR_ANNOTATIONS_NOT_FOUND" : "ERR_ANNOTATIONS_ENV_NOT_FOUND",
+      `Verify that the ${targetDesc} exists and is accessible.`
+    );
   }
 
   const stat = fs.statSync(resolved);
   if (!stat.isFile()) {
     throw new AnnotationsError(
-      source === "custom"
-        ? `Custom annotations path is not a file: ${resolved}`
-        : `Annotations path specified in environment is not a file: ${resolved}`,
+      isCustom ? `Custom annotations path is not a file: ${resolved}` : `Annotations path specified in environment is not a file: ${resolved}`,
       "ERR_ANNOTATIONS_NOT_A_FILE",
-      source === "custom"
-        ? "Verify that the path specified in --annotations points to a regular file, not a directory."
-        : "Verify that the path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS points to a regular file, not a directory."
+      `Verify that the ${targetDesc} points to a regular file, not a directory.`
     );
   }
 
   if (stat.size === 0) {
     throw new AnnotationsError(
-      source === "custom"
-        ? `Custom annotations file is empty: ${resolved}`
-        : `Annotations file specified in environment is empty: ${resolved}`,
+      isCustom ? `Custom annotations file is empty: ${resolved}` : `Annotations file specified in environment is empty: ${resolved}`,
       "ERR_ANNOTATIONS_INVALID",
-      source === "custom"
-        ? "Verify that the path specified in --annotations is a valid non-empty Lua annotations file."
-        : "Verify that the path specified in NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS is a valid non-empty Lua annotations file."
+      `Verify that the ${targetDesc} is a valid non-empty Lua annotations file.`
     );
   }
 
@@ -404,9 +466,7 @@ function validateCustomAnnotationsPath(filePath: string, source: "custom" | "env
     }
     if (isBinary) {
       throw new AnnotationsError(
-        source === "custom"
-          ? `Custom annotations file appears to be a binary file: ${resolved}`
-          : `Annotations file specified in environment appears to be a binary file: ${resolved}`,
+        isCustom ? `Custom annotations file appears to be a binary file: ${resolved}` : `Annotations file specified in environment appears to be a binary file: ${resolved}`,
         "ERR_ANNOTATIONS_INVALID",
         "Verify that the annotations file is a valid Lua text annotations file."
       );
@@ -415,7 +475,6 @@ function validateCustomAnnotationsPath(filePath: string, source: "custom" | "env
     if (err instanceof AnnotationsError) {
       throw err;
     }
-    // Ignore read errors
   }
 
   return resolved;
