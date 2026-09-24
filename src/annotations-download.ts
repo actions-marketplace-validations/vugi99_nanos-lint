@@ -185,7 +185,6 @@ async function copyFileWithRetry(src: string, dest: string, maxRetries = 10): Pr
 export async function downloadAndCacheAnnotations(
   commitId: string,
   cacheDir: string = getAnnotationsCacheDir(),
-  options?: { quiet?: boolean },
 ): Promise<string> {
   fs.mkdirSync(cacheDir, { recursive: true });
 
@@ -203,10 +202,8 @@ export async function downloadAndCacheAnnotations(
 
   try {
     fs.mkdirSync(tempDir, { recursive: true });
-    if (!options?.quiet) {
-      const label = commitId && commitId !== "unknown" ? ` (${commitId.slice(0, 7)})` : "";
-      logger.info(`[annotations] Downloading nanos world API annotations${label}...`);
-    }
+    const label = commitId && commitId !== "unknown" ? ` (${commitId.slice(0, 7)})` : "";
+    logger.info(`[annotations] Downloading nanos world API annotations${label}...`);
 
     const content = await fetchRawAnnotationsContent(commitId);
     const tempAnnotationsPath = path.join(tempDir, ANNOTATIONS_FILENAME);
@@ -243,10 +240,9 @@ export async function downloadAndCacheAnnotations(
     await copyFileWithRetry(tempAnnotationsPath, finalAnnotationsPath);
     await copyFileWithRetry(tempMetaPath, finalMetaPath);
 
-    if (!options?.quiet) {
-      const label = commitId && commitId !== "unknown" ? ` to commit ${commitId.slice(0, 7)}` : "";
-      logger.info(`[annotations] Updated annotations.lua${label}.`);
-    }
+    const commitLabel =
+      commitId && commitId !== "unknown" ? ` to commit ${commitId.slice(0, 7)}` : "";
+    logger.info(`[annotations] Updated annotations.lua${commitLabel}.`);
     return finalAnnotationsPath;
   } catch (err) {
     if (hasBackup && fs.existsSync(backupDir)) {

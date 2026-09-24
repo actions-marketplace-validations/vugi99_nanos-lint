@@ -112,7 +112,7 @@ jobs:
 | `ignore`        | Files or directories to ignore (supports glob patterns, newline or comma separated) | `""`      |
 | `luals-version` | Version of `lua-language-server` to use                                             | `latest`  |
 | `fail-on-error` | Fail the workflow step if diagnostics are found                                     | `true`    |
-| `quiet`         | Suppress progress messages                                                          | `false`   |
+| `log-level`     | Logging level (`error`, `warn`, `info`, `debug`, `silent`)                          | `warn`    |
 | `cache`         | Whether to cache the LuaLS binary and annotations across workflow runs              | `true`    |
 
 When caching is enabled, the cache key rolls over each ISO week, so a freshly downloaded LuaLS binary is actually persisted under the new week's key; in the meantime the previous week's entry is restored from the cache.
@@ -151,7 +151,6 @@ OPTIONS:
   --github                 Output in GitHub Actions format (shortcut for --format=github)
   --luals-version=<ver>    Version of LuaLS to use (default: latest, falling back to 3.19.1 when offline)
   --no-fail                Do not exit with code 1 if diagnostics are found
-  --quiet                  Suppress progress output only (equivalent to --log-level=error; the report is still printed)
   -f, --force              (init command only) Overwrite existing .luarc.json
 ```
 

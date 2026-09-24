@@ -99,7 +99,6 @@ export async function* limitDownloadStream(
 }
 
 export interface DownloadOptions {
-  quiet?: boolean;
   reuseExisting?: boolean;
   /** Base directory searched for an installed copy when reusing. Defaults to the system cache. */
   cacheDir?: string;
@@ -165,11 +164,9 @@ export async function downloadAndExtractLuaLS(
 
   try {
     if (shouldCopyFromExisting) {
-      if (!options?.quiet) {
-        logger.info(
-          `[luals] Reusing existing LuaLS ${resolvedVersion} installation from ${existingSourceDir}...`,
-        );
-      }
+      logger.info(
+        `[luals] Reusing existing LuaLS ${resolvedVersion} installation from ${existingSourceDir}...`,
+      );
       fs.cpSync(existingSourceDir, tempDir, { recursive: true });
     } else {
       if (!isAllowedDownloadUrl(url)) {
@@ -180,9 +177,7 @@ export async function downloadAndExtractLuaLS(
         );
       }
 
-      if (!options?.quiet) {
-        logger.info(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
-      }
+      logger.info(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
 
       let response: Response | null = null;
       let lastErr: unknown = null;
@@ -272,9 +267,7 @@ export async function downloadAndExtractLuaLS(
       const archiveSha256 = computeFileSha256(archivePath);
       logger.info(`[luals] Downloaded ${info.assetName} (SHA-256 ${archiveSha256})`);
 
-      if (!options?.quiet) {
-        logger.info(`[luals] Extracting to ${destDir}...`);
-      }
+      logger.info(`[luals] Extracting to ${destDir}...`);
 
       await validateArchiveMembers(archivePath);
 
@@ -410,9 +403,7 @@ export async function downloadAndExtractLuaLS(
               `[luals] Failed to remove temp directory after concurrent promotion: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
-          if (!options?.quiet) {
-            logger.info(`[luals] Ready: ${binaryPath}`);
-          }
+          logger.info(`[luals] Ready: ${binaryPath}`);
           return binaryPath;
         }
         if (attempt < 4) {
@@ -436,9 +427,7 @@ export async function downloadAndExtractLuaLS(
       }
     }
 
-    if (!options?.quiet) {
-      logger.info(`[luals] Ready: ${binaryPath}`);
-    }
+    logger.info(`[luals] Ready: ${binaryPath}`);
     return binaryPath;
   } finally {
     if (fs.existsSync(tempDir)) {

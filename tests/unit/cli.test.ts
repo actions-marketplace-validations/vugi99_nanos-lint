@@ -260,8 +260,8 @@ describe("cli module flag and command parsing", () => {
 
       const codeDefault = await runCLI(["warmup"]);
       expect(codeDefault).toBe(0);
-      expect(lualsSpy).toHaveBeenCalledWith("latest", { quiet: undefined });
-      expect(annotSpy).toHaveBeenCalledWith({ customPath: undefined, quiet: undefined });
+      expect(lualsSpy).toHaveBeenCalledWith("latest");
+      expect(annotSpy).toHaveBeenCalledWith({ customPath: undefined });
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining("[warmup] LuaLS binary ready: /mock/bin/luals"),
       );
@@ -283,11 +283,12 @@ describe("cli module flag and command parsing", () => {
         "3.19.0",
         "--annotations",
         "/custom/annotations.lua",
-        "--quiet",
+        "-l",
+        "error",
       ]);
       expect(codeDownload).toBe(0);
-      expect(lualsSpy).toHaveBeenCalledWith("3.19.0", { quiet: true });
-      expect(annotSpy).toHaveBeenCalledWith({ customPath: "/custom/annotations.lua", quiet: true });
+      expect(lualsSpy).toHaveBeenCalledWith("3.19.0");
+      expect(annotSpy).toHaveBeenCalledWith({ customPath: "/custom/annotations.lua" });
 
       lualsSpy.mockRestore();
       annotSpy.mockRestore();
@@ -351,7 +352,7 @@ describe("cli module flag and command parsing", () => {
         totalFiles: 1,
         diagnostics: {},
       });
-      const codePass = await runCLI(["check", ".", "--github", "--quiet"]);
+      const codePass = await runCLI(["check", ".", "--github", "-l", "error"]);
       expect(codePass).toBe(0);
 
       // Failing check with --no-fail should return 0
@@ -430,14 +431,14 @@ describe("cli module flag and command parsing", () => {
       const codePretty = await runCLI(["check", ".", "--format", "pretty", "--no-fail"]);
       expect(codePretty).toBe(0);
 
-      // Check with --ignore option and --quiet
+      // Check with --ignore option and --log-level
       checkSpy.mockResolvedValueOnce({
         passed: true,
         totalProblems: 0,
         totalFiles: 1,
         diagnostics: {},
       });
-      const codeIgnore = await runCLI(["check", ".", "--ignore", "myfolder/*.lua", "--quiet"]);
+      const codeIgnore = await runCLI(["check", ".", "--ignore", "myfolder/*.lua", "-l", "error"]);
       expect(codeIgnore).toBe(0);
 
       // Check with -l info
@@ -522,7 +523,7 @@ describe("cli module flag and command parsing", () => {
         expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("test.lua"));
 
         logSpy.mockClear();
-        expect(await runCLI(["check", ".", "--quiet"])).toBe(1);
+        expect(await runCLI(["check", ".", "--log-level", "warn"])).toBe(1);
         expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("test.lua"));
       } finally {
         logger.setLevel("warn");
@@ -568,6 +569,19 @@ describe("cli module flag and command parsing", () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
         cleanSpy.mockRestore();
         logSpy.mockRestore();
+      }
+    });
+
+    it("rejects the removed --quiet flag on every command (issue #3)", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(await runCLI(["check", ".", "--quiet"])).not.toBe(0);
+        expect(await runCLI(["warmup", "--quiet"])).not.toBe(0);
+        expect(await runCLI(["warmup", "-q"])).not.toBe(0);
+        const messages = errSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+        expect(messages).toContain("unknown option");
+      } finally {
+        errSpy.mockRestore();
       }
     });
   });

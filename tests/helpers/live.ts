@@ -18,7 +18,7 @@ let sharedBinaryPromise: Promise<string> | null = null;
  * worker so concurrent tests await the same resolution.
  */
 export function getSharedLuaLSBinary(): Promise<string> {
-  sharedBinaryPromise ??= resolveLuaLSBinary(undefined, { quiet: true });
+  sharedBinaryPromise ??= resolveLuaLSBinary();
   return sharedBinaryPromise;
 }
 
@@ -26,7 +26,7 @@ let sharedAnnotationsPromise: Promise<string> | null = null;
 
 /** Resolves (and caches) the annotations file once per worker process. */
 export function getSharedAnnotations(): Promise<string> {
-  sharedAnnotationsPromise ??= resolveAnnotations({ quiet: true });
+  sharedAnnotationsPromise ??= resolveAnnotations();
   return sharedAnnotationsPromise;
 }
 

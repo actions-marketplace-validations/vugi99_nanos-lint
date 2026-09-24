@@ -283,7 +283,7 @@ describe("Cache Corruption Detection and Self-Healing", () => {
 
       try {
         await expect(
-          resolveLuaLSBinary("latest", { cacheDir: lualsDir, quiet: true, reuseExisting: true }),
+          resolveLuaLSBinary("latest", { cacheDir: lualsDir, reuseExisting: true }),
         ).rejects.toThrow();
         // The traversing version was dropped and replaced by the safe fallback.
         expect(readLuaLSMetadata(lualsDir)?.latestVersion).toBe(FALLBACK_LUALS_VERSION);

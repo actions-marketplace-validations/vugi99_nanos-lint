@@ -41,7 +41,6 @@ function isOfflineError(err: unknown): boolean {
 }
 
 export interface ResolveLuaLSOptions {
-  quiet?: boolean;
   /** Cache base directory (version directories, metadata, temp extraction). Defaults to the system cache. */
   cacheDir?: string;
   /** Set to `false` to always fetch the archive instead of reusing an installed copy. */
@@ -109,11 +108,9 @@ export async function resolveLuaLSBinary(
       }
       if (!isValid) {
         wasCorrupted = true;
-        if (!options?.quiet) {
-          logger.warn(
-            `[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`,
-          );
-        }
+        logger.warn(
+          `[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`,
+        );
       }
       try {
         fs.rmSync(cachedDir, { recursive: true, force: true });
@@ -318,7 +315,7 @@ export async function runLuaLSCheck(
 
   const binary = options.lualsBin
     ? assertValidLuaLSBinary(options.lualsBin, "--luals-bin")
-    : await resolveLuaLSBinary(options.lualsVersion, { quiet: options.quiet });
+    : await resolveLuaLSBinary(options.lualsVersion);
 
   let checkDir = absoluteTarget;
   let targetFileOnly: string | null = null;

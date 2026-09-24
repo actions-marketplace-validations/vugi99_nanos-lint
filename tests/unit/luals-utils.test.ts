@@ -572,7 +572,6 @@ describe("luals utilities", () => {
         try {
           const seeded = await seedCachedLuaLS(baseCacheDir, "3.19.1");
           const binary = await resolveLuaLSBinary("3.19.1", {
-            quiet: true,
             cacheDir: baseCacheDir,
           });
           expect(binary).toBe(seeded);
@@ -604,20 +603,16 @@ describe("luals utilities", () => {
 
   describe("downloadAndExtractLuaLS", () => {
     it.skipIf(!isLiveTestsEnabled())(
-      "reuses an existing installation, logs progress when quiet is false, and returns immediately when complete",
+      "reuses an existing installation, returns immediately when complete",
       async () => {
-        const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-quiet-"));
+        const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-reuse-"));
         try {
-          const bin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, tempTarget, {
-            quiet: false,
-          });
+          const bin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, tempTarget, {});
           expect(fs.existsSync(bin)).toBe(true);
           expect(fs.existsSync(path.join(tempTarget, ".complete"))).toBe(true);
 
           // Second invocation on an already complete directory returns immediately
-          const bin2 = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, tempTarget, {
-            quiet: false,
-          });
+          const bin2 = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, tempTarget, {});
           expect(bin2).toBe(bin);
         } finally {
           fs.rmSync(tempTarget, { recursive: true, force: true });
@@ -1005,7 +1000,6 @@ describe("luals utilities", () => {
           const targetDir = path.join(linkBase, FALLBACK_LUALS_VERSION);
 
           const bin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, {
-            quiet: true,
             cacheDir: seedBase,
           });
 

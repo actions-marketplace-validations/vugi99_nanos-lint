@@ -32,7 +32,6 @@ export interface CheckOptions {
   lualsVersion?: string;
   format?: "pretty" | "json" | "github";
   failOnError?: boolean;
-  quiet?: boolean;
   lualsBin?: string;
   ignore?: string[];
 }
