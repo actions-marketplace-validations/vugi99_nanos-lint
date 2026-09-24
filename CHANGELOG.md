@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Regression test suite (`tests/unit/validation-zip.test.ts`) for the ZIP pre-extraction inspection, built on a byte-level archive builder that can tamper with every structural field: zeroed entry counts, empty archives, ZIP64 archives with and without sentinel EOCD fields, out-of-range and mismatched central directory offsets/sizes/counts, truncated central directories and local file headers, missing or corrupt ZIP64 locator/record/extra-field structures, multi-disk archives, symlink/path-escape/drive-relative/UNC members, and data-descriptor members. Verified against archives written by Python `zipfile`, PowerShell `Compress-Archive`, and the published LuaLS `win32-x64` release asset.
+
+### Changed
+
+- Extracted pure ZIP structural parsing into `src/luals/zip.ts` (`findEndOfCentralDirectory()`, `resolveCentralDirectoryLocation()`, `readZipCentralDirectoryRecord()`, `readZipLocalFileHeader()`, `assertCentralDirectoryTerminator()`), leaving `src/luals/validation.ts` with the inspection policy and within the 500-line module budget. `inspectZipMembers()` remains exported from `src/luals/validation.ts`.
+
+### Fixed
+
+- `inspectZipMembers()` (`src/luals/validation.ts`) no longer treats an unwalkable ZIP central directory as an empty archive: the directory is walked record by record from its declared offset until the declared end, every walked record is validated, and the archive is rejected unless the walk terminates on a valid end of central directory record whose record count matches the declared count and is greater than zero.
+- ZIP64 archives are now inspected instead of skipped: the ZIP64 end of central directory locator and record supply the 64-bit member count, directory offset and directory size whenever the 32-bit EOCD fields are sentinels, the per-entry ZIP64 extended information extra field (0x0001) supplies 64-bit member sizes and local header offsets, and any disagreement between the 32-bit fields and the ZIP64 record is rejected.
+- Cross-check every member's local file header against its central directory record (name bytes, and declared sizes unless a data descriptor is used), refusing archives where the local header could extract a member path or size the inspection never validated.
+- Harden `checkEscapedMember()` to reject drive-relative member paths (`C:evil.sh`) in addition to absolute drive paths (`C:\evil.sh`), UNC/rooted paths and `..` segments.
+- Reject multi-disk archives and ZIP64 archives whose sentinel fields cannot be resolved from a readable locator, end record or extra field, instead of proceeding with a partially inspected member list.
+
+### Security
+
+- Closed the fail-open bypass in the `inspectZipMembers()` ZIP pre-extraction inspection added for #31 (GHSA-4x3m-f5v4-qvp4): a release asset whose EOCD declared zero members, or whose declared central directory offset was out of range or the `0xFFFFFFFF` ZIP64 sentinel, previously walked nothing and returned `{ memberCount: 0, totalDeclaredSize: 0 }`, letting archive-planted symlinks, path-escaping members and oversized/inflated archives pass every check before extraction. Such archives are now rejected with `ERR_LUALS_EXTRACT`, so the member path, link, count (10,000) and declared size (500 MB) constraints are enforced on every ZIP archive.
+
 ## [2.8.2] - 2026-09-24
 
 ### Added
