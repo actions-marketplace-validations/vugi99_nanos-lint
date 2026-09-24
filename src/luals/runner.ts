@@ -19,7 +19,6 @@ import { getPlatformInfo } from "./platform.js";
 import {
   getBaseLuaLSCacheDir,
   getCacheDir,
-  getLegacyCacheDir,
   readLuaLSMetadata,
   writeLuaLSMetadata,
   listCachedLuaLSVersions,
@@ -122,48 +121,6 @@ export async function resolveLuaLSBinary(
         logger.warn(
           `[luals] Failed to remove corrupted cache directory ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`,
         );
-      }
-    }
-
-    // Probe legacy cache location from nanos-lint <= 2.2.1
-    if (options?.reuseExisting !== false) {
-      const legacyDir = getLegacyCacheDir(resolvedVersion);
-      if (path.resolve(legacyDir) !== path.resolve(cachedDir)) {
-        const legacyPath = path.join(legacyDir, info.binaryRelativePath);
-        const legacyMarker = path.join(legacyDir, ".complete");
-
-        if (fs.existsSync(legacyPath)) {
-          let validLegacy = false;
-          if (fs.existsSync(legacyMarker)) {
-            try {
-              const stored = fs.readFileSync(legacyMarker, "utf-8").trim();
-              if (stored === resolvedVersion && isBinaryValid(legacyPath)) {
-                validLegacy = true;
-              }
-            } catch (err) {
-              logger.debug(
-                `[luals] Failed to read legacy complete marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            }
-          } else if (isBinaryValid(legacyPath)) {
-            validLegacy = true;
-          }
-
-          if (validLegacy) {
-            try {
-              fs.mkdirSync(path.dirname(cachedDir), { recursive: true });
-              fs.cpSync(legacyDir, cachedDir, { recursive: true });
-              if (fs.existsSync(cachedPath) && isBinaryValid(cachedPath)) {
-                return cachedPath;
-              }
-            } catch (err) {
-              logger.warn(
-                `[luals] Failed to migrate legacy cache from ${legacyDir} to ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            }
-            return legacyPath;
-          }
-        }
       }
     }
 

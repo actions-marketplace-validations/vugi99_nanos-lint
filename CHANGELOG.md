@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `new-release` agent skill (`.agents/skills/new-release/SKILL.md`) documenting the release procedure as guided by AGENTS.md: verifying the `master` branch, bumping the npm version, dropping security support for older versions in `SECURITY.md`, promoting `## [Unreleased]` in `CHANGELOG.md`, updating the pinned `npx --yes nanos-lint@<version>` fallback in `action.yml`, committing through the quality gates, and creating and pushing the `v<version>` tag.
 
+### Removed
+
+- Legacy LuaLS cache discovery and automatic migration (breaking, #2): `getLegacyCacheDir()` is gone from `src/luals.ts` and from the public API exports, `findExistingLuaLSDir()` no longer probes the pre-2.3.0 locations (`%LOCALAPPDATA%\nanos-lint\luals\<version>` on Windows, `~/.cache/nanos-lint/luals/<version>` on Linux/macOS), and `resolveLuaLSBinary()` no longer copies (`fs.cpSync`) a legacy installation into the system cache. LuaLS discovery now follows a single hierarchy: `LUALS_BIN` → bundled package → system cache → `PATH` → download. This also closes #23, because `nanos-lint clean-cache` can no longer leave a legacy tree behind that the next run would silently re-migrate.
+
 ## [2.8.2] - 2026-09-24
 
 ### Added

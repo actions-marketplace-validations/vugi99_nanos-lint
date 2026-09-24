@@ -10,7 +10,6 @@ import {
 } from "../../src/annotations.js";
 import {
   readLuaLSMetadata,
-  findExistingLuaLSDir,
   resolveLuaLSBinary,
   getPlatformInfo,
   getIsoWeek,
@@ -233,7 +232,7 @@ describe("Cache Corruption Detection and Self-Healing", () => {
     });
   });
 
-  describe("LuaLS binary corruption and legacy cache handling", () => {
+  describe("LuaLS binary corruption handling", () => {
     it("throws actionable offline error when cached binary is corrupted and offline", async () => {
       const version = "9.9.2";
       const info = getPlatformInfo(version);
@@ -249,15 +248,6 @@ describe("Cache Corruption Detection and Self-Healing", () => {
       const originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockRejectedValue(new Error("fetch failed offline"));
 
-      const origLocal = process.env.LOCALAPPDATA;
-      const origXdg = process.env.XDG_CACHE_HOME;
-      const isolatedLegacy = path.join(tempDir, "isolated-legacy");
-      if (process.platform === "win32") {
-        process.env.LOCALAPPDATA = isolatedLegacy;
-      } else {
-        process.env.XDG_CACHE_HOME = isolatedLegacy;
-      }
-
       try {
         await expect(
           resolveLuaLSBinary(version, { cacheDir: tempDir, reuseExisting: false }),
@@ -266,52 +256,6 @@ describe("Cache Corruption Detection and Self-Healing", () => {
         );
       } finally {
         globalThis.fetch = originalFetch;
-        if (origLocal !== undefined) {
-          process.env.LOCALAPPDATA = origLocal;
-        } else {
-          delete process.env.LOCALAPPDATA;
-        }
-        if (origXdg !== undefined) {
-          process.env.XDG_CACHE_HOME = origXdg;
-        } else {
-          delete process.env.XDG_CACHE_HOME;
-        }
-      }
-    });
-
-    it("ignores legacy cache directory when its binary is corrupted or truncated", () => {
-      const version = "9.9.3";
-      const info = getPlatformInfo(version);
-      const legacyBase = path.join(tempDir, "legacy-base");
-      const legacyDir = path.join(legacyBase, "nanos-lint", "luals", version);
-      const legacyBin = path.join(legacyDir, info.binaryRelativePath);
-      fs.mkdirSync(path.dirname(legacyBin), { recursive: true });
-      fs.writeFileSync(legacyBin, "corrupted");
-      fs.writeFileSync(path.join(legacyDir, ".complete"), version);
-
-      const origLocal = process.env.LOCALAPPDATA;
-      const origXdg = process.env.XDG_CACHE_HOME;
-      if (process.platform === "win32") {
-        process.env.LOCALAPPDATA = legacyBase;
-      } else {
-        process.env.XDG_CACHE_HOME = legacyBase;
-      }
-
-      try {
-        // findExistingLuaLSDir should return null because legacy binary is corrupt
-        const result = findExistingLuaLSDir(version, tempDir);
-        expect(result).toBeNull();
-      } finally {
-        if (origLocal !== undefined) {
-          process.env.LOCALAPPDATA = origLocal;
-        } else {
-          delete process.env.LOCALAPPDATA;
-        }
-        if (origXdg !== undefined) {
-          process.env.XDG_CACHE_HOME = origXdg;
-        } else {
-          delete process.env.XDG_CACHE_HOME;
-        }
       }
     });
 
@@ -337,21 +281,6 @@ describe("Cache Corruption Detection and Self-Healing", () => {
       const origFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockRejectedValue(new Error("network disabled"));
 
-      // Point the legacy cache location at an empty directory: otherwise a valid
-      // LuaLS installation (such as the shared live-test fixture) can legitimately
-      // satisfy the request and the traversal path is never exercised.
-      const emptyCacheBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-empty-legacy-"));
-      const origLocal = process.env.LOCALAPPDATA;
-      const origXdg = process.env.XDG_CACHE_HOME;
-      const origHome = process.env.HOME;
-      if (process.platform === "win32") {
-        process.env.LOCALAPPDATA = emptyCacheBase;
-      } else if (process.platform === "darwin") {
-        process.env.HOME = emptyCacheBase;
-      } else {
-        process.env.XDG_CACHE_HOME = emptyCacheBase;
-      }
-
       try {
         await expect(
           resolveLuaLSBinary("latest", { cacheDir: lualsDir, quiet: true, reuseExisting: true }),
@@ -360,13 +289,6 @@ describe("Cache Corruption Detection and Self-Healing", () => {
         expect(readLuaLSMetadata(lualsDir)?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
       } finally {
         globalThis.fetch = origFetch;
-        if (origLocal !== undefined) process.env.LOCALAPPDATA = origLocal;
-        else delete process.env.LOCALAPPDATA;
-        if (origXdg !== undefined) process.env.XDG_CACHE_HOME = origXdg;
-        else delete process.env.XDG_CACHE_HOME;
-        if (origHome !== undefined) process.env.HOME = origHome;
-        else delete process.env.HOME;
-        fs.rmSync(emptyCacheBase, { recursive: true, force: true });
       }
     });
   });
