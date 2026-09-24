@@ -225,6 +225,7 @@ npm run check:all
 
 # Run individual quality gates
 npm run lint            # ESLint
+npm run lint:deps       # Dependency architecture & license checks (dependency-cruiser)
 npm run lint:comments   # Comment density limit (<= 15%)
 npm run lint:docstrings # Docstring coverage (>= 90% per file in src/)
 npm run typecheck       # TypeScript typecheck
