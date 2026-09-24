@@ -17,6 +17,10 @@ import {
   isAllowedDownloadUrl,
   computeFileSha256,
   getLegacyCacheDir,
+  MAX_DECOMPRESSED_SIZE_BYTES,
+  MAX_ARCHIVE_MEMBER_COUNT,
+  parseTarTvSize,
+  validateArchiveMembers,
 } from "../../src/luals.js";
 import { resolveWorkspaceConfig } from "../../src/config.js";
 import { fileUriToPath } from "../../src/types.js";
@@ -33,17 +37,25 @@ import crypto from "node:crypto";
 import { Readable } from "node:stream";
 import { gzipSync } from "node:zlib";
 
+interface TarTestEntry {
+  name: string;
+  size?: number;
+  type?: string;
+  linkname?: string;
+  content?: Buffer;
+}
+
 const liveTestsEnabled = isLiveTestsEnabled();
 
 describe("luals utilities", () => {
   it("escapes single quotes correctly for PowerShell single-quoted commands", () => {
-    expect(escapePowerShellSingleQuote("C:\\Users\\John O'Connor\\AppData")).toBe(
-      "C:\\Users\\John O''Connor\\AppData"
-    );
-    expect(escapePowerShellSingleQuote("normal_path/without/quotes")).toBe(
-      "normal_path/without/quotes"
-    );
-    expect(escapePowerShellSingleQuote("a'b'c'd")).toBe("a''b''c''d");
+    const cases: [string, string][] = [
+      ["C:\\Users\\John O'Connor\\AppData", "C:\\Users\\John O''Connor\\AppData"],
+      ["normal_path/without/quotes", "normal_path/without/quotes"],
+      ["a'b'c'd", "a''b''c''d"],
+    ];
+    for (const [input, expected] of cases)
+      expect(escapePowerShellSingleQuote(input)).toBe(expected);
   });
 
   it("handles GitHub API timeout or failure gracefully with fallback version", async () => {
@@ -61,27 +73,24 @@ describe("luals utilities", () => {
 
   describe("sanitizeLuaLSVersion", () => {
     it("accepts plain release tags and strips a leading v", () => {
-      expect(sanitizeLuaLSVersion("3.19.1")).toBe("3.19.1");
-      expect(sanitizeLuaLSVersion("v3.19.1")).toBe("3.19.1");
-      expect(sanitizeLuaLSVersion("  3.19.1  ")).toBe("3.19.1");
-      expect(sanitizeLuaLSVersion("3.19.1-nightly.2")).toBe("3.19.1-nightly.2");
-      expect(sanitizeLuaLSVersion("V3")).toBe("V3");
-      expect(sanitizeLuaLSVersion("alpha.1")).toBe("alpha.1");
+      const cases: [string, string][] = [
+        ["3.19.1", "3.19.1"],
+        ["v3.19.1", "3.19.1"],
+        ["  3.19.1  ", "3.19.1"],
+        ["3.19.1-nightly.2", "3.19.1-nightly.2"],
+        ["V3", "V3"],
+        ["alpha.1", "alpha.1"],
+      ];
+      for (const [inVal, outVal] of cases) expect(sanitizeLuaLSVersion(inVal)).toBe(outVal);
     });
 
     it("rejects values that could escape the cache directory", () => {
-      expect(sanitizeLuaLSVersion("../../etc")).toBeNull();
-      expect(sanitizeLuaLSVersion("..")).toBeNull();
-      expect(sanitizeLuaLSVersion(".")).toBeNull();
-      expect(sanitizeLuaLSVersion("3.19.1/../../evil")).toBeNull();
-      expect(sanitizeLuaLSVersion("C:\\Windows\\System32\\evil")).toBeNull();
-      expect(sanitizeLuaLSVersion("3.19.1; rm -rf /")).toBeNull();
-      expect(sanitizeLuaLSVersion("3.19.1$(whoami)")).toBeNull();
-      expect(sanitizeLuaLSVersion("")).toBeNull();
-      expect(sanitizeLuaLSVersion("   ")).toBeNull();
-      expect(sanitizeLuaLSVersion("v")).toBeNull();
-      expect(sanitizeLuaLSVersion("-3.19.1")).toBeNull();
-      expect(sanitizeLuaLSVersion("a".repeat(65))).toBeNull();
+      // prettier-ignore
+      const rejected = [
+        "../../etc", "..", ".", "3.19.1/../../evil", "C:\\Windows\\System32\\evil",
+        "3.19.1; rm -rf /", "3.19.1$(whoami)", "", "   ", "v", "-3.19.1", "a".repeat(65),
+      ];
+      for (const val of rejected) expect(sanitizeLuaLSVersion(val)).toBeNull();
     });
 
     it("treats a malicious GitHub API tag name as unparsable and uses the fallback", async () => {
@@ -119,7 +128,7 @@ describe("luals utilities", () => {
     it("rejects an explicitly requested invalid version", async () => {
       await expect(resolveLuaLSVersion("../../evil")).rejects.toThrow(/Invalid LuaLS version/);
       await expect(resolveLuaLSVersion("3.19.1 && whoami")).rejects.toThrow(
-        /Invalid LuaLS version/
+        /Invalid LuaLS version/,
       );
     });
 
@@ -145,21 +154,24 @@ describe("luals utilities", () => {
   });
 
   describe("getPlatformInfo and resolveLuaLSBinary overrides", () => {
-    it.skipIf(!liveTestsEnabled)("returns a valid process.env.LUALS_BIN override without resolving a version", async () => {
-      const origBin = process.env.LUALS_BIN;
-      const realBinary = await getSharedLuaLSBinary();
-      try {
-        process.env.LUALS_BIN = realBinary;
+    it.skipIf(!liveTestsEnabled)(
+      "returns a valid process.env.LUALS_BIN override without resolving a version",
+      async () => {
+        const origBin = process.env.LUALS_BIN;
+        const realBinary = await getSharedLuaLSBinary();
+        try {
+          process.env.LUALS_BIN = realBinary;
 
-        await expect(resolveLuaLSBinary("3.13.6")).resolves.toBe(realBinary);
-      } finally {
-        if (origBin !== undefined) {
-          process.env.LUALS_BIN = origBin;
-        } else {
-          delete process.env.LUALS_BIN;
+          await expect(resolveLuaLSBinary("3.13.6")).resolves.toBe(realBinary);
+        } finally {
+          if (origBin !== undefined) {
+            process.env.LUALS_BIN = origBin;
+          } else {
+            delete process.env.LUALS_BIN;
+          }
         }
-      }
-    });
+      },
+    );
 
     it("evaluates platform and architecture combinations in getPlatformInfo", () => {
       const origPlatform = process.platform;
@@ -208,14 +220,16 @@ describe("luals utilities", () => {
       const originalFetch = globalThis.fetch;
 
       let capturedHeaders: Record<string, string> | undefined;
-      globalThis.fetch = vi.fn().mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
-        capturedHeaders = init?.headers as Record<string, string>;
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ tag_name: "v3.13.6" }),
-        } as unknown as Response);
-      });
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
+          capturedHeaders = init?.headers as Record<string, string>;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ tag_name: "v3.13.6" }),
+          } as unknown as Response);
+        });
 
       try {
         const ver = await resolveLatestLuaLSVersion();
@@ -250,60 +264,71 @@ describe("luals utilities", () => {
       }
     });
 
-    it.skipIf(!liveTestsEnabled)("returns the primary cache directory when a valid binary and marker exist", async () => {
-      const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-find-primary-"));
-      try {
-        const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
-        const expectedDir = path.resolve(seeded, "..", "..");
-        expect(findExistingLuaLSDir(FALLBACK_LUALS_VERSION, baseCacheDir)).toBe(expectedDir);
-      } finally {
-        fs.rmSync(baseCacheDir, { recursive: true, force: true });
-      }
-    });
-
-    it.skipIf(!liveTestsEnabled)("returns the legacy cache directory and migrates it into the primary cache", async () => {
-      const version = "9.8.7";
-      const legacyBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-legacy-base-"));
-      const primaryBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-legacy-primary-"));
-      const origLocal = process.env.LOCALAPPDATA;
-      const origXdg = process.env.XDG_CACHE_HOME;
-
-      try {
-        const legacyVersionsDir = path.join(legacyBase, "nanos-lint", "luals");
-        await seedCachedLuaLS(legacyVersionsDir, version);
-        const legacyDir = path.join(legacyVersionsDir, version);
-
-        if (process.platform === "win32") {
-          process.env.LOCALAPPDATA = legacyBase;
-        } else {
-          process.env.XDG_CACHE_HOME = legacyBase;
+    it.skipIf(!liveTestsEnabled)(
+      "returns the primary cache directory when a valid binary and marker exist",
+      async () => {
+        const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-find-primary-"));
+        try {
+          const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+          const expectedDir = path.resolve(seeded, "..", "..");
+          expect(findExistingLuaLSDir(FALLBACK_LUALS_VERSION, baseCacheDir)).toBe(expectedDir);
+        } finally {
+          fs.rmSync(baseCacheDir, { recursive: true, force: true });
         }
+      },
+    );
 
-        expect(findExistingLuaLSDir(version, primaryBase)).toBe(legacyDir);
+    it.skipIf(!liveTestsEnabled)(
+      "returns the legacy cache directory and migrates it into the primary cache",
+      async () => {
+        const version = "9.8.7";
+        const legacyBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-legacy-base-"));
+        const primaryBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-legacy-primary-"));
+        const origLocal = process.env.LOCALAPPDATA;
+        const origXdg = process.env.XDG_CACHE_HOME;
 
-        // Migrated into the requested primary cache instead of re-downloaded.
-        const resolved = await resolveLuaLSBinary(version, { quiet: true, cacheDir: primaryBase });
-        const info = getPlatformInfo(version);
-        const migratedBin = path.join(primaryBase, version, info.binaryRelativePath);
+        try {
+          const legacyVersionsDir = path.join(legacyBase, "nanos-lint", "luals");
+          await seedCachedLuaLS(legacyVersionsDir, version);
+          const legacyDir = path.join(legacyVersionsDir, version);
 
-        expect(resolved).toBe(migratedBin);
-        expect(fs.existsSync(migratedBin)).toBe(true);
-        expect(fs.readFileSync(path.join(primaryBase, version, ".complete"), "utf-8")).toBe(version);
-      } finally {
-        if (origLocal !== undefined) {
-          process.env.LOCALAPPDATA = origLocal;
-        } else {
-          delete process.env.LOCALAPPDATA;
+          if (process.platform === "win32") {
+            process.env.LOCALAPPDATA = legacyBase;
+          } else {
+            process.env.XDG_CACHE_HOME = legacyBase;
+          }
+
+          expect(findExistingLuaLSDir(version, primaryBase)).toBe(legacyDir);
+
+          // Migrated into the requested primary cache instead of re-downloaded.
+          const resolved = await resolveLuaLSBinary(version, {
+            quiet: true,
+            cacheDir: primaryBase,
+          });
+          const info = getPlatformInfo(version);
+          const migratedBin = path.join(primaryBase, version, info.binaryRelativePath);
+
+          expect(resolved).toBe(migratedBin);
+          expect(fs.existsSync(migratedBin)).toBe(true);
+          expect(fs.readFileSync(path.join(primaryBase, version, ".complete"), "utf-8")).toBe(
+            version,
+          );
+        } finally {
+          if (origLocal !== undefined) {
+            process.env.LOCALAPPDATA = origLocal;
+          } else {
+            delete process.env.LOCALAPPDATA;
+          }
+          if (origXdg !== undefined) {
+            process.env.XDG_CACHE_HOME = origXdg;
+          } else {
+            delete process.env.XDG_CACHE_HOME;
+          }
+          fs.rmSync(legacyBase, { recursive: true, force: true });
+          fs.rmSync(primaryBase, { recursive: true, force: true });
         }
-        if (origXdg !== undefined) {
-          process.env.XDG_CACHE_HOME = origXdg;
-        } else {
-          delete process.env.XDG_CACHE_HOME;
-        }
-        fs.rmSync(legacyBase, { recursive: true, force: true });
-        fs.rmSync(primaryBase, { recursive: true, force: true });
-      }
-    });
+      },
+    );
   });
 
   describe("isBinaryValid", () => {
@@ -405,9 +430,16 @@ describe("luals utilities", () => {
         config,
         JSON.stringify({
           files: {
-            exclude: ["ignored/**", "vendor/*.lua", "temp-?.lua", "*.bak", "**/nested/*.lua", "build/**"],
+            exclude: [
+              "ignored/**",
+              "vendor/*.lua",
+              "temp-?.lua",
+              "*.bak",
+              "**/nested/*.lua",
+              "build/**",
+            ],
           },
-        })
+        }),
       );
       fs.mkdirSync(path.join(tempDir, "ignored"), { recursive: true });
       fs.writeFileSync(path.join(tempDir, "ignored", "sub.lua"), "a=1");
@@ -459,7 +491,7 @@ describe("luals utilities", () => {
       process.env.LUALS_BIN = tempBin;
       try {
         await expect(resolveLuaLSBinary()).rejects.toThrow(
-          /LUALS_BIN.*not a runnable LuaLS binary/
+          /LUALS_BIN.*not a runnable LuaLS binary/,
         );
       } finally {
         if (origBin !== undefined) {
@@ -477,7 +509,7 @@ describe("luals utilities", () => {
       try {
         // The Node.js binary runs fine but reports "v24.x.y", not a LuaLS release.
         await expect(resolveLuaLSBinary()).rejects.toThrow(
-          /LUALS_BIN.*not a runnable LuaLS binary/
+          /LUALS_BIN.*not a runnable LuaLS binary/,
         );
       } finally {
         if (origBin !== undefined) {
@@ -512,7 +544,7 @@ describe("luals utilities", () => {
           }
           fs.rmSync(tempDir, { recursive: true, force: true });
         }
-      }
+      },
     );
   });
 
@@ -523,7 +555,7 @@ describe("luals utilities", () => {
           path: "/nonexistent/target/path",
           checklevel: "Warning",
           lualsVersion: "3.19.1",
-        })
+        }),
       ).rejects.toThrow(/Target path does not exist/);
     });
 
@@ -550,14 +582,16 @@ describe("luals utilities", () => {
             fs.unlinkSync(resolved.configPath);
           }
         }
-      }
+      },
     );
 
     it.skipIf(!isLiveTestsEnabled())(
       "runs check on a failing file without checklevel and counts warnings and problem files",
       async () => {
         const failFile = path.resolve("tests/fail/type_mismatch.lua");
-        expect(fs.existsSync(failFile), "tests/fail/type_mismatch.lua fixture must exist").toBe(true);
+        expect(fs.existsSync(failFile), "tests/fail/type_mismatch.lua fixture must exist").toBe(
+          true,
+        );
 
         const resolved = resolveWorkspaceConfig(path.dirname(failFile), undefined, {
           annotationsPath: await getSharedAnnotations(),
@@ -573,7 +607,7 @@ describe("luals utilities", () => {
           // Only this file's diagnostics survive; compare like runLuaLSCheck().
           for (const uri of Object.keys(result.diagnostics)) {
             expect(path.resolve(fileUriToPath(uri)).toLowerCase()).toBe(
-              path.resolve(failFile).toLowerCase()
+              path.resolve(failFile).toLowerCase(),
             );
           }
         } finally {
@@ -581,20 +615,26 @@ describe("luals utilities", () => {
             fs.unlinkSync(resolved.configPath);
           }
         }
-      }
+      },
     );
 
-    it.skipIf(!liveTestsEnabled)("resolves an explicitly requested version from an injected cache without downloading", async () => {
-      const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-explicit-cache-"));
-      try {
-        const seeded = await seedCachedLuaLS(baseCacheDir, "3.19.1");
-        const binary = await resolveLuaLSBinary("3.19.1", { quiet: true, cacheDir: baseCacheDir });
-        expect(binary).toBe(seeded);
-        expect(fs.existsSync(binary)).toBe(true);
-      } finally {
-        fs.rmSync(baseCacheDir, { recursive: true, force: true });
-      }
-    });
+    it.skipIf(!liveTestsEnabled)(
+      "resolves an explicitly requested version from an injected cache without downloading",
+      async () => {
+        const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-explicit-cache-"));
+        try {
+          const seeded = await seedCachedLuaLS(baseCacheDir, "3.19.1");
+          const binary = await resolveLuaLSBinary("3.19.1", {
+            quiet: true,
+            cacheDir: baseCacheDir,
+          });
+          expect(binary).toBe(seeded);
+          expect(fs.existsSync(binary)).toBe(true);
+        } finally {
+          fs.rmSync(baseCacheDir, { recursive: true, force: true });
+        }
+      },
+    );
 
     it("ignores default ignoreDirs such as .git, .vscode, and node_modules", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-ignored-dirs-"));
@@ -635,7 +675,7 @@ describe("luals utilities", () => {
         } finally {
           fs.rmSync(tempTarget, { recursive: true, force: true });
         }
-      }
+      },
     );
 
     it("handles download failure when fetch rejects", async () => {
@@ -644,7 +684,7 @@ describe("luals utilities", () => {
       globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network connection error"));
       try {
         await expect(
-          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
         ).rejects.toThrow(/Failed to download LuaLS/);
       } finally {
         globalThis.fetch = originalFetch;
@@ -661,7 +701,7 @@ describe("luals utilities", () => {
       } as unknown as Response);
       try {
         await expect(
-          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
         ).rejects.toThrow(/Failed to download LuaLS/);
       } finally {
         globalThis.fetch = originalFetch;
@@ -681,7 +721,7 @@ describe("luals utilities", () => {
       } as unknown as Response);
       try {
         await expect(
-          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
         ).rejects.toThrow(/exceeds maximum limit/);
       } finally {
         globalThis.fetch = originalFetch;
@@ -704,7 +744,7 @@ describe("luals utilities", () => {
       });
       try {
         await expect(
-          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
         ).rejects.toThrow();
         expect(capturedSignal).toBeDefined();
       } finally {
@@ -734,7 +774,7 @@ describe("luals utilities", () => {
       } as unknown as Response);
       try {
         await expect(
-          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
         ).rejects.toThrow(/exceeded maximum allowed size/);
       } finally {
         globalThis.fetch = originalFetch;
@@ -757,7 +797,9 @@ describe("luals utilities", () => {
     it("isAllowedDownloadUrl validates HTTPS GitHub domains correctly (Issue #19)", () => {
       expect(isAllowedDownloadUrl("https://github.com/LuaLS/releases")).toBe(true);
       expect(isAllowedDownloadUrl("https://objects.githubusercontent.com/asset.tar.gz")).toBe(true);
-      expect(isAllowedDownloadUrl("https://release-assets.githubusercontent.com/asset.zip")).toBe(true);
+      expect(isAllowedDownloadUrl("https://release-assets.githubusercontent.com/asset.zip")).toBe(
+        true,
+      );
       expect(isAllowedDownloadUrl("https://raw.githubusercontent.com/file")).toBe(true);
       expect(isAllowedDownloadUrl("http://github.com/insecure")).toBe(false);
       expect(isAllowedDownloadUrl("https://evil.com/fake.tar.gz")).toBe(false);
@@ -781,9 +823,7 @@ describe("luals utilities", () => {
       try {
         const emptyFile = path.join(tempTarget, "empty.bin");
         fs.writeFileSync(emptyFile, "");
-        expect(computeFileSha256(emptyFile)).toBe(
-          crypto.createHash("sha256").digest("hex")
-        );
+        expect(computeFileSha256(emptyFile)).toBe(crypto.createHash("sha256").digest("hex"));
 
         // ~3 MiB of non-repeating bytes plus a partial final chunk, so a read
         // that re-hashes the same buffer or drops a chunk changes the digest.
@@ -795,7 +835,7 @@ describe("luals utilities", () => {
         fs.writeFileSync(chunkedFile, payload);
 
         expect(computeFileSha256(chunkedFile)).toBe(
-          crypto.createHash("sha256").update(payload).digest("hex")
+          crypto.createHash("sha256").update(payload).digest("hex"),
         );
       } finally {
         fs.rmSync(tempTarget, { recursive: true, force: true });
@@ -812,7 +852,7 @@ describe("luals utilities", () => {
       } as unknown as Response);
       try {
         await expect(
-          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
         ).rejects.toThrow(/Redirect to untrusted URL blocked/);
       } finally {
         globalThis.fetch = originalFetch;
@@ -852,13 +892,148 @@ describe("luals utilities", () => {
 
       try {
         await expect(
-          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false })
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
         ).rejects.toThrow(/symbolic link/);
       } finally {
         lstatSpy.mockRestore();
         existsSpy.mockRestore();
         globalThis.fetch = originalFetch;
         fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("parseTarTvSize parses verbose tar outputs correctly (Issue #31)", () => {
+      const cases: [string, number][] = [
+        ["-rwxr-xr-x 1000/1000 18239240 2024-05-01 12:00 bin/luals", 18239240],
+        ["-rwxr-xr-x  0 0      0 18239240 May  1  2024 bin/luals", 18239240],
+        ["-rw-r--r-- 0/0 100 2024-01-01 00:00 file.txt", 100],
+        ["drwxr-xr-x 0 0 0 0 May 1 2024 dir/", 0],
+        ["invalid line", 0],
+      ];
+      for (const [line, expected] of cases) expect(parseTarTvSize(line)).toBe(expected);
+    });
+
+    it("validateArchiveMembers and downloadAndExtractLuaLS enforce size and member bounds (Issue #31)", async () => {
+      expect(MAX_DECOMPRESSED_SIZE_BYTES).toBe(500 * 1024 * 1024);
+      expect(MAX_ARCHIVE_MEMBER_COUNT).toBe(10_000);
+
+      const helperCreateTarGz = (entries: TarTestEntry[]): Buffer => {
+        const chunks: Buffer[] = [];
+        for (const entry of entries) {
+          const header = Buffer.alloc(512);
+          const content = entry.content ?? Buffer.alloc(0);
+          const size = entry.size !== undefined ? entry.size : content.length;
+          header.write(entry.name, 0, 100, "utf-8");
+          header.write("0000644\x00", 100, 8, "utf-8");
+          header.write("0000000\x000000000\x00", 108, 16, "utf-8");
+          header.write(
+            size.toString(8).padStart(11, "0") + "\x0014000000000\x00        ",
+            124,
+            32,
+            "utf-8",
+          );
+          header.write(entry.type ?? "0", 156, 1, "utf-8");
+          if (entry.linkname) header.write(entry.linkname, 157, 100, "utf-8");
+          header.write("ustar\x0000", 257, 8, "utf-8");
+          let chksum = 0;
+          for (let i = 0; i < 512; i++) chksum += header[i]!;
+          header.write(chksum.toString(8).padStart(6, "0") + "\0 ", 148, 8, "utf-8");
+          chunks.push(header);
+          if (content.length > 0) {
+            chunks.push(content);
+            const pad = (512 - (content.length % 512)) % 512;
+            if (pad > 0) chunks.push(Buffer.alloc(pad));
+          }
+        }
+        chunks.push(Buffer.alloc(1024));
+        return gzipSync(Buffer.concat(chunks));
+      };
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-archive-test-"));
+      try {
+        // 1. Directory escape in archive
+        const escapeArchive = path.join(tempDir, "escape.tar.gz");
+        fs.writeFileSync(escapeArchive, helperCreateTarGz([{ name: "../evil.sh" }]));
+        await expect(validateArchiveMembers(escapeArchive)).rejects.toThrow(
+          /Archive member path escapes extraction directory/,
+        );
+
+        // 2. Symlink in archive
+        const symlinkArchive = path.join(tempDir, "symlink.tar.gz");
+        fs.writeFileSync(
+          symlinkArchive,
+          helperCreateTarGz([
+            { name: "tool", content: Buffer.from("abc") },
+            { name: "link-tool", type: "2", linkname: "tool" },
+          ]),
+        );
+        await expect(validateArchiveMembers(symlinkArchive)).rejects.toThrow(
+          /symbolic or hard link/,
+        );
+
+        // 3. Decompressed size exceeds limit in listing (using minimal zip with declared uncompressed size)
+        const makeOversizedZip = () => {
+          const lh = Buffer.alloc(38);
+          lh.writeUInt32LE(0x04034b50, 0);
+          lh.writeUInt16LE(20, 4);
+          lh.writeUInt32LE(600 * 1024 * 1024, 22);
+          lh.writeUInt16LE(8, 26);
+          lh.write("huge.bin", 30, "utf-8");
+          const ch = Buffer.alloc(54);
+          ch.writeUInt32LE(0x02014b50, 0);
+          ch.writeUInt16LE(20, 4);
+          ch.writeUInt16LE(20, 6);
+          ch.writeUInt32LE(600 * 1024 * 1024, 24);
+          ch.writeUInt16LE(8, 28);
+          ch.writeUInt32LE(0, 42);
+          ch.write("huge.bin", 46, "utf-8");
+          const eo = Buffer.alloc(22);
+          eo.writeUInt32LE(0x06054b50, 0);
+          eo.writeUInt16LE(1, 8);
+          eo.writeUInt16LE(1, 10);
+          eo.writeUInt32LE(ch.length, 12);
+          eo.writeUInt32LE(lh.length, 16);
+          return Buffer.concat([lh, ch, eo]);
+        };
+        const oversizedZip = path.join(tempDir, "oversized.zip");
+        fs.writeFileSync(oversizedZip, makeOversizedZip());
+        await expect(validateArchiveMembers(oversizedZip)).rejects.toThrow(
+          /declared decompressed size.*exceeds maximum limit/,
+        );
+
+        // 4. Member count exceeds limit
+        const countEntries = Array.from({ length: 10_005 }, (_, i) => ({
+          name: `f${i}.txt`,
+        }));
+        const countArchive = path.join(tempDir, "count.tar.gz");
+        fs.writeFileSync(countArchive, helperCreateTarGz(countEntries));
+        await expect(validateArchiveMembers(countArchive)).rejects.toThrow(
+          /member count.*exceeds maximum limit/,
+        );
+
+        // 4. Post-extraction size check
+        const targetDir = path.join(tempDir, "post-extract-dest");
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          headers: new Headers(),
+          body: Readable.from([gzipSync(Buffer.alloc(1024))]),
+        } as unknown as Response);
+
+        const pathsModule = await import("../../src/paths.js");
+        const dirSizeSpy = vi
+          .spyOn(pathsModule, "getDirectorySize")
+          .mockReturnValue(600 * 1024 * 1024);
+        try {
+          await expect(
+            downloadAndExtractLuaLS("3.19.1", targetDir, { reuseExisting: false }),
+          ).rejects.toThrow(/Extracted archive size.*exceeds maximum limit/);
+        } finally {
+          dirSizeSpy.mockRestore();
+          globalThis.fetch = originalFetch;
+        }
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
       }
     });
 
@@ -898,7 +1073,7 @@ describe("luals utilities", () => {
           fs.rmSync(realBase, { recursive: true, force: true });
           fs.rmSync(seedBase, { recursive: true, force: true });
         }
-      }
+      },
     );
   });
 
@@ -915,7 +1090,7 @@ describe("luals utilities", () => {
             ? path.join(os.homedir(), "AppData", "Local")
             : path.join(os.homedir(), ".cache");
         expect(getLegacyCacheDir("3.19.1")).toBe(
-          path.join(expectedBase, "nanos-lint", "luals", "3.19.1")
+          path.join(expectedBase, "nanos-lint", "luals", "3.19.1"),
         );
       } finally {
         if (origLocal !== undefined) process.env.LOCALAPPDATA = origLocal;
@@ -933,12 +1108,12 @@ describe("luals utilities", () => {
         if (process.platform === "win32") {
           process.env.LOCALAPPDATA = tempBase;
           expect(getLegacyCacheDir("3.19.1")).toBe(
-            path.join(tempBase, "nanos-lint", "luals", "3.19.1")
+            path.join(tempBase, "nanos-lint", "luals", "3.19.1"),
           );
         } else {
           process.env.XDG_CACHE_HOME = tempBase;
           expect(getLegacyCacheDir("3.19.1")).toBe(
-            path.join(tempBase, "nanos-lint", "luals", "3.19.1")
+            path.join(tempBase, "nanos-lint", "luals", "3.19.1"),
           );
         }
       } finally {
@@ -951,5 +1126,3 @@ describe("luals utilities", () => {
     });
   });
 });
-
-

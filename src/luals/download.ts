@@ -9,18 +9,30 @@ import { logger } from "../logger.js";
 import { DEFAULT_LUALS_VERSION, resolveLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { findExistingLuaLSDir, getBaseLuaLSCacheDir, getCacheDir } from "./cache.js";
-import { isBinaryValid } from "./validation.js";
+import {
+  isBinaryValid,
+  MAX_DECOMPRESSED_SIZE_BYTES,
+  validateArchiveMembers,
+  getTarBinary,
+  escapePowerShellSingleQuote,
+} from "./validation.js";
 import { LuaLSError } from "../errors.js";
+import { getDirectorySize } from "../paths.js";
 
-export { isBinaryValid } from "./validation.js";
+export {
+  isBinaryValid,
+  MAX_DECOMPRESSED_SIZE_BYTES,
+  MAX_ARCHIVE_MEMBER_COUNT,
+  parseTarTvSize,
+  validateArchiveMembers,
+  getTarBinary,
+  escapePowerShellSingleQuote,
+} from "./validation.js";
 
 export const DOWNLOAD_TIMEOUT_MS = 120_000;
 export const MAX_ARCHIVE_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB
 
-export const ALLOWED_DOWNLOAD_DOMAINS: readonly string[] = [
-  "github.com",
-  "githubusercontent.com",
-];
+export const ALLOWED_DOWNLOAD_DOMAINS: readonly string[] = ["github.com", "githubusercontent.com"];
 
 /**
  * Validates that a download URL uses HTTPS and targets an allowlisted host.
@@ -33,7 +45,7 @@ export function isAllowedDownloadUrl(urlString: string): boolean {
     }
     const hostname = parsed.hostname.toLowerCase();
     return ALLOWED_DOWNLOAD_DOMAINS.some(
-      (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+      (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
     );
   } catch {
     return false;
@@ -67,17 +79,10 @@ export function computeFileSha256(filePath: string): string {
 const execFileAsync = promisify(execFile);
 
 /**
- * Escapes single quotes for safe PowerShell single-quoted string interpolation.
- */
-export function escapePowerShellSingleQuote(str: string): string {
-  return str.replace(/'/g, "''");
-}
-
-/**
  * Enforces a maximum byte count on an asynchronous download stream.
  */
 export async function* limitDownloadStream(
-  source: AsyncIterable<Uint8Array | Buffer>
+  source: AsyncIterable<Uint8Array | Buffer>,
 ): AsyncGenerator<Uint8Array | Buffer, void, unknown> {
   let total = 0;
   for await (const chunk of source) {
@@ -86,7 +91,7 @@ export async function* limitDownloadStream(
       throw new LuaLSError(
         `Download exceeded maximum allowed size of ${MAX_ARCHIVE_SIZE_BYTES} bytes`,
         "ERR_LUALS_DOWNLOAD",
-        "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN."
+        "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN.",
       );
     }
     yield chunk;
@@ -100,10 +105,11 @@ export interface DownloadOptions {
   cacheDir?: string;
 }
 
+/** Downloads, verifies, and extracts the LuaLS release archive for the current platform. */
 export async function downloadAndExtractLuaLS(
   version: string = DEFAULT_LUALS_VERSION,
   targetDir?: string,
-  options?: DownloadOptions
+  options?: DownloadOptions,
 ): Promise<string> {
   const resolvedVersion = await resolveLuaLSVersion(version);
   const info = getPlatformInfo(resolvedVersion);
@@ -112,7 +118,11 @@ export async function downloadAndExtractLuaLS(
   const completeMarker = path.join(destDir, ".complete");
 
   if (fs.existsSync(destDir)) {
-    if (options?.reuseExisting !== false && fs.existsSync(binaryPath) && fs.existsSync(completeMarker)) {
+    if (
+      options?.reuseExisting !== false &&
+      fs.existsSync(binaryPath) &&
+      fs.existsSync(completeMarker)
+    ) {
       try {
         const storedVersion = fs.readFileSync(completeMarker, "utf-8").trim();
         if (storedVersion === resolvedVersion && isBinaryValid(binaryPath)) {
@@ -120,7 +130,7 @@ export async function downloadAndExtractLuaLS(
         }
       } catch (err) {
         logger.debug(
-          `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`
+          `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -129,7 +139,7 @@ export async function downloadAndExtractLuaLS(
       fs.rmSync(destDir, { recursive: true, force: true });
     } catch (err) {
       logger.warn(
-        `[luals] Failed to remove stale or invalid cache dir ${destDir}: ${err instanceof Error ? err.message : String(err)}`
+        `[luals] Failed to remove stale or invalid cache dir ${destDir}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -139,20 +149,16 @@ export async function downloadAndExtractLuaLS(
 
   const tempDir = path.join(
     parentDir,
-    `.${path.basename(destDir)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    `.${path.basename(destDir)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   );
   fs.mkdirSync(tempDir, { recursive: true });
 
   const canReuse = options?.reuseExisting !== false;
   const existingSourceDir = canReuse
-    ? findExistingLuaLSDir(
-        resolvedVersion,
-        options?.cacheDir ?? getBaseLuaLSCacheDir()
-      )
+    ? findExistingLuaLSDir(resolvedVersion, options?.cacheDir ?? getBaseLuaLSCacheDir())
     : null;
   const shouldCopyFromExisting =
-    existingSourceDir !== null &&
-    path.resolve(existingSourceDir) !== path.resolve(destDir);
+    existingSourceDir !== null && path.resolve(existingSourceDir) !== path.resolve(destDir);
 
   const url = `https://github.com/LuaLS/lua-language-server/releases/download/${resolvedVersion}/${info.assetName}`;
   const archivePath = path.join(tempDir, info.assetName);
@@ -160,7 +166,9 @@ export async function downloadAndExtractLuaLS(
   try {
     if (shouldCopyFromExisting) {
       if (!options?.quiet) {
-        logger.info(`[luals] Reusing existing LuaLS ${resolvedVersion} installation from ${existingSourceDir}...`);
+        logger.info(
+          `[luals] Reusing existing LuaLS ${resolvedVersion} installation from ${existingSourceDir}...`,
+        );
       }
       fs.cpSync(existingSourceDir, tempDir, { recursive: true });
     } else {
@@ -168,7 +176,7 @@ export async function downloadAndExtractLuaLS(
         throw new LuaLSError(
           `Refusing to download LuaLS from untrusted URL: ${url}`,
           "ERR_LUALS_DOWNLOAD",
-          "Download URLs must use HTTPS and target an allowlisted GitHub host."
+          "Download URLs must use HTTPS and target an allowlisted GitHub host.",
         );
       }
 
@@ -188,7 +196,7 @@ export async function downloadAndExtractLuaLS(
             throw new LuaLSError(
               `Redirect to untrusted URL blocked: ${res.url}`,
               "ERR_LUALS_DOWNLOAD",
-              "Download redirects must stay on allowlisted HTTPS GitHub hosts."
+              "Download redirects must stay on allowlisted HTTPS GitHub hosts.",
             );
           }
           if (res.ok && res.body) {
@@ -213,7 +221,7 @@ export async function downloadAndExtractLuaLS(
           `Failed to download LuaLS from ${url}${lastErr ? `: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}` : ""}`,
           "ERR_LUALS_DOWNLOAD",
           "Check your network connection or specify a custom binary with LUALS_BIN.",
-          { cause: lastErr }
+          { cause: lastErr },
         );
       }
 
@@ -225,7 +233,7 @@ export async function downloadAndExtractLuaLS(
           throw new LuaLSError(
             `Archive size (${contentLength} bytes) exceeds maximum limit (${MAX_ARCHIVE_SIZE_BYTES} bytes)`,
             "ERR_LUALS_DOWNLOAD",
-            "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN."
+            "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN.",
           );
         }
       }
@@ -233,8 +241,8 @@ export async function downloadAndExtractLuaLS(
       const fileStream = fs.createWriteStream(archivePath);
       try {
         const streamSource =
-          typeof (Readable as unknown as { fromWeb?: (stream: unknown) => Readable }).fromWeb === "function" &&
-          !("pipe" in response.body)
+          typeof (Readable as unknown as { fromWeb?: (stream: unknown) => Readable }).fromWeb ===
+            "function" && !("pipe" in response.body)
             ? Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
             : (response.body as unknown as Readable);
 
@@ -254,7 +262,7 @@ export async function downloadAndExtractLuaLS(
           `Failed to download LuaLS from ${url}: ${streamErr instanceof Error ? streamErr.message : String(streamErr)}`,
           "ERR_LUALS_DOWNLOAD",
           "Check your network connection or specify a custom binary with LUALS_BIN.",
-          { cause: streamErr }
+          { cause: streamErr },
         );
       }
 
@@ -268,13 +276,22 @@ export async function downloadAndExtractLuaLS(
         logger.info(`[luals] Extracting to ${destDir}...`);
       }
 
+      await validateArchiveMembers(archivePath);
+
       try {
         // Both Windows 10+ and UNIX systems have tar built in
         const tarArgs =
           process.platform === "win32"
-            ? ["-xf", archivePath, "-C", tempDir]
-            : ["-xf", archivePath, "--no-same-owner", "--no-same-permissions", "-C", tempDir];
-        await execFileAsync("tar", tarArgs);
+            ? ["-xf", path.basename(archivePath), "-C", tempDir]
+            : [
+                "-xf",
+                path.basename(archivePath),
+                "--no-same-owner",
+                "--no-same-permissions",
+                "-C",
+                tempDir,
+              ];
+        await execFileAsync(getTarBinary(), tarArgs, { cwd: path.dirname(archivePath) });
       } catch (tarErr) {
         // Fallback for PowerShell Expand-Archive on Windows if tar fails
         if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
@@ -288,12 +305,21 @@ export async function downloadAndExtractLuaLS(
         }
       }
 
+      const extractedSize = getDirectorySize(tempDir);
+      if (extractedSize > MAX_DECOMPRESSED_SIZE_BYTES) {
+        throw new LuaLSError(
+          `Extracted archive size (${extractedSize} bytes) exceeds maximum limit (${MAX_DECOMPRESSED_SIZE_BYTES} bytes)`,
+          "ERR_LUALS_EXTRACT",
+          "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
+        );
+      }
+
       // Cleanup archive file
       try {
         fs.unlinkSync(archivePath);
       } catch (err) {
         logger.debug(
-          `[luals] Failed to delete temporary archive ${archivePath}: ${err instanceof Error ? err.message : String(err)}`
+          `[luals] Failed to delete temporary archive ${archivePath}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -305,7 +331,7 @@ export async function downloadAndExtractLuaLS(
       throw new LuaLSError(
         `Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`,
         "ERR_LUALS_EXTRACT",
-        "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space."
+        "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
       );
     }
 
@@ -315,14 +341,14 @@ export async function downloadAndExtractLuaLS(
       throw new LuaLSError(
         `Extracted binary at '${tempBinaryPath}' is a symbolic link. Refusing to chmod or execute archive-planted symlinks.`,
         "ERR_LUALS_EXTRACT",
-        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
       );
     }
     if (!lstat.isFile()) {
       throw new LuaLSError(
         `Extracted binary at '${tempBinaryPath}' is not a regular file.`,
         "ERR_LUALS_EXTRACT",
-        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
       );
     }
 
@@ -336,7 +362,7 @@ export async function downloadAndExtractLuaLS(
       throw new LuaLSError(
         `Extracted binary path escapes extraction directory: ${realBinaryPath}`,
         "ERR_LUALS_EXTRACT",
-        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
       );
     }
 
@@ -346,7 +372,7 @@ export async function downloadAndExtractLuaLS(
         fs.chmodSync(tempBinaryPath, 0o755);
       } catch (err) {
         logger.warn(
-          `[luals] Failed to chmod binary at ${tempBinaryPath}: ${err instanceof Error ? err.message : String(err)}`
+          `[luals] Failed to chmod binary at ${tempBinaryPath}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -355,14 +381,14 @@ export async function downloadAndExtractLuaLS(
       throw new LuaLSError(
         `Failed to extract valid LuaLS binary to expected path: ${tempBinaryPath}`,
         "ERR_LUALS_EXTRACT",
-        "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space."
+        "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
       );
     }
     if (!isBinaryValid(tempBinaryPath)) {
       throw new LuaLSError(
         `Extracted LuaLS binary at ${tempBinaryPath} is invalid or non-functional.`,
         "ERR_LUALS_INVALID_BINARY",
-        "Run 'nanos-lint clean-cache' to remove corrupted downloads or set LUALS_BIN to a custom binary."
+        "Run 'nanos-lint clean-cache' to remove corrupted downloads or set LUALS_BIN to a custom binary.",
       );
     }
 
@@ -381,7 +407,7 @@ export async function downloadAndExtractLuaLS(
             fs.rmSync(tempDir, { recursive: true, force: true });
           } catch (err) {
             logger.debug(
-              `[luals] Failed to remove temp directory after concurrent promotion: ${err instanceof Error ? err.message : String(err)}`
+              `[luals] Failed to remove temp directory after concurrent promotion: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
           if (!options?.quiet) {
@@ -393,12 +419,15 @@ export async function downloadAndExtractLuaLS(
           await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
         } else {
           // Clean up broken destDir if partially created or left corrupted during failed promotion
-          if (fs.existsSync(destDir) && (!fs.existsSync(binaryPath) || !fs.existsSync(completeMarker))) {
+          if (
+            fs.existsSync(destDir) &&
+            (!fs.existsSync(binaryPath) || !fs.existsSync(completeMarker))
+          ) {
             try {
               fs.rmSync(destDir, { recursive: true, force: true });
             } catch (err) {
               logger.warn(
-                `[luals] Failed to clean up broken destination directory ${destDir}: ${err instanceof Error ? err.message : String(err)}`
+                `[luals] Failed to clean up broken destination directory ${destDir}: ${err instanceof Error ? err.message : String(err)}`,
               );
             }
           }
@@ -417,10 +446,9 @@ export async function downloadAndExtractLuaLS(
         fs.rmSync(tempDir, { recursive: true, force: true });
       } catch (err) {
         logger.debug(
-          `[luals] Failed to clean up temporary directory ${tempDir}: ${err instanceof Error ? err.message : String(err)}`
+          `[luals] Failed to clean up temporary directory ${tempDir}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
   }
 }
-

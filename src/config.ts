@@ -24,6 +24,7 @@ export function getPackageRoot(): string {
   return path.resolve(__dirname, "..");
 }
 
+/** Resolves the default annotations path from environment variable, bundled file, or user cache. */
 export function getDefaultAnnotationsPath(): string {
   // 1. Env variable
   const envPath = process.env.NANOS_ANNOTATIONS_PATH || process.env.NANOS_ANNOTATIONS;
@@ -47,6 +48,7 @@ export function getDefinitionsDir(): string {
   return path.dirname(getDefaultAnnotationsPath());
 }
 
+/** Resolves the absolute path to the default .luarc.json template shipped with the package. */
 export function getDefaultTemplatePath(): string {
   const root = getPackageRoot();
   return path.join(root, "templates", ".luarc.json");
@@ -60,6 +62,7 @@ export function stripJsonComments(text: string): string {
   return stripComments(cleanText);
 }
 
+/** Parses JSONC text with support for comments and trailing commas. */
 export function parseJsonc<T = unknown>(text: string): T {
   const cleanText = text.replace(/^\uFEFF/, "");
   const errors: ParseError[] = [];
@@ -73,12 +76,13 @@ export function parseJsonc<T = unknown>(text: string): T {
   return result as T;
 }
 
+/** Reads and parses a .luarc.json configuration file from disk. */
 export function loadConfigFile(filePath: string): LuaRCConfig {
   if (!fs.existsSync(filePath)) {
     throw new ConfigError(
       `Configuration file not found: ${filePath}`,
       "ERR_CONFIG_NOT_FOUND",
-      "Ensure the configuration file path is correct or run 'nanos-lint init' to generate a default config."
+      "Ensure the configuration file path is correct or run 'nanos-lint init' to generate a default config.",
     );
   }
   const content = fs.readFileSync(filePath, "utf-8");
@@ -92,7 +96,7 @@ export function loadConfigFile(filePath: string): LuaRCConfig {
       `Failed to parse configuration file at ${filePath}: ${err instanceof Error ? err.message : String(err)}`,
       "ERR_CONFIG_PARSE",
       "Check your .luarc.json syntax or run 'nanos-lint init --force' to scaffold a clean template.",
-      { cause: err }
+      { cause: err },
     );
   }
 }
@@ -202,7 +206,7 @@ export function mergeConfigs(
   base: LuaRCConfig,
   override: LuaRCConfig = {},
   definitionsPath: string = getDefaultAnnotationsPath(),
-  options?: MergeConfigOptions
+  options?: MergeConfigOptions,
 ): LuaRCConfig {
   let resolvedPath = definitionsPath;
   if (fs.existsSync(definitionsPath)) {
@@ -215,7 +219,7 @@ export function mergeConfigs(
       }
     } catch (err) {
       logger.debug(
-        `Error checking annotations definitionsPath directory (${definitionsPath}): ${err instanceof Error ? err.message : String(err)}`
+        `Error checking annotations definitionsPath directory (${definitionsPath}): ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -242,7 +246,7 @@ export function mergeConfigs(
       mergedSeverity[code] = level;
     } else {
       logger.warn(
-        `[config] Unrecognized diagnostic code "${code}" in diagnostics.severity was dropped to prevent LuaLS from discarding the severity configuration.`
+        `[config] Unrecognized diagnostic code "${code}" in diagnostics.severity was dropped to prevent LuaLS from discarding the severity configuration.`,
       );
     }
   }
@@ -258,7 +262,7 @@ export function mergeConfigs(
       mergedNeededFileStatus[code] = status;
     } else {
       logger.warn(
-        `[config] Unrecognized diagnostic code "${code}" in diagnostics.neededFileStatus was dropped.`
+        `[config] Unrecognized diagnostic code "${code}" in diagnostics.neededFileStatus was dropped.`,
       );
     }
   }
@@ -306,7 +310,9 @@ export function mergeConfigs(
     const cliDirs = normalizedCliIgnore
       .filter((p) => !p.includes("*") && !p.includes("?") && !p.endsWith(".lua"))
       .map((p) => stripTrailingSlashes(p));
-    mergedIgnoreDir = Array.from(new Set([...defaultIgnore, ...baseIgnore, ...overrideIgnore, ...cliDirs]));
+    mergedIgnoreDir = Array.from(
+      new Set([...defaultIgnore, ...baseIgnore, ...overrideIgnore, ...cliDirs]),
+    );
   } else {
     // Merge ignoreDir using default rules
     mergedIgnoreDir = Array.from(new Set([...defaultIgnore, ...baseIgnore, ...overrideIgnore]));
@@ -340,7 +346,9 @@ export function mergeConfigs(
       ...(override.diagnostics ?? {}),
       globals: Array.from(globalsSet),
       severity: mergedSeverity,
-      ...(Object.keys(mergedNeededFileStatus).length > 0 ? { neededFileStatus: mergedNeededFileStatus } : {}),
+      ...(Object.keys(mergedNeededFileStatus).length > 0
+        ? { neededFileStatus: mergedNeededFileStatus }
+        : {}),
     },
   };
 
@@ -359,7 +367,7 @@ export interface ResolveWorkspaceConfigOptions {
 export function resolveWorkspaceConfig(
   workspacePath: string,
   customConfigPath?: string,
-  options?: ResolveWorkspaceConfigOptions
+  options?: ResolveWorkspaceConfigOptions,
 ): { configPath: string; isTemp: boolean } {
   const defaultTemplate = loadConfigFile(getDefaultTemplatePath());
   const activeAnnotationsPath = options?.annotationsPath || getDefaultAnnotationsPath();
@@ -376,7 +384,7 @@ export function resolveWorkspaceConfig(
       } catch (err) {
         throw new Error(
           `Failed to parse workspace configuration file (${candidate}): ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err }
+          { cause: err },
         );
       }
     }
@@ -387,9 +395,7 @@ export function resolveWorkspaceConfig(
   // When relative to workspacePath, expand patterns if they start with workspace prefix
   let cliIgnore = options?.ignore;
   if (hasCliIgnore && cliIgnore) {
-    const normWs = stripTrailingSlashes(
-      workspacePath.replace(/\\/g, "/").replace(/^\.\//, "")
-    );
+    const normWs = stripTrailingSlashes(workspacePath.replace(/\\/g, "/").replace(/^\.\//, ""));
     const expanded: string[] = [];
     for (const pat of cliIgnore) {
       expanded.push(pat);
@@ -431,7 +437,10 @@ export function resolveWorkspaceConfig(
   // Write to a temporary configuration file for LuaLS execution
   const tempDir = systemPaths.temp;
   fs.mkdirSync(tempDir, { recursive: true });
-  const tempConfigFile = path.join(tempDir, `luarc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
+  const tempConfigFile = path.join(
+    tempDir,
+    `luarc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`,
+  );
   fs.writeFileSync(tempConfigFile, JSON.stringify(merged, null, 2), "utf-8");
 
   return { configPath: tempConfigFile, isTemp: true };
@@ -451,7 +460,7 @@ export function initWorkspace(workspacePath: string, options?: InitWorkspaceOpti
     throw new ConfigError(
       `.luarc.json already exists at ${targetFile}. Use --force to overwrite.`,
       "ERR_CONFIG_EXISTS",
-      "Pass --force to overwrite the existing .luarc.json file."
+      "Pass --force to overwrite the existing .luarc.json file.",
     );
   }
 
@@ -462,7 +471,7 @@ export function initWorkspace(workspacePath: string, options?: InitWorkspaceOpti
     throw new ConfigError(
       `Definitions file not found at ${sourceAnnotations}. Make sure annotations have been downloaded or pass a valid file with --annotations.`,
       "ERR_ANNOTATIONS_NOT_FOUND",
-      "Run 'nanos-lint warmup' to download annotations or provide --annotations <path>."
+      "Run 'nanos-lint warmup' to download annotations or provide --annotations <path>.",
     );
   }
 

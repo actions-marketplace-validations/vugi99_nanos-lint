@@ -87,7 +87,7 @@ describe("Typed Error Hierarchy", () => {
 
     it("resolveAnnotations throws AnnotationsError for nonexistent custom file", async () => {
       await expect(
-        resolveAnnotations({ customPath: "/nonexistent/custom-annotations.lua" })
+        resolveAnnotations({ customPath: "/nonexistent/custom-annotations.lua" }),
       ).rejects.toThrow(AnnotationsError);
 
       try {
@@ -130,7 +130,9 @@ describe("Typed Error Hierarchy", () => {
       try {
         const exitCode = await runCLI(["check", ".", "--config", "/nonexistent/.luarc.json"]);
         expect(exitCode).toBe(1);
-        expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/^error: Configuration file not found/));
+        expect(errSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/^error: Configuration file not found/),
+        );
         expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/^hint: /));
       } finally {
         errSpy.mockRestore();
@@ -142,9 +144,18 @@ describe("Typed Error Hierarchy", () => {
       const prevLevel = logger.getLevel();
       logger.setLevel("debug");
       try {
-        const exitCode = await runCLI(["check", ".", "--config", "/nonexistent/.luarc.json", "-l", "debug"]);
+        const exitCode = await runCLI([
+          "check",
+          ".",
+          "--config",
+          "/nonexistent/.luarc.json",
+          "-l",
+          "debug",
+        ]);
         expect(exitCode).toBe(1);
-        expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/^error: Configuration file not found/));
+        expect(errSpy).toHaveBeenCalledWith(
+          expect.stringMatching(/^error: Configuration file not found/),
+        );
         expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/^hint: /));
       } finally {
         logger.setLevel(prevLevel);
@@ -153,4 +164,3 @@ describe("Typed Error Hierarchy", () => {
     });
   });
 });
-

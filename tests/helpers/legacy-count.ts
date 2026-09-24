@@ -2,16 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { LuaRCConfig } from "../../src/types.js";
 
-/**
- * Frozen copy of the `countCheckedFiles()` implementation shipped before #27
- * (hand-rolled recursive walk plus glob-to-regex translation).
- *
- * It exists only as a differential reference for
- * `tests/unit/glob-parity.test.ts`: every future change to the bundled-glob
- * implementation can be re-checked against the behaviour users had before, so
- * the intended differences (documented in that test) stay the *only* ones.
- * It is never imported by `src/`.
- */
+/** Reference copy of pre-#27 countCheckedFiles() for tests/unit/glob-parity.test.ts (#27). */
 const LEGACY_DEFAULT_IGNORE_DIRS = [".git", ".vscode", ".nanos-lint", "node_modules"];
 
 export function legacyCountCheckedFiles(targetPath: string, configPath?: string): number {
@@ -53,7 +44,6 @@ export function legacyCountCheckedFiles(targetPath: string, configPath?: string)
       if (norm.startsWith(`${normPat}/`)) return true;
 
       if (normPat.includes("*") || normPat.includes("?")) {
-        // If pattern has no slash, it matches basename anywhere
         if (!normPat.includes("/")) {
           const baseRegexStr =
             "^" +
@@ -65,7 +55,6 @@ export function legacyCountCheckedFiles(targetPath: string, configPath?: string)
           if (new RegExp(baseRegexStr, "i").test(baseName)) return true;
         }
 
-        // Convert glob with ** and * to regex matching full relPath
         let regexStr = normPat;
         const hasLeadingDoubleStar = regexStr.startsWith("**/");
         if (hasLeadingDoubleStar) {

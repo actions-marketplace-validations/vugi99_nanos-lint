@@ -7,24 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Prettier code formatting quality gate (`npm run format:check` and auto-fix `npm run format:fix`) enforcing consistent code style across all TypeScript, JSON, Markdown, and YAML files, with `eslint-config-prettier` integration to disable conflicting ESLint rules (#41).
+- Dependency architecture, bundle boundaries, and license compliance quality gate (`npm run lint:deps` via `dependency-cruiser` and `.dependency-cruiser.cjs`), enforcing zero cycles, strict layer boundaries, tsdown bundle compliance, orphan detection, and MIT-compatible permissive licenses (#40).
+- Docstring quality gate script (`npm run lint:docstrings` via `scripts/lint-docstrings.ts`) enforcing >= 90% function documentation coverage per file across `src/`, with comprehensive JSDoc coverage across all production modules (#38).
+- Comment density quality gate script (`npm run lint:comments` via `scripts/lint-comments.ts`) enforcing <= 15% pure comment lines on files with >= 50 lines, with condensed commentary in verbose modules and exception support (#37).
+- Unified quality gates npm script (`npm run gates` and alias `npm run check:all`) chaining all mandatory project quality gates in sequence, simplifying pre-commit hooks and documentation (#39).
+- Hardening tests for shipped `templates/.luarc.json` (#36):
+  - Unit tests in `tests/unit/config.test.ts` asserting 100% of keys in `diagnostics.severity` and `diagnostics.neededFileStatus` belong to `VALID_LUALS_DIAGNOSTIC_CODES`, merging default template emits zero dropped-key warnings, and the `$schema` URL pattern is valid.
+  - Live integration test in `tests/integration/luals.test.ts` verifying the `$schema` URL is reachable (HTTP 200) and returns valid JSON.
+  - Live integration test in `tests/integration/luals.test.ts` verifying that each default diagnostic severity promotion (`unused-local`, `redefined-local`, `unused-vararg`) actively triggers at `Warning` severity on live LuaLS.
+
 ### Fixed
+
+- Cross-platform ZIP archive safety inspection (`inspectZipMembers` in `src/luals/validation.ts`) using pure-JS central directory parsing without spawning external processes (`tar` or PowerShell), fixing Linux test failures on `.zip` fixtures where GNU `tar` does not support ZIP archives (#31).
+- Cross-platform LF line endings normalization in `.gitattributes` (`* text=auto eol=lf`), preventing Git checkouts on Windows runners with `core.autocrlf=true` from failing Prettier code formatting checks (#41).
 - Close file descriptor in a `finally` block when `fs.readSync()` throws in `isAnnotationsValid()`, preventing descriptor leaks on I/O errors (#32, #34).
 - Close file descriptor in a `finally` block when `fs.readSync()` throws during custom or environment annotations validation in `validateCustomAnnotationsPath()`.
+- Drop ineffective LuaLS binary and annotations `actions/cache` step and week computation from CI workflow, which were never read or written by the isolated test suite (#29).
+- Cap `annotations.lua` download size (10 MB via `MAX_ANNOTATIONS_SIZE_BYTES`) and commit JSON response (1 MB via `MAX_COMMIT_JSON_SIZE_BYTES`) before buffering in memory, rejecting over-large responses with `ERR_ANNOTATIONS_TOO_LARGE` and remediation naming `--annotations <path>` (#30).
+- Bound decompressed archive size (500 MB via `MAX_DECOMPRESSED_SIZE_BYTES`) and member count (10,000 via `MAX_ARCHIVE_MEMBER_COUNT`) during LuaLS archive inspection before and after extraction, rejecting archives with symlink/hardlink members, directory escapes, or excessive members/size with `ERR_LUALS_EXTRACT` (#31).
+- Return `null` immediately in `fetchLatestCommitId()` when response exceeds limit, preventing double-read of consumed response body via `res.json()` on Node.js 24 (#30, #42).
+- Include `scripts/**/*.ts` in `tsconfig.json` and ESLint checks so quality gate tooling is typechecked and linted (#42).
+- Clarify dependency cruiser rule names and docstring coverage specifications for top-level/exported functions (#42).
 
 ## [2.8.1] - 2026-09-24
 
 ### Added
+
 - Security vulnerability reporting guidelines and working `gh api` CLI examples in `AGENTS.md` specifying private GitHub Security Advisories for responsible disclosure.
 - Bundled `glob@13` together with its `minimatch`, `path-scurry`, `lru-cache`, `minipass`, and `brace-expansion` dependency tree, inlined through `tsdown` so the published package keeps zero runtime dependencies while `countCheckedFiles()` gains full glob support (#27).
 - Regression tests for `LUALS_BIN` / `--luals-bin` validation (#26) and for glob-based file counting, covering brace expansion, character classes, adversarial pattern budgets, unusable patterns, and symlink handling (#27).
 - Differential parity test (`tests/unit/glob-parity.test.ts`) that runs the pre-#27 `countCheckedFiles()` implementation against the bundled-glob one on the same fixture tree, pinning the configs where behaviour must stay identical and documenting each intended difference (#27).
 
 ### Changed
+
 - `countCheckedFiles()` (`src/luals/files.ts`) now walks the tree and matches `files.exclude` / `workspace.ignoreDir` patterns with the bundled `globSync()` instead of a hand-rolled recursive walk plus glob-to-regex translation: brace expansion (`{a,b}`), character classes (`[0-9]`), `?` and `**` follow standard glob semantics, patterns without a slash keep matching at any depth, and a trailing slash (`vendor/`) is treated like `vendor` (#27).
 - Glob wildcards now apply to `workspace.ignoreDir` entries as well (`deep/*` previously matched nothing), and unusable pattern values (`""`, `"."`, NUL bytes, oversized strings, absolute paths, non-string JSON values) are skipped instead of throwing out of `countCheckedFiles()`. Absolute patterns are rejected everywhere on purpose: `glob` anchors them on some platforms but not others, so skipping them keeps one `.luarc.json` behaving identically on Linux, macOS and Windows (#27).
 - `LUALS_BIN` and `--luals-bin` are validated instead of trusted: a path that is missing, is a directory, or is not a runnable LuaLS binary now fails with `ERR_LUALS_BIN_INVALID` naming the setting, instead of being silently ignored or failing deep inside the check run (#26). Thin wrapper scripts that report a version stay supported — the 100 KB floor for downloaded archives is not applied to user-supplied binaries.
 
 ### Fixed
+
 - Validate `LUALS_BIN` / `options.lualsBin` by requiring a regular file whose `--version` reports a LuaLS release, with actionable remediation hints naming `LUALS_BIN` / `--luals-bin` (#26).
 - Repaired the Issue #20 archive-planted symlink regression test, which aborted while extracting an intentionally fake archive before reaching the symlink guard it asserts on.
 - Repaired the Issue #17 traversal regression test, which a discoverable valid LuaLS installation (such as the shared live-test fixture) could legitimately satisfy, so the poisoned `metadata.json` path was never exercised deterministically.
@@ -37,12 +61,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pin annotations downloads to resolved upstream commit SHAs, enforce named constant `MIN_ANNOTATIONS_SIZE_BYTES` with strict header validation against generic comments, and validate custom/env annotation paths against directories, empty files, and binary files (#24).
 
 ### Security
+
 - Bound glob pattern complexity in `countCheckedFiles()` (#27): patterns that exceed the per-segment wildcard (max 2), total wildcard (max 12) or brace-expansion (max 256) budget are skipped with a warning, keeping the walk bounded against catastrophic regex backtracking and combinatorial brace expansion from a hostile `.luarc.json`. The budgets are conservative on purpose — matching cost grows like `C(segment length, wildcards per segment)` — and a skipped pattern only over-counts the reported file total, never under-counts it.
 - Dropped security support for versions `< 2.8.1` in `SECURITY.md`.
 
 ## [2.8.0] - 2026-09-23
 
 ### Added
+
 - Cache status and inspection command (`nanos-lint cache status`, `cache info`, and `cache-status`) with human-readable terminal output and `--json` export displaying cached LuaLS binaries, annotations commit SHA, metadata freshness, and disk usage (#14).
 - Cache inspection and sizing utilities (`getCacheStatus`, `formatCacheStatusPretty`, `getDirectorySize`, `formatBytes`) exported in `src/cache-status.ts` and `src/paths.ts` (#14).
 - Dedicated unit test suite `tests/unit/cache-status.test.ts` verifying disk size calculation, byte formatting, empty and populated cache reporting, and CLI subcommands (#14).
@@ -56,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dedicated unit test suite `tests/unit/cache-corruption.test.ts` covering automated self-healing across corrupted annotations, malformed metadata, broken binaries, and legacy cache states.
 
 ### Changed
+
 - Promoted `redefined-local`, `unused-local`, and `unused-vararg` diagnostics from `Hint` to `Warning` in `templates/.luarc.json`; projects running with default `--checklevel=Warning` can opt out by specifying `--checklevel=Error` or setting their severities back to `Hint` in `.luarc.json`.
 - Dropped `?/init.lua` from default `runtime.path` in `templates/.luarc.json` intentionally to align with standard nanos world package layouts.
 - Updated `$schema` URL in `templates/.luarc.json` and `README.md` to point to the live `LuaLS/vscode-lua` repository.
@@ -76,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated `AGENTS.md` guidelines noting that running checks manually before committing is unnecessary because the full quality suite runs automatically in the pre-commit hook.
 
 ### Fixed
+
 - Fixed single-file diagnostic filtering in `runLuaLSCheck` (`src/luals/runner.ts`) across macOS and Windows by canonicalizing paths with `fs.realpathSync.native` to handle symlinks (such as `/var` vs `/private/var` on macOS) and 8.3 short names on Windows runner environments.
 - Fixed cache status inspection in `getCacheStatus()` (`src/cache-status.ts`) by targeting `<cache>/luals` rather than `<cache>`, accurately discovering cached LuaLS copies, metadata freshness, and distinguishing valid versus corrupted binaries (#14).
 - Filtered `diagnostics.severity` and `diagnostics.neededFileStatus` keys against LuaLS's 62 valid diagnostic codes in `mergeConfigs()`, automatically dropping obsolete or unrecognized keys (such as `syntax-error`) with a warning to prevent LuaLS from silently voiding the entire severity table (#22).
@@ -87,11 +115,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Duplicate releases: pushing a release commit to `master` and its tag produced two qualifying CI runs, so the release ran twice and the second `npm publish` failed with a 409. The release job now only runs for tag-triggered CI, skips a tag whose GitHub release already exists, and skips `npm publish` when the version is already published.
 
 ### Security
+
 - Dropped security support for versions `< 2.8.0` in `SECURITY.md`.
 
 ## [2.7.0] - 2026-09-23
 
 ### Added
+
 - Centralized logger module (`src/logger.ts`) providing configurable log levels (`error`, `warn`, `info`, `debug`, `silent`) with default level `"warn"`.
 - `-l, --log-level <level>` CLI parameter on root and `check` command and `NANOS_LOG_LEVEL` environment variable to configure the application log level.
 - Custom ESLint rule `local/no-empty-catch` in `eslint.config.mjs` preventing empty or silent `catch` blocks across the codebase.
@@ -115,6 +145,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Regression test asserting that a warm weekly cache validates exactly one binary.
 
 ### Changed
+
 - `resolveLuaLSBinary()` checks the weekly metadata before enumerating the cache, so the warm path validates one binary instead of spawning LuaLS once per cached version.
 - `--log-level=silent` now suppresses the diagnosis report and command output too; `--quiet`/`--log-level=error` still print the report and hide only progress.
 - `src/logger.ts` reads only `NANOS_LOG_LEVEL`, no longer a bare `LOG_LEVEL`.
@@ -125,9 +156,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `README.md` documents the test-suite variables and the shared download; the runtime environment variable table links to them.
 
 ### Removed
+
 - 1-vCPU `ubuntu-slim` runner from the CI test matrix.
 
 ### Fixed
+
 - Test suite hermetic: no user-cache mutation, no stray `../invalid` directory, no dependency on a pre-warmed cache.
 - Single shared LuaLS download per run (previously one per test file plus a `regressions.test.ts` `beforeAll`).
 - `tests/unit/regressions.test.ts` no longer degrades to "29 skipped" when its `beforeAll` fails.
@@ -144,23 +177,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CodeQL `js/incomplete-url-substring-sanitization`**: the LuaLS request assertions in `tests/unit/luals-cache.test.ts` and the download counter in `tests/helpers/download-counter.ts` now parse URLs and compare the hostname and path instead of matching substrings.
 
 ### Security
+
 - Hardened `.github/workflows/release.yml` against command injection: no `${{ }}` expression remains in any `run:` script text.
 - Scoped `id-token: write` to the npm publish job, so the release job and its third-party actions cannot mint OIDC tokens.
 
 ## [2.6.1] - 2026-09-23
 
 ### Added
+
 - Built-in GitHub Actions caching in `action.yml` using `actions/cache@v6` with a configurable `cache` input (default: `true`), automatically caching LuaLS binaries and annotations across runs for consumers of the action.
 
 ### Changed
+
 - Updated fallback npx execution in `action.yml` to target `nanos-lint@^2.6.1`.
 
 ## [2.6.0] - 2026-09-23
 
 ### Security
+
 - Dropped security support for versions `< 2.6.0` in `SECURITY.md`.
 
 ### Added
+
 - `npm run test:coverage` script using `@vitest/coverage-v8` to enforce strict test coverage thresholds across the codebase without autoUpdate.
 - Vitest global coverage thresholds: statements (85%), functions (88%), lines (85%), branches (75%).
 - Comprehensive unit tests across all modules targeting previously uncovered branches in URI resolution (`types.test.ts`), CLI options & commands (`cli.test.ts`), report snippet and annotation formatting (`reporter.test.ts`), config discovery & workspace init (`config.test.ts`), platform & binary resolution (`luals-utils.test.ts`), and commit/content fetching (`annotations.test.ts`).
@@ -176,6 +214,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - npm version badge in `README.md`.
 
 ### Changed
+
 - Standardized project quality gates (`.githooks/pre-commit`, `.git/hooks/pre-commit`, `AGENTS.md`, `README.md`) and CI workflows (`.github/workflows/ci.yml`) to enforce `npm run test:coverage`.
 - Standardized cross-platform application cache, config, data, and temp path resolution using `env-paths` in `src/paths.ts`.
 - **Cache relocation migration note**: System cache paths now resolve to `%LOCALAPPDATA%\nanos-lint\Cache` on Windows and `~/Library/Caches/nanos-lint` on macOS (standard platform cache paths). Existing cache directories from <= 2.2.1 are automatically probed and migrated.
@@ -187,6 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated vulnerability reporting link in `SECURITY.md` to GitHub repository security advisories.
 
 ### Fixed
+
 - **Annotation error reporting**: Differentiated filesystem and permission errors (`EACCES`, `ENOSPC`, etc.) from network errors in `resolveAnnotations()`, preserving the original error cause without incorrectly diagnosing a network failure.
 - **Early configuration validation**: CLI `check` command now verifies the existence of any custom `--config` path before initiating annotation resolution.
 - **Offline cache persistence**: Updated `lastChecked` date when falling back to existing cached annotations during offline or rate-limited sessions, avoiding repeated failing network calls.
@@ -200,6 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.5.0] - 2026-09-22
 
 ### Security
+
 - **CodeQL `js/command-line-injection`**: LuaLS version/tag strings are now validated with an allow-list before use. Values obtained from the GitHub releases API (`tag_name`) and from user supplied `--luals-version` arguments are interpolated into cache directory paths, download URLs, and the path of the executed binary, so they are rebuilt character by character (`sanitizeLuaLSVersion()`) and rejected unless they form a single safe path segment. This prevents path traversal or command injection through a crafted release tag.
 - **CodeQL `js/shell-command-injection-from-environment`**: The Windows `.cmd` launcher integration test no longer puts an environment-derived absolute path on a command line interpreted by `cmd.exe`; the launcher is referenced by name and resolved through the `cwd` option.
 - **CodeQL `actions/missing-workflow-permissions`**: Added an explicit least-privilege `permissions: contents: read` block to `.github/workflows/ci.yml` so the workflow token stays read-only regardless of repository/organization defaults.
@@ -207,44 +248,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dropped security support for versions `< 2.5.0` in `SECURITY.md`.
 
 ### Fixed
+
 - **CodeQL `js/polynomial-redos`**: Removed the `\/+$` regular expressions used to trim trailing slashes in `src/config.ts` and replaced them with the linear `stripTrailingSlashes()` scan, eliminating quadratic backtracking on slash-heavy input.
 
 ### Changed
+
 - `resolveLuaLSVersion()` now throws a descriptive error for an invalid explicitly requested version instead of returning it unchanged.
 - Added exported helpers `sanitizeLuaLSVersion()` (`src/luals.ts`) and `stripTrailingSlashes()` (`src/config.ts`).
 
 ## [2.4.0] - 2026-09-22
 
 ### Changed
+
 - Replaced custom handwritten JSONC parser and comment stripper with `jsonc-parser` (`^3.3.1`).
 - Configured ESM module alias in `tsdown.config.ts` for `jsonc-parser` to ensure internal implementation modules (`./impl/*`) are statically bundled, resolving Node.js bundling issues ([microsoft/node-jsonc-parser#57](https://github.com/microsoft/node-jsonc-parser/issues/57)).
 
 ### Security
+
 - Dropped security support for versions `< 2.4.0` in `SECURITY.md`.
 
 ## [2.3.0] - 2026-09-22
 
 ### Fixed
+
 - **Critical (Finding N0)**: Added `.nanos-lint` to `workspace.ignoreDir` and `.nanos-lint/**` to `files.exclude` in `templates/.luarc.json`, `src/config.ts`, and `initWorkspace()`, preventing LuaLS from diagnosing `.nanos-lint/annotations.lua` as workspace source code and eliminating false-positive luadoc warnings on initialized workspaces.
 - **High (Finding N1)**: Made LuaLS download and extraction atomic and race-safe for concurrent cold-cache runs using unique PID/timestamp temporary directories, isolated archive downloads, cancellation of non-OK response bodies, and atomic directory promotion with conflict resolution.
 - **Medium (Finding N2)**: Added self-healing cache validation and recovery via `isBinaryValid()` smoke testing and `.complete` installation markers; automatically detects, cleans up, and repairs corrupted/truncated binaries, and includes the cache directory path in error messages when LuaLS check execution fails.
 - **Low**: Ensured `initWorkspace()` throws an informative error if source `annotations.lua` is missing instead of generating broken workspace configurations.
 
 ### Security
+
 - Dropped security support for versions `< 2.3.0` in `SECURITY.md`.
 
 ## [2.2.1] - 2026-09-22
 
 ### Changed
+
 - Configured npm Trusted Publishing using OpenID Connect (OIDC) via `id-token: write` workflow permission.
 - Updated nanos world official game website URL in `README.md` to `https://nanos-world.com/`.
 
 ### Fixed
+
 - Fixed release workflow step condition where `env.NPM_TOKEN != ''` was evaluated before step-level environment variables were initialized, migrating to tokenless OIDC authentication.
 
 ## [2.2.0] - 2026-09-22
 
 ### Added
+
 - `--github` flag as a direct shortcut for `--format=github`.
 - `--force` (`-f`) flag for the `init` command to explicitly permit overwriting an existing `.luarc.json`.
 - Automated update of moving major version tags (e.g. `v2`) on GitHub release.
@@ -255,10 +305,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mandatory release and changelog guidelines in `AGENTS.md`.
 
 ### Changed
+
 - Moved `commander` from `dependencies` to `devDependencies`, achieving a true zero-dependency runtime for published bundles.
 - Cleaned `tsconfig.json` to target Node.js runtime exclusively (removed `DOM` library and stale configuration files).
 
 ### Fixed
+
 - **Critical**: Prevented silent false passes by treating missing target paths and failed/crashed LuaLS subprocess runs without output as hard errors.
 - **Critical**: Fixed variadic `-i, --ignore` option swallowing following positional target arguments by switching to a repeatable single-pattern option.
 - **Critical**: Hardened `action.yml` to prevent script injection via shell input variables and added fallback to `npx` when `dist/` is not present.
@@ -277,28 +329,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.1.0] - 2026-09-22
 
 ### Added
+
 - `-i/--ignore` option with glob pattern matching for CLI and GitHub Action input (`action.yml`).
 - Total count of checked files in terminal output upon passing diagnosis (`Diagnosis completed, no problems found across N files`).
 
 ### Fixed
+
 - Applied universal two-space symbol padding across all platforms for consistent alignment in terminal output.
 
 ## [2.0.1] - 2026-09-22
 
 ### Added
+
 - Error and warning breakdown in terminal problem summary (`N errors, M warnings across X files`).
 
 ### Fixed
+
 - Automatic pluralization of nouns ("problem", "warning", "error", "file") in CLI report output.
 - Prevented LuaLS check from hanging indefinitely when running with default positional path inside a directory containing the tool itself or a cached LuaLS binary.
 
 ## [2.0.0] - 2026-09-22
 
 ### Changed
+
 - **Breaking**: Require Node.js `>= 24.0.0` (`engines.node: ">=24.0.0"`).
 - Replaced deprecated `Command#addHelpCommand` with `Command#helpCommand` in Commander setup, enabling `@typescript-eslint/no-deprecated` rule.
 
 ### Added
+
 - Node.js 26 to CI test matrix on Ubuntu and Windows runners.
 - Submodule tracking upstream `nanos-world-vscode-extension` (`docgen-output` branch) under `vendor/nanos-world-vscode-extension`, loading `annotations.lua` directly from the submodule and removing `definitions/` directory and custom sanitizers.
 - Automated daily synchronization workflow (`.github/workflows/sync-annotations.yml`) at 01:00 UTC to track upstream annotations updates.
@@ -306,12 +364,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Smoke tests and regression test suite for CLI entrypoints and launcher scripts.
 
 ### Fixed
+
 - Fixed Windows batch launcher (`bin/nanos-lint.cmd`) errorlevel propagation on non-zero exit codes.
 - Ensured `dist/` is compiled before running CLI integration tests in CI.
 
 ## [1.2.0] - 2026-09-22
 
 ### Changed
+
 - Migrated bundler from `tsup` to `tsdown` (`v0.23.0`) powered by Rolldown, compiling standalone bundles targeting Node.js 24.
 - Rewrote CLI argument parsing with `commander` (`v15.0.0`), supporting `check`, `init`, `download-luals`, and `version` subcommands.
 - Configured `tsdown.config.ts` with `deps.alwaysBundle: ["commander"]` to maintain zero external runtime dependencies.
@@ -320,27 +380,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.2] - 2026-09-21
 
 ### Security
+
 - Hardened release workflow by requiring `workflow_run` events to originate from upstream `push` events (ignoring `pull_request` and preventing unauthorized fork triggers).
 
 ## [1.1.1] - 2026-09-21
 
 ### Added
+
 - Pre-release test matrix job (Ubuntu and Windows) in release workflow before building and publishing.
 
 ### Changed
+
 - Chained release workflow to execute upon successful completion of CI workflow via GitHub Actions `workflow_run` on `master`.
 
 ### Fixed
+
 - Added automated detection of release tags on HEAD using `git tag --points-at`, cleanly skipping untagged runs.
 
 ## [1.1.0] - 2026-09-21
 
 ### Added
+
 - JSONC support in `.luarc.json` configuration files (support for comments and trailing commas).
 - Respect for `NO_COLOR` environment variable convention and TTY detection in reporter output.
 - CLI validation for unrecognized flags and missing required options.
 
 ### Fixed
+
 - Added 10-second timeout to GitHub API LuaLS version resolution fetch.
 - Guaranteed temporary check configuration file cleanup in `finally` block.
 - Escaped single quotes in PowerShell `Expand-Archive` command on Windows.
@@ -349,6 +415,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2026-09-21
 
 ### Added
+
 - Initial release of `nanos-lint`.
 - Lua Language Server (LuaLS) integration targeting Lua 5.4.9 for nanos world scripts.
 - Automatic download and caching of platform-specific LuaLS standalone binaries (Windows x64, Linux x64, macOS).
@@ -359,6 +426,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-platform CI/CD release workflow for npm publishing and GitHub Releases.
 
 ### Fixed
+
 - Normalized LuaLS file URI schemes across Windows (`file:///C:/...`) and Linux/POSIX (`file:///...`).
-
-

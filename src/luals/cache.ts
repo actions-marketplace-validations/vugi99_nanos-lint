@@ -8,6 +8,7 @@ import { FALLBACK_LUALS_VERSION, sanitizeLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { isBinaryValid } from "./validation.js";
 
+/** Returns the base directory in the system cache where LuaLS versions and metadata are stored. */
 export function getBaseLuaLSCacheDir(): string {
   return path.join(systemPaths.cache, "luals");
 }
@@ -18,7 +19,7 @@ export function getBaseLuaLSCacheDir(): string {
  */
 export function getCacheDir(
   version: string = FALLBACK_LUALS_VERSION,
-  baseCacheDir: string = getBaseLuaLSCacheDir()
+  baseCacheDir: string = getBaseLuaLSCacheDir(),
 ): string {
   return path.join(baseCacheDir, version);
 }
@@ -50,15 +51,19 @@ export function getIsoWeek(d: Date = new Date()): string {
   const dayNum = date.getUTCDay() || 7;
   date.setUTCDate(date.getUTCDate() + 4 - dayNum);
   const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  const weekNo = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
+/** Returns the path to the LuaLS metadata.json file within the specified cache directory. */
 export function getLuaLSMetadataPath(baseCacheDir: string = getBaseLuaLSCacheDir()): string {
   return path.join(baseCacheDir, LUALS_METADATA_FILENAME);
 }
 
-export function readLuaLSMetadata(baseCacheDir: string = getBaseLuaLSCacheDir()): LuaLSMetadata | null {
+/** Reads and parses the LuaLS metadata.json file, purging corrupted or invalid files automatically. */
+export function readLuaLSMetadata(
+  baseCacheDir: string = getBaseLuaLSCacheDir(),
+): LuaLSMetadata | null {
   const metaPath = getLuaLSMetadataPath(baseCacheDir);
   if (!fs.existsSync(metaPath)) {
     return null;
@@ -68,10 +73,7 @@ export function readLuaLSMetadata(baseCacheDir: string = getBaseLuaLSCacheDir())
     const parsed = JSON.parse(content) as LuaLSMetadata;
     const rawVersion = parsed?.latestVersion;
     const safeVersion = typeof rawVersion === "string" ? sanitizeLuaLSVersion(rawVersion) : null;
-    if (
-      typeof parsed?.lastCheckedWeek === "string" &&
-      safeVersion !== null
-    ) {
+    if (typeof parsed?.lastCheckedWeek === "string" && safeVersion !== null) {
       return {
         ...parsed,
         latestVersion: safeVersion,
@@ -81,30 +83,39 @@ export function readLuaLSMetadata(baseCacheDir: string = getBaseLuaLSCacheDir())
       fs.unlinkSync(metaPath);
       logger.warn(`[luals] Stale or invalid LuaLS metadata at ${metaPath} purged.`);
     } catch (unlinkErr) {
-      logger.debug(`[luals] Failed to unlink invalid metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`);
+      logger.debug(
+        `[luals] Failed to unlink invalid metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`,
+      );
     }
   } catch (err) {
-    logger.debug(`[luals] Failed to parse LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`);
+    logger.debug(
+      `[luals] Failed to parse LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`,
+    );
     try {
       fs.unlinkSync(metaPath);
       logger.warn(`[luals] Corrupted LuaLS metadata at ${metaPath} purged.`);
     } catch (unlinkErr) {
-      logger.debug(`[luals] Failed to unlink corrupted metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`);
+      logger.debug(
+        `[luals] Failed to unlink corrupted metadata: ${unlinkErr instanceof Error ? unlinkErr.message : String(unlinkErr)}`,
+      );
     }
   }
   return null;
 }
 
+/** Writes metadata.json containing the latest checked version and timestamp. */
 export function writeLuaLSMetadata(
   metadata: LuaLSMetadata,
-  baseCacheDir: string = getBaseLuaLSCacheDir()
+  baseCacheDir: string = getBaseLuaLSCacheDir(),
 ): void {
   try {
     fs.mkdirSync(baseCacheDir, { recursive: true });
     const metaPath = getLuaLSMetadataPath(baseCacheDir);
     fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2), "utf-8");
   } catch (err) {
-    logger.warn(`[luals] Failed to write LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`);
+    logger.warn(
+      `[luals] Failed to write LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -112,7 +123,9 @@ export function writeLuaLSMetadata(
  * Lists all candidate LuaLS version directories under baseCacheDir without running
  * execution smoke tests on the binaries.
  */
-export function listCachedLuaLSVersionDirs(baseCacheDir: string = getBaseLuaLSCacheDir()): string[] {
+export function listCachedLuaLSVersionDirs(
+  baseCacheDir: string = getBaseLuaLSCacheDir(),
+): string[] {
   if (!fs.existsSync(baseCacheDir)) {
     return [];
   }
@@ -130,7 +143,9 @@ export function listCachedLuaLSVersionDirs(baseCacheDir: string = getBaseLuaLSCa
     }
     return versions;
   } catch (err) {
-    logger.debug(`[luals] Failed to list cached LuaLS version directories: ${err instanceof Error ? err.message : String(err)}`);
+    logger.debug(
+      `[luals] Failed to list cached LuaLS version directories: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return [];
   }
 }
@@ -164,13 +179,17 @@ export function listCachedLuaLSVersions(baseCacheDir: string = getBaseLuaLSCache
             versions.push(version);
           }
         } catch (err) {
-          logger.debug(`[luals] Error validating cached version ${version}: ${err instanceof Error ? err.message : String(err)}`);
+          logger.debug(
+            `[luals] Error validating cached version ${version}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     }
     return versions;
   } catch (err) {
-    logger.debug(`[luals] Failed to list cached LuaLS versions: ${err instanceof Error ? err.message : String(err)}`);
+    logger.debug(
+      `[luals] Failed to list cached LuaLS versions: ${err instanceof Error ? err.message : String(err)}`,
+    );
     return [];
   }
 }
@@ -181,7 +200,7 @@ export function listCachedLuaLSVersions(baseCacheDir: string = getBaseLuaLSCache
  */
 export function cleanupOldCachedLuaLSVersions(
   keepVersion: string,
-  baseCacheDir: string = getBaseLuaLSCacheDir()
+  baseCacheDir: string = getBaseLuaLSCacheDir(),
 ): string[] {
   if (!fs.existsSync(baseCacheDir)) {
     return [];
@@ -204,13 +223,15 @@ export function cleanupOldCachedLuaLSVersions(
           logger.info(`[luals] Cleaned up older cached LuaLS version: ${entry.name}`);
         } catch (err) {
           logger.warn(
-            `[luals] Failed to remove older cached LuaLS version at ${dirPath}: ${err instanceof Error ? err.message : String(err)}`
+            `[luals] Failed to remove older cached LuaLS version at ${dirPath}: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
     }
   } catch (err) {
-    logger.debug(`[luals] Failed to clean up old LuaLS versions: ${err instanceof Error ? err.message : String(err)}`);
+    logger.debug(
+      `[luals] Failed to clean up old LuaLS versions: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   return removed;
 }
@@ -221,7 +242,7 @@ export function cleanupOldCachedLuaLSVersions(
  */
 export function findExistingLuaLSDir(
   version: string,
-  baseCacheDir: string = getBaseLuaLSCacheDir()
+  baseCacheDir: string = getBaseLuaLSCacheDir(),
 ): string | null {
   const info = getPlatformInfo(version);
 
@@ -236,7 +257,7 @@ export function findExistingLuaLSDir(
       }
     } catch (err) {
       logger.debug(
-        `[luals] Error checking primary LuaLS cache marker at ${primaryMarker}: ${err instanceof Error ? err.message : String(err)}`
+        `[luals] Error checking primary LuaLS cache marker at ${primaryMarker}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -253,7 +274,7 @@ export function findExistingLuaLSDir(
         }
       } catch (err) {
         logger.debug(
-          `[luals] Error checking legacy LuaLS cache marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
+          `[luals] Error checking legacy LuaLS cache marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -268,4 +289,3 @@ export function findExistingLuaLSDir(
 
   return null;
 }
-

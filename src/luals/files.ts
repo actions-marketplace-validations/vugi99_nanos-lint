@@ -14,21 +14,8 @@ const LUA_FILE_PATTERN = "**/*.lua";
 const MAX_PATTERN_LENGTH = 65536;
 
 /**
- * Complexity budget per pattern. `minimatch` evaluates patterns through an AST
- * but still compiles them to regular expressions, so ambiguous wildcards inside
- * one path segment can backtrack, and brace groups expand combinatorially
- * (`{a,b}` repeated 16 times is 65 536 alternatives). A hostile or accidental
- * `.luarc.json` could otherwise stall the file walk, so patterns beyond the
- * budget are skipped with a warning instead of being matched.
- *
- * The ambiguity of one segment grows like `C(segment length, wildcards)`, so the
- * per-segment cap is what keeps matching cheap. `**\/*a*a*a*a\/*a*a*a*a\/*a*a*a*a\/*a*a*a*z.lua`
- * (4 wildcards per segment) stays within a 4-wildcard cap yet costs ~5 ms per
- * candidate file — ~100 s on a 20 000-file tree — while two wildcards per
- * segment cost `C(60, 2) = 1 770` splits, hundreds of times less. The budget is
- * deliberately far below what minimatch can parse: every realistic pattern
- * (`**\/*.{bak,tmp}`, `**\/node_modules\/**`, `**\/item-[0-9].lua`,
- * `**\/*.min.*`) needs at most two wildcards in any one segment.
+ * Complexity budget per pattern to bound backtracking and combinatorial brace expansion.
+ * Patterns exceeding limits are skipped with a warning to protect against ReDoS (#27).
  */
 const MAX_WILDCARDS_PER_SEGMENT = 2;
 const MAX_TOTAL_WILDCARDS = 12;
@@ -82,15 +69,7 @@ function isPatternWithinBudget(pattern: string): boolean {
     .every((segment) => countWildcards(segment) <= MAX_WILDCARDS_PER_SEGMENT);
 }
 
-/**
- * Normalizes one user-supplied pattern (`workspace.ignoreDir`, `files.exclude`
- * or a built-in default) into the slash-separated form `glob` expects.
- * Backslashes are accepted as separators so Windows-authored `.luarc.json`
- * files keep working, and trailing slashes are dropped so `vendor/` behaves
- * exactly like `vendor`. Patterns that cannot be matched (`""`, `"."`, NUL
- * bytes, oversized input, absolute paths, or non-string JSON values) are
- * rejected instead of being handed to `glob`.
- */
+/** Normalizes a user pattern to slash-separated form, dropping trailing slashes and invalid inputs. */
 function normalizePattern(pattern: unknown): string | null {
   if (typeof pattern !== "string") {
     return null;
@@ -111,32 +90,14 @@ function normalizePattern(pattern: unknown): string | null {
 /** Drive-letter prefixes, recognized on every platform (not just Windows). */
 const WINDOWS_ABSOLUTE_PATTERN = /^[A-Za-z]:\//;
 
-/**
- * `workspace.ignoreDir` / `files.exclude` entries are workspace-relative in
- * LuaLS, and `glob` matches ignore patterns against walk-relative paths. An
- * absolute entry is therefore unusable, and `glob` anchors it on some platforms
- * but not others (a macOS `/var` -> `/private/var` walk root or a Windows drive
- * letter behave differently again), so it is skipped to keep one `.luarc.json`
- * behaving identically on Linux, macOS and Windows.
- */
+/** Rejects absolute patterns to maintain cross-platform consistency with LuaLS relative paths. */
 function isAbsolutePattern(normalized: string): boolean {
   return path.posix.isAbsolute(normalized) || WINDOWS_ABSOLUTE_PATTERN.test(normalized);
 }
 
-/**
- * Expands one LuaLS pattern into the equivalent `glob` ignore patterns:
- *
- * - basename-only patterns (`*.lua`, `vendor`) match at any depth, so the
- *   `**\/`-prefixed variants are added (mirrors LuaLS `matchBase` semantics);
- * - a pattern also excludes everything below a matching directory, which is
- *   what the trailing `/**` variant expresses;
- * - the pattern itself is always kept so an exact file or directory match
- *   works as written.
- */
+/** Expands a LuaLS pattern to include basename and sub-directory variants for glob matching. */
 function expandIgnorePattern(pattern: string): string[] {
-  return pattern.includes("/")
-    ? [pattern, `${pattern}/**`]
-    : [`**/${pattern}`, `**/${pattern}/**`];
+  return pattern.includes("/") ? [pattern, `${pattern}/**`] : [`**/${pattern}`, `**/${pattern}/**`];
 }
 
 /** Normalizes and expands a list of LuaLS patterns into `glob` ignore patterns. */
@@ -146,13 +107,13 @@ function toIgnorePatterns(patterns: readonly unknown[]): string[] {
     const normalized = normalizePattern(raw);
     if (!normalized) {
       logger.debug(
-        `[luals] Skipping unusable glob pattern "${String(raw)}" while counting checked files.`
+        `[luals] Skipping unusable glob pattern "${String(raw)}" while counting checked files.`,
       );
       continue;
     }
     if (!isPatternWithinBudget(normalized)) {
       logger.warn(
-        `[luals] Skipping glob pattern "${raw}": it is too complex to match safely and would slow down file counting.`
+        `[luals] Skipping glob pattern "${raw}": it is too complex to match safely and would slow down file counting.`,
       );
       continue;
     }
@@ -161,17 +122,7 @@ function toIgnorePatterns(patterns: readonly unknown[]): string[] {
   return ignore;
 }
 
-/**
- * Counts candidate Lua files within targetPath, taking `workspace.ignoreDir`
- * and `files.exclude` into account.
- *
- * Traversal and matching are delegated to the bundled `glob` package, whose
- * `minimatch` matcher understands the full glob syntax LuaLS accepts (brace
- * expansion, character classes, `**`, `?`) instead of the hand-rolled
- * glob-to-regex translation used before. Combined with the pattern budgets
- * above, this keeps the count predictable for adversarial configurations
- * while remaining consistent with LuaLS exclude semantics (#27).
- */
+/** Counts candidate Lua files within targetPath, taking workspace ignoreDir and files.exclude into account (#27). */
 export function countCheckedFiles(targetPath: string, configPath?: string): number {
   let absPath = path.resolve(targetPath);
   if (!fs.existsSync(absPath)) {
@@ -207,34 +158,26 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
       }
     } catch (err) {
       logger.warn(
-        `[luals] Failed to parse config file for file counting at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+        `[luals] Failed to parse config file for file counting at ${configPath}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
-  const ignore = [
-    ...toIgnorePatterns(ignoreDirs),
-    ...toIgnorePatterns(excludePatterns),
-  ];
+  const ignore = [...toIgnorePatterns(ignoreDirs), ...toIgnorePatterns(excludePatterns)];
 
   try {
     const entries = globSync(LUA_FILE_PATTERN, {
       cwd: absPath,
       ignore,
-      // LuaLS counts dotfiles, and nanos-lint matching stays case-insensitive
-      // on every platform so the reported totals do not vary by filesystem.
       dot: true,
       nocase: true,
-      // Symlinked directories are never traversed: this prevents both symlink
-      // loops and escaping the checked tree (#21).
-      follow: false,
+      follow: false, // Disallow symlinks to prevent loops and directory escapes (#21)
       withFileTypes: true,
     });
-    // Symbolic links are not followed, so they are not counted either (#21).
     return entries.filter((entry) => entry.isFile()).length;
   } catch (err) {
     logger.warn(
-      `[luals] Failed to walk ${absPath} while counting checked files: ${err instanceof Error ? err.message : String(err)}`
+      `[luals] Failed to walk ${absPath} while counting checked files: ${err instanceof Error ? err.message : String(err)}`,
     );
     return 0;
   }

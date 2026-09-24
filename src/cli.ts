@@ -12,6 +12,7 @@ import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.j
 import { ConfigError, NanosLintError } from "./errors.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
 
+/** Retrieves the formatted package name and version string from package.json. */
 function getVersionString(): string {
   const root = getPackageRoot();
   try {
@@ -19,7 +20,7 @@ function getVersionString(): string {
     return `nanos-lint v${pkg.version}`;
   } catch (err) {
     logger.debug(
-      `Could not read version from package.json: ${err instanceof Error ? err.message : String(err)}`
+      `Could not read version from package.json: ${err instanceof Error ? err.message : String(err)}`,
     );
     return "nanos-lint v1.0.0";
   }
@@ -32,6 +33,7 @@ function writeOutput(message: string): void {
   }
 }
 
+/** Accumulates repeatable --ignore pattern arguments, splitting by comma and newline. */
 export function collectIgnorePatterns(val: string, prev?: string[]): string[] {
   const parts = val
     .split(/[\r\n,]+/)
@@ -57,6 +59,7 @@ export interface CreateProgramOptions {
   setExitCode?: (code: number) => void;
 }
 
+/** Constructs and configures the top-level Commander program and its CLI subcommands. */
 export function createProgram(options?: CreateProgramOptions): Command {
   const setExitCode = options?.setExitCode ?? (() => {});
   const program = new Command("nanos-lint");
@@ -67,7 +70,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .addOption(
       new Option("-l, --log-level <level>", "Logging level: error, warn, info, debug, silent")
         .choices(["error", "warn", "info", "debug", "silent"])
-        .default(DEFAULT_LOG_LEVEL)
+        .default(DEFAULT_LOG_LEVEL),
     )
     .hook("preAction", (thisCommand, actionCommand) => {
       const target = actionCommand || thisCommand;
@@ -92,30 +95,36 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .addOption(
       new Option(
         "--checklevel <level>",
-        "Minimum diagnostic level: Error, Warning, Information, Hint"
+        "Minimum diagnostic level: Error, Warning, Information, Hint",
       )
         .choices(["Error", "Warning", "Information", "Hint"])
-        .default("Warning")
+        .default("Warning"),
     )
     .option("--config <path>", "Path to custom .luarc.json configuration file")
     .option("--annotations <path>", "Path to custom annotations.lua file")
     .addOption(
       new Option(
         "--format <format>",
-        "Output format: pretty, json, github (default: pretty, auto-detects GitHub Actions)"
-      ).choices(["pretty", "json", "github"])
+        "Output format: pretty, json, github (default: pretty, auto-detects GitHub Actions)",
+      ).choices(["pretty", "json", "github"]),
     )
     .option(
       "-i, --ignore <pattern>",
       "Files or directories to ignore (supports glob patterns, repeatable)",
-      collectIgnorePatterns
+      collectIgnorePatterns,
     )
-    .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`, DEFAULT_LUALS_VERSION)
+    .option(
+      "--luals-version <ver>",
+      `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`,
+      DEFAULT_LUALS_VERSION,
+    )
     .option("--no-fail", "Do not exit with code 1 if diagnostics are found")
     .option("--quiet", "Suppress progress output")
     .addOption(
-      new Option("-l, --log-level <level>", "Logging level: error, warn, info, debug, silent")
-        .choices(["error", "warn", "info", "debug", "silent"])
+      new Option(
+        "-l, --log-level <level>",
+        "Logging level: error, warn, info, debug, silent",
+      ).choices(["error", "warn", "info", "debug", "silent"]),
     )
     .option("--github", "Output in GitHub Actions format (shortcut for --format=github)")
     .action(async (targetPath: string = ".", opts: CheckCommandOptions) => {
@@ -146,7 +155,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
           throw new ConfigError(
             `Configuration file not found: ${resolvedConfig}`,
             "ERR_CONFIG_NOT_FOUND",
-            "Verify the path passed to --config exists and is readable."
+            "Verify the path passed to --config exists and is readable.",
           );
         }
       }
@@ -169,7 +178,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
             fs.unlinkSync(resolved.configPath);
           } catch (err) {
             logger.warn(
-              `Failed to clean up temporary config file ${resolved.configPath}: ${err instanceof Error ? err.message : String(err)}`
+              `Failed to clean up temporary config file ${resolved.configPath}: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
         }
@@ -222,7 +231,9 @@ export function createProgram(options?: CreateProgramOptions): Command {
       });
       const meta = readAnnotationsMetadata();
       const commitInfo =
-        meta?.commitId && meta.commitId !== "unknown" ? ` (commit ${meta.commitId.slice(0, 7)})` : "";
+        meta?.commitId && meta.commitId !== "unknown"
+          ? ` (commit ${meta.commitId.slice(0, 7)})`
+          : "";
       writeOutput(`[warmup] nanos world annotations ready: ${annotationsPath}${commitInfo}`);
       writeOutput("[warmup] Cache pre-warmed successfully. Ready for offline execution.");
       setExitCode(0);
@@ -251,7 +262,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
       setExitCode(0);
     } catch (err) {
       logger.error(
-        `[cache] Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`
+        `[cache] Failed to clear cache: ${err instanceof Error ? err.message : String(err)}`,
       );
       setExitCode(1);
     }
@@ -327,12 +338,13 @@ Examples:
   $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"
   $ npx nanos-lint init
   $ npx nanos-lint clean-cache
-`
+`,
   );
 
   return program;
 }
 
+/** Parses command-line arguments and executes the requested CLI action. */
 export async function runCLI(args: string[] = process.argv.slice(2)): Promise<number> {
   // Early parse of log-level so early exits (e.g. --version, --help) configure the logger
   for (let i = 0; i < args.length; i++) {
@@ -376,7 +388,7 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
         logger.error(err.stack);
         if (err.cause) {
           logger.error(
-            `cause: ${err.cause instanceof Error ? err.cause.stack || err.cause.message : String(err.cause)}`
+            `cause: ${err.cause instanceof Error ? err.cause.stack || err.cause.message : String(err.cause)}`,
           );
         }
       }
@@ -391,9 +403,10 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
   }
 }
 
+/** Determines whether the current module is being directly executed as an application entrypoint. */
 export function isDirectExecution(
   importMetaUrl: string = import.meta.url,
-  argv1: string | undefined = process.argv[1]
+  argv1: string | undefined = process.argv[1],
 ): boolean {
   if (!argv1) {
     return false;
@@ -406,7 +419,7 @@ export function isDirectExecution(
       return urlStr;
     } catch (err) {
       logger.debug(
-        `[cli] Failed to convert URL "${urlStr}" using fileURLToPath: ${err instanceof Error ? err.message : String(err)}`
+        `[cli] Failed to convert URL "${urlStr}" using fileURLToPath: ${err instanceof Error ? err.message : String(err)}`,
       );
       return urlStr.replace(/^file:\/\/\/?/, "");
     }
@@ -426,7 +439,7 @@ export function isDirectExecution(
     }
   } catch (err) {
     logger.debug(
-      `[cli] Failed to resolve realpath for entry detection: ${err instanceof Error ? err.message : String(err)}`
+      `[cli] Failed to resolve realpath for entry detection: ${err instanceof Error ? err.message : String(err)}`,
     );
     const normArgv = path.resolve(argv1).toLowerCase();
     const normMeta = toPath(importMetaUrl).toLowerCase();

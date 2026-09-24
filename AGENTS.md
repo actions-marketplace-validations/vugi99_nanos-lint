@@ -64,25 +64,44 @@ nanos-lint/
 
 ## 4. Mandatory Quality Gates for Agents
 
-Whenever you make any changes to this repository, **you must execute and pass all of the following commands before completing your work**:
+Whenever you make any changes to this repository, **you must execute and pass the unified quality gates command before completing your work**:
 
 ```bash
-# 1. Lint the codebase (must have 0 errors and 0 warnings)
+# Run all mandatory project quality gates in sequence
+npm run gates
+```
+
+Alternatively, you can run the individual quality gates:
+
+```bash
+# 1. Check code formatting with Prettier (auto-fix via `npm run format:fix`)
+npm run format:check
+
+# 2. Lint the codebase (must have 0 errors and 0 warnings)
 npm run lint
 
-# 2. Type-check TypeScript (must produce 0 type errors)
+# 3. Check architecture and dependency boundaries via dependency-cruiser
+npm run lint:deps
+
+# 4. Check comment density (<= 15% limit on files >= 50 lines)
+npm run lint:comments
+
+# 5. Check docstring coverage (>= 90% top-level/exported function coverage per file in src/)
+npm run lint:docstrings
+
+# 6. Type-check TypeScript (must produce 0 type errors)
 npm run typecheck
 
-# 3. Build distribution bundle
+# 7. Build distribution bundle
 npm run build
 
-# 4. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
+# 8. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
 npm run test:coverage
 ```
 
-These quality gates are automated in `.githooks/pre-commit`, which the `prepare` npm script installs via `git config core.hooksPath .githooks`. That setting is repo-local, so a fresh clone only runs the hook after `npm install`. `.gitattributes` keeps hook and shell scripts on LF so it also works on Windows.
+These quality gates are automated in `.githooks/pre-commit` (which delegates to `npm run gates`), installed by the `prepare` npm script via `git config core.hooksPath .githooks`. That setting is repo-local, so a fresh clone only runs the hook after `npm install`. `.gitattributes` keeps hook and shell scripts on LF so it also works on Windows.
 
-There is no need to manually run all checks before committing because those checks are already included in and executed by the pre-commit hook on every commit. Running them manually beforehand is redundant unless you are debugging a specific failure or running an isolated check.
+There is no need to manually run all checks before committing because those checks are already included in and executed by the pre-commit hook on every commit (`npm run gates`). Running them manually beforehand is redundant unless you are debugging a specific failure or running an isolated check.
 
 If any check fails or emits warnings, investigate and fix it before responding to the user.
 
@@ -103,11 +122,14 @@ Otherwise the live fixtures must resolve: failures abort the run instead of sile
 ## 5. Releases & Changelog Maintenance
 
 ### Continuous Maintenance (After Every Change)
+
 - **Always update `CHANGELOG.md` after making changes**: Any modification to the codebase (features, bug fixes, performance improvements, documentation, CI workflows, or internal tooling) must be documented in `CHANGELOG.md` under the `## [Unreleased]` section before completing your work.
 - **Standardized Categories**: Group changes strictly under Keep a Changelog 1.1.0 categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or `Security`.
 
 ### Release Preparation & Publishing
+
 Whenever preparing or publishing a new tagged release or cutting a new version:
+
 - **Review and verify `CHANGELOG.md`**: Check that all unreleased changes since the previous release are accurately recorded under `## [Unreleased]`.
 - **Promote Unreleased to Version Header**: Move all unreleased changes under a new version heading strictly adhering to [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (e.g. `## [X.Y.Z] - YYYY-MM-DD`), and restore an empty `## [Unreleased]` section above it.
 - **Pre-Release Requirement**: Record and commit the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
@@ -133,6 +155,7 @@ Public issues expose vulnerabilities before a patch is available. Instead, all s
 ### Requirements for Security Advisories
 
 The GitHub Security Advisories API requires:
+
 - `summary`: A short, descriptive summary.
 - `description`: Detailed description including impact, reproduction steps, and suggested fix.
 - `severity`: One of `"critical"`, `"high"`, `"medium"`, `"low"`.
@@ -162,6 +185,7 @@ EOF
 ```
 
 On Windows PowerShell:
+
 ```powershell
 @'
 {
@@ -194,6 +218,3 @@ gh api repos/:owner/:repo/security-advisories --jq '.[] | {ghsa_id, summary, sta
 ```bash
 gh api repos/:owner/:repo/security-advisories/GHSA-xxxx-xxxx-xxxx
 ```
-
-
-

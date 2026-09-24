@@ -1,5 +1,5 @@
-# LF for hooks/shell scripts so Git for Windows can execute them.
-* text=auto
+# Keep repository text files on LF across all operating systems.
+* text=auto eol=lf
 *.sh text eol=lf
 .githooks/** text eol=lf
 .github/workflows/*.yml text eol=lf

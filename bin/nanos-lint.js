@@ -13,5 +13,3 @@ runCLI()
     }
     process.exit(1);
   });
-
-

@@ -1,11 +1,15 @@
 import { defineConfig } from "vitest/config";
-import { applyTestCacheEnv, ensureTestCacheRoot, testCacheEnv } from "./tests/helpers/test-cache.js";
+import {
+  applyTestCacheEnv,
+  ensureTestCacheRoot,
+  testCacheEnv,
+} from "./tests/helpers/test-cache.js";
 
 const DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
 
 /** `NANOS_LIVE_TESTS=0` selects the hermetic offline subset (see AGENTS.md). */
 const liveTestsEnabled = !DISABLED_VALUES.has(
-  (process.env.NANOS_LIVE_TESTS ?? "").trim().toLowerCase()
+  (process.env.NANOS_LIVE_TESTS ?? "").trim().toLowerCase(),
 );
 
 // Per-run isolated cache root, applied here and inherited by every worker.

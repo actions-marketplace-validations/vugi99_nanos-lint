@@ -1,6 +1,7 @@
 import eslint from "@eslint/js";
 import { defineConfig } from "eslint/config";
 import tseslint from "typescript-eslint";
+import eslintConfigPrettier from "eslint-config-prettier";
 
 const localRulesPlugin = {
   rules: {
@@ -12,7 +13,8 @@ const localRulesPlugin = {
         },
         schema: [],
         messages: {
-          noEmptyCatch: "Empty catch block is not allowed. All catches must log or handle the error.",
+          noEmptyCatch:
+            "Empty catch block is not allowed. All catches must log or handle the error.",
         },
       },
       create(context) {
@@ -35,13 +37,7 @@ export default defineConfig(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    ignores: [
-      "dist/**",
-      "node_modules/**",
-      "vendor/**",
-      "tests/pass/**",
-      "tests/fail/**"
-    ],
+    ignores: ["dist/**", "node_modules/**", "vendor/**", "tests/pass/**", "tests/fail/**"],
   },
   {
     plugins: {
@@ -59,16 +55,16 @@ export default defineConfig(
       "@typescript-eslint/explicit-function-return-type": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
-        { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
-      "no-empty": ["error", { "allowEmptyCatch": false }],
+      "no-empty": ["error", { allowEmptyCatch: false }],
       "local/no-empty-catch": "error",
       "@typescript-eslint/no-floating-promises": "error",
       "@typescript-eslint/await-thenable": "error",
       "@typescript-eslint/no-misused-promises": "error",
-      "eqeqeq": ["error", "always", { "null": "ignore" }],
-      "prefer-const": "error"
-    }
+      eqeqeq: ["error", "always", { null: "ignore" }],
+      "prefer-const": "error",
+    },
   },
   {
     files: ["src/**/*.ts"],
@@ -95,5 +91,6 @@ export default defineConfig(
         },
       ],
     },
-  }
+  },
+  eslintConfigPrettier,
 );

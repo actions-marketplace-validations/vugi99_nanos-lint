@@ -96,13 +96,17 @@ export function fileUriToPath(uri: string): string {
     }
     return res;
   } catch (err) {
-    logger.debug(`fileURLToPath fallback for URI "${uri}": ${err instanceof Error ? err.message : String(err)}`);
+    logger.debug(
+      `fileURLToPath fallback for URI "${uri}": ${err instanceof Error ? err.message : String(err)}`,
+    );
     // Fallback if nodeFileURLToPath fails (e.g. malformed percent encoding)
     let decoded = uri.slice(7);
     try {
       decoded = decodeURIComponent(decoded);
     } catch (decodeErr) {
-      logger.warn(`decodeURIComponent failed for path "${decoded}": ${decodeErr instanceof Error ? decodeErr.message : String(decodeErr)}`);
+      logger.warn(
+        `decodeURIComponent failed for path "${decoded}": ${decodeErr instanceof Error ? decodeErr.message : String(decodeErr)}`,
+      );
     }
 
     if (decoded.startsWith("//")) {
@@ -126,6 +130,3 @@ export function fileUriToPath(uri: string): string {
     return decoded;
   }
 }
-
-
-
