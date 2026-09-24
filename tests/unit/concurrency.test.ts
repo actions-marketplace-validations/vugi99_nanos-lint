@@ -301,8 +301,10 @@ describe("concurrent cache access (#7)", () => {
       let rawFetches = 0;
 
       globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
-        const url = typeof input === "string" ? input : input.toString();
-        if (url.includes("api.github.com")) {
+        const raw =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const { hostname } = new URL(raw);
+        if (hostname === "api.github.com") {
           return {
             ok: true,
             status: 200,

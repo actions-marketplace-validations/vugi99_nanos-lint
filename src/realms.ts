@@ -44,8 +44,9 @@ function normalizeRelative(candidate: string): string {
 }
 
 /**
- * Assigns every checked Lua file to a realm. The last matching `nanos.realms` entry wins,
- * and files matched by no entry belong to the shared (full-context) pass.
+ * Assigns every checked Lua file to a realm, returning the paths exactly as they are on
+ * disk (comparisons are case-insensitive on Windows). The last matching `nanos.realms`
+ * entry wins, and files matched by no entry belong to the shared (full-context) pass.
  */
 export function collectRealmFiles(
   root: string,
@@ -82,8 +83,8 @@ export function collectRealmFiles(
   }
 
   const sets: RealmFileSets = { client: [], server: [], shared: [], unmatched: [] };
-  for (const file of checked) {
-    const realm = assignments.get(file);
+  for (const file of checkedFiles) {
+    const realm = assignments.get(normalizeRelative(file));
     if (realm) {
       sets[realm].push(file);
     } else {
@@ -184,10 +185,12 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
     const checkedFiles = listCheckedFiles(resolvedTarget, baseConfigPath);
     const realmFiles = collectRealmFiles(resolvedTarget, mappings, checkedFiles);
 
+    // Report sets are keyed by normalized paths: diagnostics arrive as real file paths,
+    // so membership must survive Windows' case-insensitive file system.
     const realmReportFiles: Record<RealmPassName, Set<string>> = {
-      client: new Set(realmFiles.client),
-      server: new Set(realmFiles.server),
-      shared: new Set([...realmFiles.shared, ...realmFiles.unmatched]),
+      client: new Set(realmFiles.client.map(normalizeRelative)),
+      server: new Set(realmFiles.server.map(normalizeRelative)),
+      shared: new Set([...realmFiles.shared, ...realmFiles.unmatched].map(normalizeRelative)),
     };
     const hasRealmFolders =
       realmFiles.client.length > 0 || realmFiles.server.length > 0 || realmFiles.shared.length > 0;
