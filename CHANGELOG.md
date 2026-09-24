@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `nanos.realms` configuration in `.luarc.json` for custom package layouts (#35): each entry maps a glob pattern (relative to the checked root) to `server`, `client`, `shared` or the `global` alias, the last matching entry wins, files matched by no entry are treated as shared, and the `nanos` key is ignored by LuaLS so editor support is unaffected. Omitting the key keeps the conventional `Server/**`, `Client/**`, `Shared/**` layout, while `"nanos": { "realms": {} }` disables realm passes. Unusable entries (unknown realm names, empty patterns, non-object values) are dropped with a warning, and the default template now ships the conventional mapping as documentation.
 - Zero-dependency cross-process locking and atomic file replacement (`src/lock.ts`) so parallel `nanos-lint` runs can share one user cache (#7):
   - `withFileLock()` acquires locks with `fs.openSync(..., "wx")` (`O_CREAT | O_EXCL`), records `{ pid, createdAt, token }`, queues contenders with jittered exponential backoff, reclaims abandoned locks (dead owner pid or older than 120s), and only unlinks the lock it still owns.
   - `writeAtomicFileSync()` / `writeAtomicFile()` write to a unique sibling temp file and rename over the target with retries for transient `EBUSY`/`EPERM`/`EACCES` errors, so readers never observe a truncated file.

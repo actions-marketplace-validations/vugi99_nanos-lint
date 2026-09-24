@@ -193,6 +193,35 @@ npx nanos-lint init
 npx nanos-lint init --force
 ```
 
+### Realm Mapping (`nanos.realms`)
+
+nanos world runs two isolated Lua VMs: the server executes `Server/**` + `Shared/**`, the client executes `Client/**` + `Shared/**`. `nanos-lint` mirrors that split and lets you describe a non-standard layout in `.luarc.json`:
+
+```json
+{
+  "nanos": {
+    "realms": {
+      "src/server/**": "server",
+      "src/client/**": "client",
+      "common/**": "shared"
+    }
+  }
+}
+```
+
+| Realm value             | Meaning                                                                                                         |
+| :---------------------- | :-------------------------------------------------------------------------------------------------------------- |
+| `"server"`              | Checked with the server context: client-only APIs and `Client/**` globals do not exist.                         |
+| `"client"`              | Checked with the client context: server-only APIs and `Server/**` globals do not exist.                         |
+| `"shared"` / `"global"` | Checked with the complete context, because a shared script may guard side-specific calls behind runtime checks. |
+
+- Omitting `nanos.realms` falls back to the conventional `Server/**`, `Client/**`, `Shared/**` layout, and realm passes only run when at least one of those patterns matches a checked Lua file.
+- `"nanos": { "realms": {} }` disables realm checking and restores a single standard pass.
+- When several entries match the same file, the last matching entry wins.
+- Files matched by no entry (a root `main.lua`, for example) are checked with the complete context.
+
+The `nanos` key is nanos-lint specific and ignored by LuaLS, so the same `.luarc.json` keeps working in the editor.
+
 ### File Counting and Glob Semantics
 
 The `N files checked` figure is produced by matching `workspace.ignoreDir` and `files.exclude` with the bundled `glob` engine. The v3.0.0 contract is:

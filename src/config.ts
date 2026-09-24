@@ -361,34 +361,52 @@ export interface ResolveWorkspaceConfigOptions {
 }
 
 /**
- * Discovers any existing workspace configuration and returns the path to an active
- * configuration file with nanos definitions properly injected.
+ * Loads the user workspace configuration from `--config` or `<workspace>/.luarc.json`,
+ * returning an empty object when neither exists. Parse failures are reported with the
+ * offending path so a broken `.luarc.json` is never silently ignored.
  */
-export function resolveWorkspaceConfig(
+export function loadUserConfig(workspacePath: string, customConfigPath?: string): LuaRCConfig {
+  if (customConfigPath) {
+    return loadConfigFile(path.resolve(customConfigPath));
+  }
+  const candidate = path.join(workspacePath, ".luarc.json");
+  if (!fs.existsSync(candidate)) {
+    return {};
+  }
+  try {
+    return loadConfigFile(candidate);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse workspace configuration file (${candidate}): ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+}
+
+/** Writes a merged configuration to a unique temporary file and returns its path. */
+export function writeTempConfig(config: LuaRCConfig): string {
+  const tempDir = systemPaths.temp;
+  fs.mkdirSync(tempDir, { recursive: true });
+  const tempConfigFile = path.join(
+    tempDir,
+    `luarc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`,
+  );
+  fs.writeFileSync(tempConfigFile, JSON.stringify(config, null, 2), "utf-8");
+  return tempConfigFile;
+}
+
+/**
+ * Discovers any existing workspace configuration and merges it with the nanos template,
+ * returning a LuaLS-ready configuration object without writing anything to disk.
+ */
+export function buildWorkspaceConfig(
   workspacePath: string,
   customConfigPath?: string,
   options?: ResolveWorkspaceConfigOptions,
-): { configPath: string; isTemp: boolean } {
+): LuaRCConfig {
   const defaultTemplate = loadConfigFile(getDefaultTemplatePath());
   const activeAnnotationsPath = options?.annotationsPath || getDefaultAnnotationsPath();
-
-  let userConfig: LuaRCConfig = {};
-
-  if (customConfigPath) {
-    userConfig = loadConfigFile(path.resolve(customConfigPath));
-  } else {
-    const candidate = path.join(workspacePath, ".luarc.json");
-    if (fs.existsSync(candidate)) {
-      try {
-        userConfig = loadConfigFile(candidate);
-      } catch (err) {
-        throw new Error(
-          `Failed to parse workspace configuration file (${candidate}): ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err },
-        );
-      }
-    }
-  }
+  const userConfig = loadUserConfig(workspacePath, customConfigPath);
 
   const hasCliIgnore = Boolean(options?.ignore && options.ignore.length > 0);
 
@@ -434,16 +452,100 @@ export function resolveWorkspaceConfig(
     }
   }
 
-  // Write to a temporary configuration file for LuaLS execution
-  const tempDir = systemPaths.temp;
-  fs.mkdirSync(tempDir, { recursive: true });
-  const tempConfigFile = path.join(
-    tempDir,
-    `luarc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`,
-  );
-  fs.writeFileSync(tempConfigFile, JSON.stringify(merged, null, 2), "utf-8");
+  return merged;
+}
 
-  return { configPath: tempConfigFile, isTemp: true };
+/**
+ * Builds the merged workspace configuration for a single standard LuaLS pass and writes
+ * it to a temporary file (deleted by the caller after the run).
+ */
+export function resolveWorkspaceConfig(
+  workspacePath: string,
+  customConfigPath?: string,
+  options?: ResolveWorkspaceConfigOptions,
+): { configPath: string; isTemp: boolean } {
+  return {
+    configPath: writeTempConfig(buildWorkspaceConfig(workspacePath, customConfigPath, options)),
+    isTemp: true,
+  };
+}
+
+/** A glob pattern (relative to the checked root) bound to an execution realm. */
+export interface RealmMapping {
+  pattern: string;
+  realm: "client" | "server" | "shared";
+}
+
+/** Conventional nanos world package layout used when `nanos.realms` is omitted. */
+export const DEFAULT_REALM_MAPPINGS: ReadonlyArray<RealmMapping> = [
+  { pattern: "Server/**", realm: "server" },
+  { pattern: "Client/**", realm: "client" },
+  { pattern: "Shared/**", realm: "shared" },
+];
+
+export interface ResolvedRealmMappings {
+  /** `false` when the user explicitly disabled realms with `nanos.realms: {}`. */
+  enabled: boolean;
+  mappings: RealmMapping[];
+}
+
+/** Normalizes a realm identifier, mapping the `global` alias onto `shared`. */
+function normalizeRealmName(value: unknown): RealmMapping["realm"] | null {
+  if (value === "server" || value === "client") {
+    return value;
+  }
+  if (value === "shared" || value === "global") {
+    return "shared";
+  }
+  return null;
+}
+
+/**
+ * Resolves the realm mappings declared in `nanos.realms`.
+ *
+ * - The key is omitted: the conventional `Server/**`, `Client/**`, `Shared/**` layout is
+ *   used, and realms only activate when those patterns actually match files (#15, #35).
+ * - The key is `{}`: realms are disabled and a single standard pass runs.
+ * - Otherwise the declared mapping replaces the defaults, and `global` is accepted as an
+ *   alias of `shared`. Unusable entries are dropped with a warning.
+ */
+export function resolveRealmMappings(userConfig: LuaRCConfig): ResolvedRealmMappings {
+  const raw = userConfig.nanos?.realms;
+  if (raw === undefined) {
+    return { enabled: true, mappings: [...DEFAULT_REALM_MAPPINGS] };
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    logger.warn(
+      "[realms] Ignoring nanos.realms: expected an object mapping glob patterns to realm names.",
+    );
+    return { enabled: true, mappings: [...DEFAULT_REALM_MAPPINGS] };
+  }
+
+  const mappings: RealmMapping[] = [];
+  for (const [rawPattern, rawRealm] of Object.entries(raw as Record<string, unknown>)) {
+    const realm = normalizeRealmName(rawRealm);
+    if (!realm) {
+      logger.warn(
+        `[realms] Ignoring nanos.realms entry "${rawPattern}": "${String(rawRealm)}" is not one of server, client, shared or global.`,
+      );
+      continue;
+    }
+    const pattern =
+      typeof rawPattern === "string"
+        ? stripTrailingSlashes(rawPattern.trim().replace(/\\/g, "/"))
+        : "";
+    if (!pattern || pattern === ".") {
+      logger.warn(`[realms] Ignoring unusable nanos.realms pattern "${rawPattern}".`);
+      continue;
+    }
+    mappings.push({ pattern, realm });
+  }
+
+  if (mappings.length === 0) {
+    logger.warn("[realms] nanos.realms has no usable entries; realm passes are disabled.");
+    return { enabled: false, mappings: [] };
+  }
+  return { enabled: true, mappings };
 }
 
 export interface InitWorkspaceOptions {

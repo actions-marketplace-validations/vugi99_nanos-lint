@@ -46,6 +46,16 @@ export interface CheckResult {
   diagnostics: DiagnosticReport;
 }
 
+/** Execution realm of a nanos world script, as loaded by the server or client VM. */
+export type RealmName = "client" | "server" | "shared" | "global";
+
+/** nanos-lint specific settings embedded in `.luarc.json` under the `nanos` key. */
+export interface NanosConfig {
+  /** Maps glob patterns (relative to the checked root) to realm names. */
+  realms?: Record<string, RealmName>;
+  [key: string]: unknown;
+}
+
 export interface LuaRCConfig {
   $schema?: string;
   runtime?: {
@@ -72,6 +82,7 @@ export interface LuaRCConfig {
     neededFileStatus?: Record<string, string>;
     [key: string]: unknown;
   };
+  nanos?: NanosConfig;
   [key: string]: unknown;
 }
 
