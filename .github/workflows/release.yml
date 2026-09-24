@@ -43,7 +43,7 @@ jobs:
       tag_name: ${{ steps.tag.outputs.tag_name }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
@@ -364,7 +364,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
