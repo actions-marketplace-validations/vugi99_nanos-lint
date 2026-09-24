@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `new-release` agent skill (`.agents/skills/new-release/SKILL.md`) documenting the release procedure as guided by AGENTS.md: verifying the `master` branch, bumping the npm version, dropping security support for older versions in `SECURITY.md`, promoting `## [Unreleased]` in `CHANGELOG.md`, updating the pinned `npx --yes nanos-lint@<version>` fallback in `action.yml`, committing through the quality gates, and creating and pushing the `v<version>` tag.
+
 ## [2.8.2] - 2026-09-24
 
 ### Added
