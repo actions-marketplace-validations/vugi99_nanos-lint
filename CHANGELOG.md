@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Close file descriptor in a `finally` block when `fs.readSync()` throws during custom or environment annotations validation in `validateCustomAnnotationsPath()`.
 - Drop ineffective LuaLS binary and annotations `actions/cache` step and week computation from CI workflow, which were never read or written by the isolated test suite (#29).
 - Cap `annotations.lua` download size (10 MB via `MAX_ANNOTATIONS_SIZE_BYTES`) and commit JSON response (1 MB via `MAX_COMMIT_JSON_SIZE_BYTES`) before buffering in memory, rejecting over-large responses with `ERR_ANNOTATIONS_TOO_LARGE` and remediation naming `--annotations <path>` (#30).
+- Bound decompressed archive size (500 MB via `MAX_DECOMPRESSED_SIZE_BYTES`) and member count (10,000 via `MAX_ARCHIVE_MEMBER_COUNT`) during LuaLS archive inspection before and after extraction, rejecting archives with symlink/hardlink members, directory escapes, or excessive members/size with `ERR_LUALS_EXTRACT` (#31).
 
 ## [2.8.1] - 2026-09-24
 

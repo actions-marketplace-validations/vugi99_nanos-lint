@@ -17,6 +17,10 @@ import {
   isAllowedDownloadUrl,
   computeFileSha256,
   getLegacyCacheDir,
+  MAX_DECOMPRESSED_SIZE_BYTES,
+  MAX_ARCHIVE_MEMBER_COUNT,
+  parseTarTvSize,
+  validateArchiveMembers,
 } from "../../src/luals.js";
 import { resolveWorkspaceConfig } from "../../src/config.js";
 import { fileUriToPath } from "../../src/types.js";
@@ -859,6 +863,141 @@ describe("luals utilities", () => {
         existsSpy.mockRestore();
         globalThis.fetch = originalFetch;
         fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("parseTarTvSize parses verbose tar outputs correctly (Issue #31)", () => {
+      expect(parseTarTvSize("-rwxr-xr-x 1000/1000 18239240 2024-05-01 12:00 bin/luals")).toBe(
+        18239240
+      );
+      expect(parseTarTvSize("-rwxr-xr-x  0 0      0 18239240 May  1  2024 bin/luals")).toBe(
+        18239240
+      );
+      expect(parseTarTvSize("-rw-r--r-- 0/0 100 2024-01-01 00:00 file.txt")).toBe(100);
+      expect(parseTarTvSize("drwxr-xr-x 0 0 0 0 May 1 2024 dir/")).toBe(0);
+      expect(parseTarTvSize("invalid line")).toBe(0);
+    });
+
+    it("validateArchiveMembers and downloadAndExtractLuaLS enforce size and member bounds (Issue #31)", async () => {
+      expect(MAX_DECOMPRESSED_SIZE_BYTES).toBe(500 * 1024 * 1024);
+      expect(MAX_ARCHIVE_MEMBER_COUNT).toBe(10_000);
+
+      const helperCreateTarGz = (
+        entries: Array<{ name: string; size?: number; type?: string; linkname?: string; content?: Buffer }>
+      ): Buffer => {
+        const chunks: Buffer[] = [];
+        for (const entry of entries) {
+          const header = Buffer.alloc(512);
+          header.write(entry.name, 0, 100, "utf-8");
+          header.write("0000644\0", 100, 8, "utf-8");
+          header.write("0000000\0", 108, 8, "utf-8");
+          header.write("0000000\0", 116, 8, "utf-8");
+          const content = entry.content ?? Buffer.alloc(0);
+          const size = entry.size !== undefined ? entry.size : content.length;
+          header.write(size.toString(8).padStart(11, "0") + "\0", 124, 12, "utf-8");
+          header.write("14000000000\0", 136, 12, "utf-8");
+          header.write("        ", 148, 8, "utf-8");
+          header.write(entry.type ?? "0", 156, 1, "utf-8");
+          if (entry.linkname) header.write(entry.linkname, 157, 100, "utf-8");
+          header.write("ustar\0", 257, 6, "utf-8");
+          header.write("00", 263, 2, "utf-8");
+          let chksum = 0;
+          for (let i = 0; i < 512; i++) chksum += header[i]!;
+          header.write(chksum.toString(8).padStart(6, "0") + "\0 ", 148, 8, "utf-8");
+          chunks.push(header);
+          if (content.length > 0) {
+            chunks.push(content);
+            const pad = (512 - (content.length % 512)) % 512;
+            if (pad > 0) chunks.push(Buffer.alloc(pad));
+          }
+        }
+        chunks.push(Buffer.alloc(1024));
+        return gzipSync(Buffer.concat(chunks));
+      };
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-archive-test-"));
+      try {
+        // 1. Directory escape in archive
+        const escapeArchive = path.join(tempDir, "escape.tar.gz");
+        fs.writeFileSync(escapeArchive, helperCreateTarGz([{ name: "../evil.sh" }]));
+        await expect(validateArchiveMembers(escapeArchive)).rejects.toThrow(
+          /Archive member path escapes extraction directory/
+        );
+
+        // 2. Symlink in archive
+        const symlinkArchive = path.join(tempDir, "symlink.tar.gz");
+        fs.writeFileSync(
+          symlinkArchive,
+          helperCreateTarGz([
+            { name: "tool", content: Buffer.from("abc") },
+            { name: "link-tool", type: "2", linkname: "tool" },
+          ])
+        );
+        await expect(validateArchiveMembers(symlinkArchive)).rejects.toThrow(
+          /symbolic or hard link/
+        );
+
+        // 3. Decompressed size exceeds limit in listing (using minimal zip with declared uncompressed size)
+        const localHeader = Buffer.alloc(38);
+        localHeader.writeUInt32LE(0x04034b50, 0);
+        localHeader.writeUInt16LE(20, 4);
+        localHeader.writeUInt32LE(600 * 1024 * 1024, 22);
+        localHeader.writeUInt16LE(8, 26);
+        localHeader.write("huge.bin", 30, "utf-8");
+
+        const cdHeader = Buffer.alloc(54);
+        cdHeader.writeUInt32LE(0x02014b50, 0);
+        cdHeader.writeUInt16LE(20, 4);
+        cdHeader.writeUInt16LE(20, 6);
+        cdHeader.writeUInt32LE(600 * 1024 * 1024, 24);
+        cdHeader.writeUInt16LE(8, 28);
+        cdHeader.writeUInt32LE(0, 42);
+        cdHeader.write("huge.bin", 46, "utf-8");
+
+        const eocd = Buffer.alloc(22);
+        eocd.writeUInt32LE(0x06054b50, 0);
+        eocd.writeUInt16LE(1, 8);
+        eocd.writeUInt16LE(1, 10);
+        eocd.writeUInt32LE(cdHeader.length, 12);
+        eocd.writeUInt32LE(localHeader.length, 16);
+
+        const oversizedZip = path.join(tempDir, "oversized.zip");
+        fs.writeFileSync(oversizedZip, Buffer.concat([localHeader, cdHeader, eocd]));
+        await expect(validateArchiveMembers(oversizedZip)).rejects.toThrow(
+          /declared decompressed size.*exceeds maximum limit/
+        );
+
+        // 4. Member count exceeds limit
+        const countEntries = Array.from({ length: 10_005 }, (_, i) => ({
+          name: `f${i}.txt`,
+        }));
+        const countArchive = path.join(tempDir, "count.tar.gz");
+        fs.writeFileSync(countArchive, helperCreateTarGz(countEntries));
+        await expect(validateArchiveMembers(countArchive)).rejects.toThrow(
+          /member count.*exceeds maximum limit/
+        );
+
+        // 4. Post-extraction size check
+        const targetDir = path.join(tempDir, "post-extract-dest");
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          headers: new Headers(),
+          body: Readable.from([gzipSync(Buffer.alloc(1024))]),
+        } as unknown as Response);
+
+        const pathsModule = await import("../../src/paths.js");
+        const dirSizeSpy = vi.spyOn(pathsModule, "getDirectorySize").mockReturnValue(600 * 1024 * 1024);
+        try {
+          await expect(
+            downloadAndExtractLuaLS("3.19.1", targetDir, { reuseExisting: false })
+          ).rejects.toThrow(/Extracted archive size.*exceeds maximum limit/);
+        } finally {
+          dirSizeSpy.mockRestore();
+          globalThis.fetch = originalFetch;
+        }
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
       }
     });
 

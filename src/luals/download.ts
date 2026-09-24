@@ -9,10 +9,25 @@ import { logger } from "../logger.js";
 import { DEFAULT_LUALS_VERSION, resolveLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { findExistingLuaLSDir, getBaseLuaLSCacheDir, getCacheDir } from "./cache.js";
-import { isBinaryValid } from "./validation.js";
+import {
+  isBinaryValid,
+  MAX_DECOMPRESSED_SIZE_BYTES,
+  validateArchiveMembers,
+  getTarBinary,
+  escapePowerShellSingleQuote,
+} from "./validation.js";
 import { LuaLSError } from "../errors.js";
+import { getDirectorySize } from "../paths.js";
 
-export { isBinaryValid } from "./validation.js";
+export {
+  isBinaryValid,
+  MAX_DECOMPRESSED_SIZE_BYTES,
+  MAX_ARCHIVE_MEMBER_COUNT,
+  parseTarTvSize,
+  validateArchiveMembers,
+  getTarBinary,
+  escapePowerShellSingleQuote,
+} from "./validation.js";
 
 export const DOWNLOAD_TIMEOUT_MS = 120_000;
 export const MAX_ARCHIVE_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB
@@ -66,12 +81,6 @@ export function computeFileSha256(filePath: string): string {
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Escapes single quotes for safe PowerShell single-quoted string interpolation.
- */
-export function escapePowerShellSingleQuote(str: string): string {
-  return str.replace(/'/g, "''");
-}
 
 /**
  * Enforces a maximum byte count on an asynchronous download stream.
@@ -92,6 +101,7 @@ export async function* limitDownloadStream(
     yield chunk;
   }
 }
+
 
 export interface DownloadOptions {
   quiet?: boolean;
@@ -268,13 +278,15 @@ export async function downloadAndExtractLuaLS(
         logger.info(`[luals] Extracting to ${destDir}...`);
       }
 
+      await validateArchiveMembers(archivePath);
+
       try {
         // Both Windows 10+ and UNIX systems have tar built in
         const tarArgs =
           process.platform === "win32"
-            ? ["-xf", archivePath, "-C", tempDir]
-            : ["-xf", archivePath, "--no-same-owner", "--no-same-permissions", "-C", tempDir];
-        await execFileAsync("tar", tarArgs);
+            ? ["-xf", path.basename(archivePath), "-C", tempDir]
+            : ["-xf", path.basename(archivePath), "--no-same-owner", "--no-same-permissions", "-C", tempDir];
+        await execFileAsync(getTarBinary(), tarArgs, { cwd: path.dirname(archivePath) });
       } catch (tarErr) {
         // Fallback for PowerShell Expand-Archive on Windows if tar fails
         if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
@@ -286,6 +298,15 @@ export async function downloadAndExtractLuaLS(
         } else {
           throw tarErr;
         }
+      }
+
+      const extractedSize = getDirectorySize(tempDir);
+      if (extractedSize > MAX_DECOMPRESSED_SIZE_BYTES) {
+        throw new LuaLSError(
+          `Extracted archive size (${extractedSize} bytes) exceeds maximum limit (${MAX_DECOMPRESSED_SIZE_BYTES} bytes)`,
+          "ERR_LUALS_EXTRACT",
+          "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space."
+        );
       }
 
       // Cleanup archive file

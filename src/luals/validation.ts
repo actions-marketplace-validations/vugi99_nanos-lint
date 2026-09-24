@@ -1,7 +1,177 @@
 import fs from "node:fs";
-import { execFileSync } from "node:child_process";
+import path from "node:path";
+import { execFileSync, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { logger } from "../logger.js";
 import { LuaLSError } from "../errors.js";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Escapes single quotes for safe PowerShell single-quoted string interpolation.
+ */
+export function escapePowerShellSingleQuote(str: string): string {
+  return str.replace(/'/g, "''");
+}
+
+/**
+ * Maximum total decompressed size of a LuaLS release archive (500 MB).
+ * Protects against zip bombs and maliciously inflated archives (#31).
+ */
+export const MAX_DECOMPRESSED_SIZE_BYTES = 500 * 1024 * 1024;
+
+/**
+ * Maximum number of members allowed in a LuaLS release archive (10,000).
+ * Protects against inode exhaustion and archive recursion attacks (#31).
+ */
+export const MAX_ARCHIVE_MEMBER_COUNT = 10_000;
+
+export function parseTarTvSize(line: string): number {
+  const parts = line.trim().split(/\s+/);
+  if (parts.length < 5) return 0;
+  const p1 = parts[1];
+  const p2 = parts[2];
+  const p4 = parts[4];
+  if (p1 && p2 && p1.includes("/") && /^\d+$/.test(p2)) {
+    return parseInt(p2, 10) || 0;
+  }
+  if (p4 && /^\d+$/.test(p4)) {
+    return parseInt(p4, 10) || 0;
+  }
+  for (let i = 2; i < Math.min(parts.length - 1, 6); i++) {
+    const p = parts[i];
+    if (p && /^\d+$/.test(p)) {
+      return parseInt(p, 10) || 0;
+    }
+  }
+  return 0;
+}
+
+function checkEscapedMember(member: string): void {
+  if (
+    member.startsWith("/") ||
+    member.startsWith("\\") ||
+    /^[a-zA-Z]:[\\/]/.test(member) ||
+    member.split(/[/\\]/).includes("..")
+  ) {
+    throw new LuaLSError(
+      `Archive member path escapes extraction directory: ${member}`,
+      "ERR_LUALS_EXTRACT",
+      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+    );
+  }
+}
+
+function checkArchiveLimits(count: number, size: number): void {
+  if (count > MAX_ARCHIVE_MEMBER_COUNT) {
+    throw new LuaLSError(
+      `Archive member count (${count}) exceeds maximum limit (${MAX_ARCHIVE_MEMBER_COUNT})`,
+      "ERR_LUALS_EXTRACT",
+      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+    );
+  }
+  if (size > MAX_DECOMPRESSED_SIZE_BYTES) {
+    throw new LuaLSError(
+      `Archive declared decompressed size (${size} bytes) exceeds maximum limit (${MAX_DECOMPRESSED_SIZE_BYTES} bytes)`,
+      "ERR_LUALS_EXTRACT",
+      "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space."
+    );
+  }
+}
+
+export function getTarBinary(): string {
+  if (process.platform === "win32") {
+    const sysTar = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
+    if (fs.existsSync(sysTar)) {
+      return sysTar;
+    }
+  }
+  return "tar";
+}
+
+export async function validateArchiveMembers(
+  archivePath: string
+): Promise<{ memberCount: number; totalDeclaredSize: number }> {
+  let memberCount = 0;
+  let totalDeclaredSize = 0;
+  const tarBin = getTarBinary();
+  const archiveDir = path.dirname(archivePath);
+  const archiveFile = path.basename(archivePath);
+
+  try {
+    const [namesOutput, verboseOutput] = await Promise.all([
+      execFileAsync(tarBin, ["-tf", archiveFile], { cwd: archiveDir }),
+      execFileAsync(tarBin, ["-tvf", archiveFile], { cwd: archiveDir }),
+    ]);
+
+    for (const rawName of namesOutput.stdout.split(/\r?\n/)) {
+      const member = rawName.trim();
+      if (!member) continue;
+      memberCount++;
+      checkEscapedMember(member);
+    }
+
+    for (const rawLine of verboseOutput.stdout.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (/^[lh]/.test(line) || line.includes(" -> ") || line.includes(" link to ")) {
+        throw new LuaLSError(
+          "Archive member is a symbolic or hard link. Refusing to extract archive-planted links.",
+          "ERR_LUALS_EXTRACT",
+          "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+        );
+      }
+      totalDeclaredSize += parseTarTvSize(line);
+    }
+    checkArchiveLimits(memberCount, totalDeclaredSize);
+  } catch (err) {
+    if (err instanceof LuaLSError) throw err;
+    if (process.platform === "win32" && archivePath.endsWith(".zip")) {
+      try {
+        const psCommand = [
+          "Add-Type -AssemblyName System.IO.Compression.FileSystem",
+          `$z = [System.IO.Compression.ZipFile]::OpenRead('${escapePowerShellSingleQuote(archivePath)}')`,
+          "try {",
+          '  foreach ($e in $z.Entries) { [Console]::WriteLine("{0}`t{1}", $e.Length, $e.FullName) }',
+          "} finally { $z.Dispose() }",
+        ].join("; ");
+        const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", psCommand]);
+        memberCount = 0;
+        totalDeclaredSize = 0;
+        for (const rawLine of stdout.split(/\r?\n/)) {
+          const line = rawLine.trim();
+          if (!line) continue;
+          const tabIndex = line.indexOf("\t");
+          if (tabIndex === -1) continue;
+          const sizeStr = line.slice(0, tabIndex).trim();
+          const fullName = line.slice(tabIndex + 1).trim();
+          if (!fullName) continue;
+          memberCount++;
+          checkEscapedMember(fullName);
+          totalDeclaredSize += parseInt(sizeStr, 10) || 0;
+        }
+        checkArchiveLimits(memberCount, totalDeclaredSize);
+        return { memberCount, totalDeclaredSize };
+      } catch (psErr) {
+        if (psErr instanceof LuaLSError) throw psErr;
+        throw new LuaLSError(
+          `Failed to inspect release archive before extraction: ${psErr instanceof Error ? psErr.message : String(psErr)}`,
+          "ERR_LUALS_EXTRACT",
+          "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
+          { cause: psErr }
+        );
+      }
+    }
+    throw new LuaLSError(
+      `Failed to inspect release archive before extraction: ${err instanceof Error ? err.message : String(err)}`,
+      "ERR_LUALS_EXTRACT",
+      "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
+      { cause: err }
+    );
+  }
+
+  return { memberCount, totalDeclaredSize };
+}
 
 /**
  * Minimum plausible size of a downloaded LuaLS executable. Release assets are
