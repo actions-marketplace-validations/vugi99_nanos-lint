@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Realm file assignment (`collectRealmFiles()`) now returns workspace-relative paths with their on-disk casing instead of lowercasing them on Windows; realm report sets are keyed by normalized paths separately, so diagnostics still match on Windows' case-insensitive file system (#15).
 
+- The realm CLI tests in `tests/integration/cli-execution.test.ts` are now hermetic: they pin `--format=pretty` and normalize path separators, because the pretty reporter prints OS-native separators while `GITHUB_ACTIONS` in the environment switches the CLI to the slash-normalized annotation format. A new unit test asserts that `GITHUB_ACTIONS` auto-selection so the two environments can no longer mask each other (#15).
+
 ### Removed
 
 - `--quiet` / `-q` CLI flag and the `quiet?: boolean` option across the programmatic API (breaking, #3): `nanos-lint check --quiet`, `nanos-lint warmup -q|--quiet`, the `quiet` input of `action.yml`, and the `quiet` field of `CheckOptions`, `ResolveLuaLSOptions`, `DownloadOptions`, `ResolveAnnotationsOptions` and the third argument of `downloadAndCacheAnnotations()` are gone. Output is now governed by a single knob: `-l, --log-level error` suppresses progress while still printing the report, `--log-level silent` suppresses everything. The GitHub Action exposes the same control through its new `log-level` input (default `warn`), and the redundant `if (!options?.quiet)` guards were deleted so `Logger` is the only component gating output.

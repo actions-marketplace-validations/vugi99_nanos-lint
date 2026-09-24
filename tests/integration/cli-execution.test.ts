@@ -9,6 +9,16 @@ import { isLiveTestsEnabled, getSharedLuaLSBinary, getSharedAnnotations } from "
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 const rootDir = path.resolve(__dirname, "../..");
+
+/**
+ * The pretty reporter prints OS-native separators (so Windows output contains `\`), and
+ * `GITHUB_ACTIONS` in the environment switches the CLI to the annotation format. Every
+ * realm assertion below pins `--format=pretty` and normalizes separators so the test
+ * behaves identically on a developer machine and inside CI.
+ */
+function normalizeSlashes(output: string | undefined): string {
+  return (output ?? "").replace(/\\/g, "/");
+}
 const distCli = path.join(rootDir, "dist", "cli.js");
 const binCli = path.join(rootDir, "bin", "nanos-lint.js");
 
@@ -65,30 +75,39 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
   it("checks a package through dist/cli.js with realm-aware passes", async () => {
     const fixture = path.join(rootDir, "tests", "fixtures", "realms");
     try {
-      await execFileAsync(process.execPath, [distCli, "check", fixture]);
+      await execFileAsync(process.execPath, [distCli, "check", fixture, "--format=pretty"]);
       expect.fail("Expected realm violations to fail the check");
     } catch (err: unknown) {
       const execErr = err as { code?: number; stdout?: string };
+      const stdout = normalizeSlashes(execErr.stdout);
       expect(execErr.code).toBe(1);
       // Server and client files are reported from their own strict realm pass.
-      expect(execErr.stdout).toContain("tests/fixtures/realms/Server/combat.lua");
-      expect(execErr.stdout).toContain("tests/fixtures/realms/Client/hud.lua");
-      expect(execErr.stdout).toContain("Undefined global");
+      expect(stdout).toContain("tests/fixtures/realms/Server/combat.lua");
+      expect(stdout).toContain("tests/fixtures/realms/Client/hud.lua");
+      expect(stdout).toContain("Undefined global");
       // The guarded side-specific call in Shared/ stays unreported.
-      expect(execErr.stdout).not.toContain("tests/fixtures/realms/Shared/bridge.lua");
+      expect(stdout).not.toContain("tests/fixtures/realms/Shared/bridge.lua");
     }
   }, 120000);
 
   it("restricts dist/cli.js check --realm client to the client realm", async () => {
     const fixture = path.join(rootDir, "tests", "fixtures", "realms");
     try {
-      await execFileAsync(process.execPath, [distCli, "check", fixture, "--realm", "client"]);
+      await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        fixture,
+        "--realm",
+        "client",
+        "--format=pretty",
+      ]);
       expect.fail("Expected the client realm violation to fail the check");
     } catch (err: unknown) {
       const execErr = err as { code?: number; stdout?: string };
+      const stdout = normalizeSlashes(execErr.stdout);
       expect(execErr.code).toBe(1);
-      expect(execErr.stdout).toContain("tests/fixtures/realms/Client/hud.lua");
-      expect(execErr.stdout).not.toContain("tests/fixtures/realms/Server/combat.lua");
+      expect(stdout).toContain("tests/fixtures/realms/Client/hud.lua");
+      expect(stdout).not.toContain("tests/fixtures/realms/Server/combat.lua");
     }
   }, 120000);
 
@@ -97,9 +116,12 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
       distCli,
       "check",
       path.join(rootDir, "tests", "fixtures", "realms_clean"),
+      "--format=pretty",
     ]);
 
-    expect(stdout).toMatch(/Diagnosis completed, no problems found across \d+ files?\./);
+    expect(normalizeSlashes(stdout)).toMatch(
+      /Diagnosis completed, no problems found across \d+ files?\./,
+    );
   }, 120000);
 
   it("executes bin/nanos-lint.js --help and matches dist/cli.js output", async () => {

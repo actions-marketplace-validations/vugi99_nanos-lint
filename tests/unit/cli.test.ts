@@ -297,6 +297,49 @@ describe("cli module flag and command parsing", () => {
       logSpy.mockRestore();
     });
 
+    it("auto-selects GitHub annotations when GITHUB_ACTIONS is set", async () => {
+      const originalGithubActions = process.env.GITHUB_ACTIONS;
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck").mockResolvedValue({
+        passed: false,
+        totalProblems: 1,
+        totalErrors: 0,
+        totalWarnings: 1,
+        totalFiles: 1,
+        diagnostics: {
+          "file:///workspace/Server/combat.lua": [
+            {
+              code: "undefined-global",
+              message: "Undefined global `Client`.",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } },
+              severity: 2 as const,
+            },
+          ],
+        },
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        process.env.GITHUB_ACTIONS = "true";
+        expect(await runCLI(["check", "."])).toBe(1);
+        const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+        expect(output).toContain("::warning file=");
+        // Annotation paths are always slash-normalized, unlike the pretty reporter.
+        expect(output).toContain("Server/combat.lua");
+      } finally {
+        if (originalGithubActions === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGithubActions;
+        }
+        annotSpy.mockRestore();
+        checkSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
     it("runs realm passes when a realm plan is available and always cleans it up", async () => {
       const annotSpy = vi
         .spyOn(annotationsModule, "resolveAnnotations")
