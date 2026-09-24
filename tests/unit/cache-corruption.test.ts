@@ -79,6 +79,23 @@ describe("Cache Corruption Detection and Self-Healing", () => {
       fs.writeFileSync(validFile, "-- nanos world annotations\n" + " ".repeat(1500));
       expect(isAnnotationsValid(validFile)).toBe(true);
     });
+
+    it("closes the file descriptor when readSync throws (Issue #32)", () => {
+      const validFile = path.join(tempDir, "meta.lua");
+      fs.writeFileSync(validFile, "---@meta\n" + " ".repeat(1500));
+
+      const closeSpy = vi.spyOn(fs, "closeSync");
+      const readSpy = vi.spyOn(fs, "readSync").mockImplementationOnce(() => {
+        throw new Error("simulated EIO");
+      });
+      try {
+        expect(isAnnotationsValid(validFile)).toBe(false);
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        readSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
+    });
   });
 
   describe("Metadata self-healing on corrupted JSON", () => {

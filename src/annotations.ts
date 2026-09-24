@@ -96,15 +96,18 @@ export function isAnnotationsValid(filePath: string): boolean {
       return false;
     }
     const fd = fs.openSync(filePath, "r");
-    const buffer = Buffer.alloc(512);
-    const bytesRead = fs.readSync(fd, buffer, 0, 512, 0);
-    fs.closeSync(fd);
-    const header = buffer.toString("utf-8", 0, bytesRead).trimStart();
-    return (
-      header.startsWith("---@meta") ||
-      header.includes("nanos world") ||
-      header.includes("nanos-world")
-    );
+    try {
+      const buffer = Buffer.alloc(512);
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+      const header = buffer.toString("utf-8", 0, bytesRead).trimStart();
+      return (
+        header.startsWith("---@meta") ||
+        header.includes("nanos world") ||
+        header.includes("nanos-world")
+      );
+    } finally {
+      fs.closeSync(fd);
+    }
   } catch (err) {
     logger.debug(
       `[annotations] Annotation validation failed for ${filePath}: ${err instanceof Error ? err.message : String(err)}`
