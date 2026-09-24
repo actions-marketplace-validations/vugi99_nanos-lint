@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +14,9 @@ import {
   stripTrailingSlashes,
   resolveWorkspaceConfig,
   initWorkspace,
+  VALID_LUALS_DIAGNOSTIC_CODES,
 } from "../../src/config.js";
+import { logger } from "../../src/logger.js";
 import type { LuaRCConfig } from "../../src/types.js";
 
 describe("config module", () => {
@@ -46,6 +48,62 @@ describe("config module", () => {
     expect(config.diagnostics?.severity?.["unused-local"]).toBe("Warning");
     expect(config.workspace?.ignoreDir).toContain("script");
     expect(config.workspace?.ignoreDir).toContain("node_modules");
+  });
+
+  describe("shipped templates/.luarc.json validation (Issue #36)", () => {
+    it("asserts 100% of diagnostic keys in templates/.luarc.json belong to VALID_LUALS_DIAGNOSTIC_CODES", () => {
+      const templatePath = getDefaultTemplatePath();
+      const config = loadConfigFile(templatePath);
+
+      const severityMap = config.diagnostics?.severity ?? {};
+      const severityKeys = Object.keys(severityMap);
+      expect(severityKeys.length).toBeGreaterThan(0);
+      for (const key of severityKeys) {
+        expect(
+          VALID_LUALS_DIAGNOSTIC_CODES.has(key),
+          `diagnostics.severity key "${key}" in templates/.luarc.json must belong to VALID_LUALS_DIAGNOSTIC_CODES`
+        ).toBe(true);
+      }
+
+      const neededFileStatusMap = config.diagnostics?.neededFileStatus ?? {};
+      const neededFileStatusKeys = Object.keys(neededFileStatusMap);
+      expect(neededFileStatusKeys.length).toBeGreaterThan(0);
+      for (const key of neededFileStatusKeys) {
+        expect(
+          VALID_LUALS_DIAGNOSTIC_CODES.has(key),
+          `diagnostics.neededFileStatus key "${key}" in templates/.luarc.json must belong to VALID_LUALS_DIAGNOSTIC_CODES`
+        ).toBe(true);
+      }
+    });
+
+    it("emits zero warning logs when merging default template (no dropped diagnostic keys)", () => {
+      const templatePath = getDefaultTemplatePath();
+      const template = loadConfigFile(templatePath);
+
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        const merged = mergeConfigs(template, {});
+        expect(warnSpy).not.toHaveBeenCalled();
+        expect(merged.diagnostics?.severity).toBeDefined();
+        expect(Object.keys(merged.diagnostics?.severity ?? {}).length).toBe(
+          Object.keys(template.diagnostics?.severity ?? {}).length
+        );
+        expect(Object.keys(merged.diagnostics?.neededFileStatus ?? {}).length).toBe(
+          Object.keys(template.diagnostics?.neededFileStatus ?? {}).length
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("asserts $schema URL pattern in templates/.luarc.json is valid (offline check)", () => {
+      const templatePath = getDefaultTemplatePath();
+      const config = loadConfigFile(templatePath);
+      expect(config.$schema).toBeDefined();
+      expect(typeof config.$schema).toBe("string");
+      expect(config.$schema).toMatch(/^https:\/\/raw\.githubusercontent\.com\/LuaLS\/vscode-lua\//);
+      expect(config.$schema).toMatch(/\/schema\.json$/);
+    });
   });
 
   it("merges custom workspace config while preserving nanos definitions", () => {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Hardening tests for shipped `templates/.luarc.json` (#36):
+  - Unit tests in `tests/unit/config.test.ts` asserting 100% of keys in `diagnostics.severity` and `diagnostics.neededFileStatus` belong to `VALID_LUALS_DIAGNOSTIC_CODES`, merging default template emits zero dropped-key warnings, and the `$schema` URL pattern is valid.
+  - Live integration test in `tests/integration/luals.test.ts` verifying the `$schema` URL is reachable (HTTP 200) and returns valid JSON.
+  - Live integration test in `tests/integration/luals.test.ts` verifying that each default diagnostic severity promotion (`unused-local`, `redefined-local`, `unused-vararg`) actively triggers at `Warning` severity on live LuaLS.
+
 ### Fixed
 - Close file descriptor in a `finally` block when `fs.readSync()` throws in `isAnnotationsValid()`, preventing descriptor leaks on I/O errors (#32, #34).
 - Close file descriptor in a `finally` block when `fs.readSync()` throws during custom or environment annotations validation in `validateCustomAnnotationsPath()`.

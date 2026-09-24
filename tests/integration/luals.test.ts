@@ -2,7 +2,13 @@ import { describe, it, expect, beforeAll } from "vitest";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
-import { resolveWorkspaceConfig, getPackageRoot, initWorkspace } from "../../src/config.js";
+import {
+  resolveWorkspaceConfig,
+  getPackageRoot,
+  initWorkspace,
+  getDefaultTemplatePath,
+  loadConfigFile,
+} from "../../src/config.js";
 import { runLuaLSCheck } from "../../src/luals.js";
 import {
   getSharedAnnotations,
@@ -293,6 +299,98 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
       } finally {
         if (resolvedLegacy.isTemp && fs.existsSync(resolvedLegacy.configPath)) {
           fs.unlinkSync(resolvedLegacy.configPath);
+        }
+      }
+    } finally {
+      fs.rmSync(rawTempDir, { recursive: true, force: true });
+      if (tempDir !== rawTempDir) {
+        try {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        } catch {
+          void 0;
+        }
+      }
+    }
+  });
+
+  it("verifies shipped templates/.luarc.json $schema URL is reachable and returns valid JSON (Issue #36)", async () => {
+    const templatePath = getDefaultTemplatePath();
+    const config = loadConfigFile(templatePath);
+    expect(config.$schema).toBeDefined();
+
+    const response = await fetch(config.$schema!, {
+      signal: AbortSignal.timeout(15000),
+    });
+    expect(response.status).toBe(200);
+
+    const bodyText = await response.text();
+    let parsed: unknown;
+    expect(() => {
+      parsed = JSON.parse(bodyText);
+    }).not.toThrow();
+    expect(typeof parsed).toBe("object");
+    expect(parsed).not.toBeNull();
+    expect((parsed as Record<string, unknown>).properties).toBeDefined();
+  });
+
+  it("actively enforces all default diagnostic promotions (unused-local, redefined-local, unused-vararg) at Warning severity (Issue #36)", async () => {
+    const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-promotions-"));
+    const tempDir = fs.realpathSync.native ? fs.realpathSync.native(rawTempDir) : fs.realpathSync(rawTempDir);
+    try {
+      const fileUnusedLocal = path.join(tempDir, "unused_local.lua");
+      fs.writeFileSync(fileUnusedLocal, "local myUnused = 42\n", "utf-8");
+
+      const fileRedefinedLocal = path.join(tempDir, "redefined_local.lua");
+      fs.writeFileSync(
+        fileRedefinedLocal,
+        "local x = 1\nlocal function foo()\n  local x = 2\n  return x\nend\nfoo()\nprint(x)\n",
+        "utf-8"
+      );
+
+      const fileUnusedVararg = path.join(tempDir, "unused_vararg.lua");
+      fs.writeFileSync(
+        fileUnusedVararg,
+        "local function bar(...)\n  return 100\nend\nbar(1, 2)\n",
+        "utf-8"
+      );
+
+      const resolved = resolveWorkspaceConfig(tempDir);
+      try {
+        // 1. unused-local must trigger at Warning (severity 2)
+        const resUnused = await runLuaLSCheck(fileUnusedLocal, resolved.configPath, {
+          path: fileUnusedLocal,
+          checklevel: "Warning",
+        });
+        expect(resUnused.passed).toBe(false);
+        const diagsUnused = Object.values(resUnused.diagnostics).flat();
+        const unusedLocalDiag = diagsUnused.find((d) => d.code === "unused-local");
+        expect(unusedLocalDiag).toBeDefined();
+        expect(unusedLocalDiag?.severity).toBe(2);
+
+        // 2. redefined-local must trigger at Warning (severity 2)
+        const resRedefined = await runLuaLSCheck(fileRedefinedLocal, resolved.configPath, {
+          path: fileRedefinedLocal,
+          checklevel: "Warning",
+        });
+        expect(resRedefined.passed).toBe(false);
+        const diagsRedefined = Object.values(resRedefined.diagnostics).flat();
+        const redefinedLocalDiag = diagsRedefined.find((d) => d.code === "redefined-local");
+        expect(redefinedLocalDiag).toBeDefined();
+        expect(redefinedLocalDiag?.severity).toBe(2);
+
+        // 3. unused-vararg must trigger at Warning (severity 2)
+        const resVararg = await runLuaLSCheck(fileUnusedVararg, resolved.configPath, {
+          path: fileUnusedVararg,
+          checklevel: "Warning",
+        });
+        expect(resVararg.passed).toBe(false);
+        const diagsVararg = Object.values(resVararg.diagnostics).flat();
+        const unusedVarargDiag = diagsVararg.find((d) => d.code === "unused-vararg");
+        expect(unusedVarargDiag).toBeDefined();
+        expect(unusedVarargDiag?.severity).toBe(2);
+      } finally {
+        if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+          fs.unlinkSync(resolved.configPath);
         }
       }
     } finally {
