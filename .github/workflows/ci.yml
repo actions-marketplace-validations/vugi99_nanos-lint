@@ -46,20 +46,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint TypeScript code
-        run: npm run lint
-
-      - name: Check comment density
-        run: npm run lint:comments
-
-      - name: Typecheck TypeScript code
-        run: npm run typecheck
-
-      - name: Build distribution package
-        run: npm run build
-
-      - name: Run Vitest tests with coverage (Unit & LuaLS Integration)
-        run: npm run test:coverage
+      - name: Run project quality gates
+        run: npm run gates
 
       - name: Test CLI directly on passing fixtures (via bin/nanos-lint.js and dist/cli.js)
         run: |

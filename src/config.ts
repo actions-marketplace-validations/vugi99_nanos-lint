@@ -24,6 +24,7 @@ export function getPackageRoot(): string {
   return path.resolve(__dirname, "..");
 }
 
+/** Resolves the default annotations path from environment variable, bundled file, or user cache. */
 export function getDefaultAnnotationsPath(): string {
   // 1. Env variable
   const envPath = process.env.NANOS_ANNOTATIONS_PATH || process.env.NANOS_ANNOTATIONS;
@@ -47,6 +48,7 @@ export function getDefinitionsDir(): string {
   return path.dirname(getDefaultAnnotationsPath());
 }
 
+/** Resolves the absolute path to the default .luarc.json template shipped with the package. */
 export function getDefaultTemplatePath(): string {
   const root = getPackageRoot();
   return path.join(root, "templates", ".luarc.json");
@@ -60,6 +62,7 @@ export function stripJsonComments(text: string): string {
   return stripComments(cleanText);
 }
 
+/** Parses JSONC text with support for comments and trailing commas. */
 export function parseJsonc<T = unknown>(text: string): T {
   const cleanText = text.replace(/^\uFEFF/, "");
   const errors: ParseError[] = [];
@@ -73,6 +76,7 @@ export function parseJsonc<T = unknown>(text: string): T {
   return result as T;
 }
 
+/** Reads and parses a .luarc.json configuration file from disk. */
 export function loadConfigFile(filePath: string): LuaRCConfig {
   if (!fs.existsSync(filePath)) {
     throw new ConfigError(

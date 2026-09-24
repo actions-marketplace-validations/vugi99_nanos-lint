@@ -9,6 +9,7 @@ export interface PlatformInfo {
   binaryRelativePath: string;
 }
 
+/** Resolves platform-specific binary naming and relative paths for the host operating system. */
 export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): PlatformInfo {
   const platform = process.platform;
   const arch = process.arch;

@@ -26,6 +26,7 @@ export const MAX_DECOMPRESSED_SIZE_BYTES = 500 * 1024 * 1024;
  */
 export const MAX_ARCHIVE_MEMBER_COUNT = 10_000;
 
+/** Parses the file size column from a 'tar -tvf' listing output line. */
 export function parseTarTvSize(line: string): number {
   const parts = line.trim().split(/\s+/);
   if (parts.length < 5) return 0;
@@ -47,6 +48,7 @@ export function parseTarTvSize(line: string): number {
   return 0;
 }
 
+/** Asserts that an archive entry name does not escape the destination directory. */
 function checkEscapedMember(member: string): void {
   if (
     member.startsWith("/") ||
@@ -62,6 +64,7 @@ function checkEscapedMember(member: string): void {
   }
 }
 
+/** Validates that archive entry count and decompressed size do not exceed safety limits. */
 function checkArchiveLimits(count: number, size: number): void {
   if (count > MAX_ARCHIVE_MEMBER_COUNT) {
     throw new LuaLSError(
@@ -79,6 +82,7 @@ function checkArchiveLimits(count: number, size: number): void {
   }
 }
 
+/** Locates the platform tar executable path, checking System32 on Windows. */
 export function getTarBinary(): string {
   if (process.platform === "win32") {
     const sysTar = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
@@ -89,6 +93,7 @@ export function getTarBinary(): string {
   return "tar";
 }
 
+/** Pre-inspects archive members using tar listing to enforce extraction safety constraints (#31). */
 export async function validateArchiveMembers(
   archivePath: string
 ): Promise<{ memberCount: number; totalDeclaredSize: number }> {

@@ -80,13 +80,16 @@ npm run lint
 # 2. Check comment density (<= 15% limit on files >= 50 lines)
 npm run lint:comments
 
-# 3. Type-check TypeScript (must produce 0 type errors)
+# 3. Check docstring coverage (>= 90% function coverage per file in src/)
+npm run lint:docstrings
+
+# 4. Type-check TypeScript (must produce 0 type errors)
 npm run typecheck
 
-# 4. Build distribution bundle
+# 5. Build distribution bundle
 npm run build
 
-# 5. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
+# 6. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
 npm run test:coverage
 ```
 

@@ -110,6 +110,7 @@ export interface DownloadOptions {
   cacheDir?: string;
 }
 
+/** Downloads, verifies, and extracts the LuaLS release archive for the current platform. */
 export async function downloadAndExtractLuaLS(
   version: string = DEFAULT_LUALS_VERSION,
   targetDir?: string,

@@ -28,6 +28,7 @@ export interface AnnotationsMetadata {
 export const ANNOTATIONS_FILENAME = "annotations.lua";
 export const METADATA_FILENAME = "metadata.json";
 
+/** Returns the current date formatted as YYYY-MM-DD alongside a date components object. */
 export function getTodayDateString(d: Date = new Date()): { dateStr: string; dateObj: AnnotationsDate } {
   const year = d.getFullYear();
   const month = d.getMonth() + 1;
@@ -39,18 +40,22 @@ export function getTodayDateString(d: Date = new Date()): { dateStr: string; dat
   };
 }
 
+/** Returns the system cache directory used for nanos world annotations. */
 export function getAnnotationsCacheDir(): string {
   return path.join(systemPaths.cache, "annotations");
 }
 
+/** Returns the full path to the cached annotations.lua file. */
 export function getCachedAnnotationsFilePath(): string {
   return path.join(getAnnotationsCacheDir(), ANNOTATIONS_FILENAME);
 }
 
+/** Returns the full path to the annotations metadata.json file. */
 export function getAnnotationsMetadataFilePath(): string {
   return path.join(getAnnotationsCacheDir(), METADATA_FILENAME);
 }
 
+/** Reads and parses annotations metadata.json, purging corrupt files automatically. */
 export function readAnnotationsMetadata(cacheDir: string = getAnnotationsCacheDir()): AnnotationsMetadata | null {
   const metaPath = path.join(cacheDir, "metadata.json");
   if (!fs.existsSync(metaPath)) {
@@ -115,6 +120,7 @@ export function isAnnotationsValid(filePath: string): boolean {
   }
 }
 
+/** Reads an HTTP response body with an upper byte limit to guard against memory exhaustion. */
 async function readBoundedResponseBody(
   res: Response,
   maxBytes: number,
@@ -167,6 +173,7 @@ async function readBoundedResponseBody(
   return "";
 }
 
+/** Fetches the latest commit SHA for the annotations branch from the GitHub API. */
 export async function fetchLatestCommitId(): Promise<string | null> {
   try {
     const headers: Record<string, string> = { "User-Agent": "nanos-lint" };
@@ -212,6 +219,7 @@ export function getRawAnnotationsUrl(commitSha?: string): string {
   return RAW_ANNOTATIONS_URL;
 }
 
+/** Downloads raw annotations.lua content from GitHub raw content endpoints. */
 export async function fetchRawAnnotationsContent(commitSha?: string): Promise<string> {
   const url = getRawAnnotationsUrl(commitSha);
   const res = await fetch(url, {
@@ -248,6 +256,7 @@ export async function fetchRawAnnotationsContent(commitSha?: string): Promise<st
   return text;
 }
 
+/** Copies a file with exponential backoff retries to handle transient file lock contention. */
 async function copyFileWithRetry(src: string, dest: string, maxRetries = 10): Promise<void> {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -425,6 +434,7 @@ export interface ResolveAnnotationsOptions {
   quiet?: boolean;
 }
 
+/** Validates that a user-supplied or environment-specified annotations path exists and is a valid file. */
 function validateCustomAnnotationsPath(filePath: string, source: "custom" | "env"): string {
   const resolved = path.resolve(filePath);
   const isCustom = source === "custom";

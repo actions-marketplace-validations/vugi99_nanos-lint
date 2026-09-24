@@ -12,6 +12,7 @@ import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.j
 import { ConfigError, NanosLintError } from "./errors.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
 
+/** Retrieves the formatted package name and version string from package.json. */
 function getVersionString(): string {
   const root = getPackageRoot();
   try {
@@ -32,6 +33,7 @@ function writeOutput(message: string): void {
   }
 }
 
+/** Accumulates repeatable --ignore pattern arguments, splitting by comma and newline. */
 export function collectIgnorePatterns(val: string, prev?: string[]): string[] {
   const parts = val
     .split(/[\r\n,]+/)
@@ -57,6 +59,7 @@ export interface CreateProgramOptions {
   setExitCode?: (code: number) => void;
 }
 
+/** Constructs and configures the top-level Commander program and its CLI subcommands. */
 export function createProgram(options?: CreateProgramOptions): Command {
   const setExitCode = options?.setExitCode ?? (() => {});
   const program = new Command("nanos-lint");
@@ -333,6 +336,7 @@ Examples:
   return program;
 }
 
+/** Parses command-line arguments and executes the requested CLI action. */
 export async function runCLI(args: string[] = process.argv.slice(2)): Promise<number> {
   // Early parse of log-level so early exits (e.g. --version, --help) configure the logger
   for (let i = 0; i < args.length; i++) {
@@ -391,6 +395,7 @@ export async function runCLI(args: string[] = process.argv.slice(2)): Promise<nu
   }
 }
 
+/** Determines whether the current module is being directly executed as an application entrypoint. */
 export function isDirectExecution(
   importMetaUrl: string = import.meta.url,
   argv1: string | undefined = process.argv[1]

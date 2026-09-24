@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Docstring quality gate script (`npm run lint:docstrings` via `scripts/lint-docstrings.ts`) enforcing >= 90% function documentation coverage per file across `src/`, with comprehensive JSDoc coverage across all production modules (#38).
 - Comment density quality gate script (`npm run lint:comments` via `scripts/lint-comments.ts`) enforcing <= 15% pure comment lines on files with >= 50 lines, with condensed commentary in verbose modules and exception support (#37).
 - Unified quality gates npm script (`npm run gates` and alias `npm run check:all`) chaining all mandatory project quality gates in sequence, simplifying pre-commit hooks and documentation (#39).
 - Hardening tests for shipped `templates/.luarc.json` (#36):

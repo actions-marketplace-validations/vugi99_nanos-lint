@@ -8,6 +8,7 @@ import { FALLBACK_LUALS_VERSION, sanitizeLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { isBinaryValid } from "./validation.js";
 
+/** Returns the base directory in the system cache where LuaLS versions and metadata are stored. */
 export function getBaseLuaLSCacheDir(): string {
   return path.join(systemPaths.cache, "luals");
 }
@@ -54,10 +55,12 @@ export function getIsoWeek(d: Date = new Date()): string {
   return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
 }
 
+/** Returns the path to the LuaLS metadata.json file within the specified cache directory. */
 export function getLuaLSMetadataPath(baseCacheDir: string = getBaseLuaLSCacheDir()): string {
   return path.join(baseCacheDir, LUALS_METADATA_FILENAME);
 }
 
+/** Reads and parses the LuaLS metadata.json file, purging corrupted or invalid files automatically. */
 export function readLuaLSMetadata(baseCacheDir: string = getBaseLuaLSCacheDir()): LuaLSMetadata | null {
   const metaPath = getLuaLSMetadataPath(baseCacheDir);
   if (!fs.existsSync(metaPath)) {
@@ -95,6 +98,7 @@ export function readLuaLSMetadata(baseCacheDir: string = getBaseLuaLSCacheDir())
   return null;
 }
 
+/** Writes metadata.json containing the latest checked version and timestamp. */
 export function writeLuaLSMetadata(
   metadata: LuaLSMetadata,
   baseCacheDir: string = getBaseLuaLSCacheDir()

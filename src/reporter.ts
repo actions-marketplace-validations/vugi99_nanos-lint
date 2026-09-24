@@ -25,6 +25,7 @@ export function shouldEnableColor(): boolean {
   return process.stdout ? Boolean(process.stdout.isTTY) : true;
 }
 
+/** Returns ANSI color escape code helpers or empty strings when colors are disabled. */
 export function getColors(useColor: boolean = shouldEnableColor()) {
   if (!useColor) {
     return {
@@ -54,6 +55,7 @@ export function getColors(useColor: boolean = shouldEnableColor()) {
   };
 }
 
+/** Formats a numeric diagnostic severity level into a colored badge. */
 export function formatSeverityBadge(
   severity: number,
   useColor: boolean = shouldEnableColor()
@@ -72,10 +74,12 @@ export function formatSeverityBadge(
   }
 }
 
+/** Formats a noun with its count and pluralizes if necessary. */
 export function pluralize(count: number, singular: string, plural: string = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+/** Formats the summary text detailing diagnostic counts and affected files. */
 export function formatProblemSummary(
   totalProblems: number,
   errors: number,
@@ -101,6 +105,7 @@ export function formatProblemSummary(
   return `Diagnosis complete: ${problemStr}${breakdown} found across ${fileStr}.`;
 }
 
+/** Formats check results into pretty human-readable terminal output. */
 export function formatPretty(
   result: CheckResult,
   cwd: string = process.cwd(),
@@ -187,6 +192,7 @@ export function formatPretty(
   return lines.join("\n");
 }
 
+/** Formats check diagnostics into GitHub Actions workflow annotation commands. */
 export function formatGitHubAnnotations(result: CheckResult, cwd: string = process.cwd()): string {
   const commands: string[] = [];
 
@@ -225,6 +231,7 @@ export function formatGitHubAnnotations(result: CheckResult, cwd: string = proce
   return commands.join("\n");
 }
 
+/** Formats check results according to the chosen format (pretty, json, github). */
 export function formatReport(
   result: CheckResult,
   format: "pretty" | "json" | "github" = "pretty",

@@ -224,11 +224,12 @@ npm run gates
 npm run check:all
 
 # Run individual quality gates
-npm run lint           # ESLint
-npm run lint:comments  # Comment density limit (<= 15%)
-npm run typecheck      # TypeScript typecheck
-npm run build          # Build distribution bundle
-npm run test:coverage  # Vitest unit + live LuaLS integration tests with coverage
+npm run lint            # ESLint
+npm run lint:comments   # Comment density limit (<= 15%)
+npm run lint:docstrings # Docstring coverage (>= 90% per file in src/)
+npm run typecheck       # TypeScript typecheck
+npm run build           # Build distribution bundle
+npm run test:coverage   # Vitest unit + live LuaLS integration tests with coverage
 
 # Offline: skip live LuaLS tests, perform no network access, disable coverage thresholds
 NANOS_LIVE_TESTS=0 npm run test:coverage

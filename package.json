@@ -41,10 +41,11 @@
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0",
     "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix --max-warnings=0",
     "lint:comments": "tsx scripts/lint-comments.ts",
+    "lint:docstrings": "tsx scripts/lint-docstrings.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "gates": "npm run lint && npm run lint:comments && npm run typecheck && npm run build && npm run test:coverage",
+    "gates": "npm run lint && npm run lint:comments && npm run lint:docstrings && npm run typecheck && npm run build && npm run test:coverage",
     "check:all": "npm run gates",
     "prepare": "node -e \"try { require('node:child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },

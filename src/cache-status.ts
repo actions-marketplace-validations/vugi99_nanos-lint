@@ -45,6 +45,7 @@ export interface CacheStatusReport {
   annotations: AnnotationsCacheStatus;
 }
 
+/** Collects detailed status and disk usage information for LuaLS and annotations caches. */
 export function getCacheStatus(baseCacheDir: string = systemPaths.cache): CacheStatusReport {
   const totalSize = getDirectorySize(baseCacheDir);
   const totalSizeFormatted = formatBytes(totalSize);
@@ -118,6 +119,7 @@ export function getCacheStatus(baseCacheDir: string = systemPaths.cache): CacheS
   };
 }
 
+/** Formats a cache status report into human-readable terminal output. */
 export function formatCacheStatusPretty(report: CacheStatusReport): string {
   const lines: string[] = [];
 

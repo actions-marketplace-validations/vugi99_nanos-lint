@@ -34,6 +34,7 @@ export { countCheckedFiles } from "./files.js";
 
 const execFileAsync = promisify(execFile);
 
+/** Determines if an error represents an offline network condition. */
 function isOfflineError(err: unknown): boolean {
   if (!err) return false;
   const msg = err instanceof Error ? err.message : String(err);
@@ -48,6 +49,7 @@ export interface ResolveLuaLSOptions {
   reuseExisting?: boolean;
 }
 
+/** Resolves the executable path of a LuaLS binary from env, bundle, cache, or network download. */
 export async function resolveLuaLSBinary(
   version: string = DEFAULT_LUALS_VERSION,
   options?: ResolveLuaLSOptions
@@ -312,6 +314,7 @@ export async function resolveLuaLSBinary(
   return downloadedBinary;
 }
 
+/** Executes the LuaLS diagnostics check on the target path using merged configurations. */
 export async function runLuaLSCheck(
   targetPath: string,
   configPath: string,
