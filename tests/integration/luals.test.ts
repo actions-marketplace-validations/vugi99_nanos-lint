@@ -10,11 +10,7 @@ import {
   loadConfigFile,
 } from "../../src/config.js";
 import { runLuaLSCheck } from "../../src/luals.js";
-import {
-  getSharedAnnotations,
-  getSharedLuaLSBinary,
-  isLiveTestsEnabled,
-} from "../helpers/live.js";
+import { getSharedAnnotations, getSharedLuaLSBinary, isLiveTestsEnabled } from "../helpers/live.js";
 
 describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
   const root = getPackageRoot();
@@ -134,7 +130,7 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
       const hasIssue20Warning = allDiags.some(
         (d) =>
           d.code === "param-type-mismatch" &&
-          d.message.includes("Cannot assign `string` to parameter `integer?`")
+          d.message.includes("Cannot assign `string` to parameter `integer?`"),
       );
       expect(hasIssue20Warning).toBe(true);
     } finally {
@@ -181,7 +177,7 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
       fs.writeFileSync(
         path.join(tempWorkspace, ".luarc.json"),
         "\uFEFF" + JSON.stringify(workspaceConfig),
-        "utf-8"
+        "utf-8",
       );
 
       const resolved = resolveWorkspaceConfig(tempWorkspace);
@@ -245,7 +241,9 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
 
   it("reports unused-local at Warning severity through default merged config and recovers from legacy syntax-error (Issue #22)", async () => {
     const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unused-local-"));
-    const tempDir = fs.realpathSync.native ? fs.realpathSync.native(rawTempDir) : fs.realpathSync(rawTempDir);
+    const tempDir = fs.realpathSync.native
+      ? fs.realpathSync.native(rawTempDir)
+      : fs.realpathSync(rawTempDir);
     try {
       const luaFile = path.join(tempDir, "unused.lua");
       fs.writeFileSync(luaFile, "local myUnused = 123\n", "utf-8");
@@ -281,7 +279,7 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
             },
           },
         }),
-        "utf-8"
+        "utf-8",
       );
 
       const resolvedLegacy = resolveWorkspaceConfig(tempDir);
@@ -335,7 +333,9 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
 
   it("actively enforces all default diagnostic promotions (unused-local, redefined-local, unused-vararg) at Warning severity (Issue #36)", async () => {
     const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-promotions-"));
-    const tempDir = fs.realpathSync.native ? fs.realpathSync.native(rawTempDir) : fs.realpathSync(rawTempDir);
+    const tempDir = fs.realpathSync.native
+      ? fs.realpathSync.native(rawTempDir)
+      : fs.realpathSync(rawTempDir);
     try {
       const fileUnusedLocal = path.join(tempDir, "unused_local.lua");
       fs.writeFileSync(fileUnusedLocal, "local myUnused = 42\n", "utf-8");
@@ -344,14 +344,14 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
       fs.writeFileSync(
         fileRedefinedLocal,
         "local x = 1\nlocal function foo()\n  local x = 2\n  return x\nend\nfoo()\nprint(x)\n",
-        "utf-8"
+        "utf-8",
       );
 
       const fileUnusedVararg = path.join(tempDir, "unused_vararg.lua");
       fs.writeFileSync(
         fileUnusedVararg,
         "local function bar(...)\n  return 100\nend\nbar(1, 2)\n",
-        "utf-8"
+        "utf-8",
       );
 
       const resolved = resolveWorkspaceConfig(tempDir);
@@ -405,4 +405,3 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
     }
   });
 });
-

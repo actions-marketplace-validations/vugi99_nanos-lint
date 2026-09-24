@@ -74,7 +74,7 @@ export function analyzeDocstringCoverage(filePath: string, content: string): Fil
     else if (ts.isVariableStatement(node)) {
       const isTopLevel = node.parent === sourceFile;
       const isExported = Boolean(
-        node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+        node.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword),
       );
 
       if (isTopLevel || isExported) {
@@ -83,7 +83,9 @@ export function analyzeDocstringCoverage(filePath: string, content: string): Fil
             decl.initializer &&
             (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
           ) {
-            const name = ts.isIdentifier(decl.name) ? decl.name.text : decl.name.getText(sourceFile);
+            const name = ts.isIdentifier(decl.name)
+              ? decl.name.text
+              : decl.name.getText(sourceFile);
             const hasDoc = hasJSDocComment(node, content) || hasJSDocComment(decl, content);
             functions.push({
               name,
@@ -159,7 +161,7 @@ export function runDocstringLint(): boolean {
       ? ` (Exception: >= ${stat.minAllowed.toFixed(1)}% - ${stat.exceptionReason})`
       : "";
     console.log(
-      `[${status}] ${stat.file.padEnd(30)} ${stat.coverage.toFixed(1).padStart(5)}% (${stat.documentedFunctions}/${stat.totalFunctions} functions)${exceptionText}`
+      `[${status}] ${stat.file.padEnd(30)} ${stat.coverage.toFixed(1).padStart(5)}% (${stat.documentedFunctions}/${stat.totalFunctions} functions)${exceptionText}`,
     );
     if (!stat.passed && stat.undocumented.length > 0) {
       for (const u of stat.undocumented) {

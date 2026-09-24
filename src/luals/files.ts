@@ -97,9 +97,7 @@ function isAbsolutePattern(normalized: string): boolean {
 
 /** Expands a LuaLS pattern to include basename and sub-directory variants for glob matching. */
 function expandIgnorePattern(pattern: string): string[] {
-  return pattern.includes("/")
-    ? [pattern, `${pattern}/**`]
-    : [`**/${pattern}`, `**/${pattern}/**`];
+  return pattern.includes("/") ? [pattern, `${pattern}/**`] : [`**/${pattern}`, `**/${pattern}/**`];
 }
 
 /** Normalizes and expands a list of LuaLS patterns into `glob` ignore patterns. */
@@ -109,13 +107,13 @@ function toIgnorePatterns(patterns: readonly unknown[]): string[] {
     const normalized = normalizePattern(raw);
     if (!normalized) {
       logger.debug(
-        `[luals] Skipping unusable glob pattern "${String(raw)}" while counting checked files.`
+        `[luals] Skipping unusable glob pattern "${String(raw)}" while counting checked files.`,
       );
       continue;
     }
     if (!isPatternWithinBudget(normalized)) {
       logger.warn(
-        `[luals] Skipping glob pattern "${raw}": it is too complex to match safely and would slow down file counting.`
+        `[luals] Skipping glob pattern "${raw}": it is too complex to match safely and would slow down file counting.`,
       );
       continue;
     }
@@ -160,15 +158,12 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
       }
     } catch (err) {
       logger.warn(
-        `[luals] Failed to parse config file for file counting at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+        `[luals] Failed to parse config file for file counting at ${configPath}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
-  const ignore = [
-    ...toIgnorePatterns(ignoreDirs),
-    ...toIgnorePatterns(excludePatterns),
-  ];
+  const ignore = [...toIgnorePatterns(ignoreDirs), ...toIgnorePatterns(excludePatterns)];
 
   try {
     const entries = globSync(LUA_FILE_PATTERN, {
@@ -182,7 +177,7 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
     return entries.filter((entry) => entry.isFile()).length;
   } catch (err) {
     logger.warn(
-      `[luals] Failed to walk ${absPath} while counting checked files: ${err instanceof Error ? err.message : String(err)}`
+      `[luals] Failed to walk ${absPath} while counting checked files: ${err instanceof Error ? err.message : String(err)}`,
     );
     return 0;
   }

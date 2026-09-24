@@ -6,7 +6,7 @@ export const DEFAULT_LUALS_VERSION = "latest";
 
 /** Characters accepted in a safe LuaLS version tag. */
 const SAFE_VERSION_CHARS: ReadonlyMap<string, string> = new Map(
-  [..."0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._-"].map((ch) => [ch, ch])
+  [..."0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._-"].map((ch) => [ch, ch]),
 );
 
 const MAX_VERSION_LENGTH = 64;
@@ -60,19 +60,20 @@ export async function fetchLatestLuaLSVersionFromGitHub(): Promise<string | null
       {
         headers,
         signal: AbortSignal.timeout(5000),
-      }
+      },
     );
     if (res.ok) {
       const data = (await res.json()) as { tag_name?: string };
       // The response body is untrusted input: only use it when it is a valid tag.
-      const version = typeof data.tag_name === "string" ? sanitizeLuaLSVersion(data.tag_name) : null;
+      const version =
+        typeof data.tag_name === "string" ? sanitizeLuaLSVersion(data.tag_name) : null;
       if (version) {
         return version;
       }
     }
   } catch (err) {
     logger.debug(
-      `[luals] Failed to resolve latest LuaLS version from GitHub API: ${err instanceof Error ? err.message : String(err)}`
+      `[luals] Failed to resolve latest LuaLS version from GitHub API: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
   return null;
@@ -101,9 +102,8 @@ export async function resolveLuaLSVersion(version?: string): Promise<string> {
     throw new LuaLSError(
       `Invalid LuaLS version: "${version}". Expected a release tag such as "3.19.1", or "latest".`,
       "ERR_LUALS_INVALID_VERSION",
-      "Provide a valid release tag like '3.19.1' or use 'latest'."
+      "Provide a valid release tag like '3.19.1' or use 'latest'.",
     );
   }
   return sanitized;
 }
-

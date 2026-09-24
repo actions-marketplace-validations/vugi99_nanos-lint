@@ -74,25 +74,28 @@ npm run gates
 Alternatively, you can run the individual quality gates:
 
 ```bash
-# 1. Lint the codebase (must have 0 errors and 0 warnings)
+# 1. Check code formatting with Prettier (auto-fix via `npm run format:fix`)
+npm run format:check
+
+# 2. Lint the codebase (must have 0 errors and 0 warnings)
 npm run lint
 
-# 2. Check architecture and dependency boundaries via dependency-cruiser
+# 3. Check architecture and dependency boundaries via dependency-cruiser
 npm run lint:deps
 
-# 3. Check comment density (<= 15% limit on files >= 50 lines)
+# 4. Check comment density (<= 15% limit on files >= 50 lines)
 npm run lint:comments
 
-# 4. Check docstring coverage (>= 90% function coverage per file in src/)
+# 5. Check docstring coverage (>= 90% function coverage per file in src/)
 npm run lint:docstrings
 
-# 5. Type-check TypeScript (must produce 0 type errors)
+# 6. Type-check TypeScript (must produce 0 type errors)
 npm run typecheck
 
-# 6. Build distribution bundle
+# 7. Build distribution bundle
 npm run build
 
-# 7. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
+# 8. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
 npm run test:coverage
 ```
 
@@ -119,11 +122,14 @@ Otherwise the live fixtures must resolve: failures abort the run instead of sile
 ## 5. Releases & Changelog Maintenance
 
 ### Continuous Maintenance (After Every Change)
+
 - **Always update `CHANGELOG.md` after making changes**: Any modification to the codebase (features, bug fixes, performance improvements, documentation, CI workflows, or internal tooling) must be documented in `CHANGELOG.md` under the `## [Unreleased]` section before completing your work.
 - **Standardized Categories**: Group changes strictly under Keep a Changelog 1.1.0 categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or `Security`.
 
 ### Release Preparation & Publishing
+
 Whenever preparing or publishing a new tagged release or cutting a new version:
+
 - **Review and verify `CHANGELOG.md`**: Check that all unreleased changes since the previous release are accurately recorded under `## [Unreleased]`.
 - **Promote Unreleased to Version Header**: Move all unreleased changes under a new version heading strictly adhering to [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (e.g. `## [X.Y.Z] - YYYY-MM-DD`), and restore an empty `## [Unreleased]` section above it.
 - **Pre-Release Requirement**: Record and commit the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
@@ -149,6 +155,7 @@ Public issues expose vulnerabilities before a patch is available. Instead, all s
 ### Requirements for Security Advisories
 
 The GitHub Security Advisories API requires:
+
 - `summary`: A short, descriptive summary.
 - `description`: Detailed description including impact, reproduction steps, and suggested fix.
 - `severity`: One of `"critical"`, `"high"`, `"medium"`, `"low"`.
@@ -178,6 +185,7 @@ EOF
 ```
 
 On Windows PowerShell:
+
 ```powershell
 @'
 {
@@ -210,6 +218,3 @@ gh api repos/:owner/:repo/security-advisories --jq '.[] | {ghsa_id, summary, sta
 ```bash
 gh api repos/:owner/:repo/security-advisories/GHSA-xxxx-xxxx-xxxx
 ```
-
-
-

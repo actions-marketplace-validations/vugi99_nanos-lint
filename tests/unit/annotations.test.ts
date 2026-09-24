@@ -93,14 +93,17 @@ describe("annotations management and date-based caching", () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          text: () => Promise.resolve("-- nanos world annotations mock\nreturn {}\n" + " ".repeat(1500)),
+          text: () =>
+            Promise.resolve("-- nanos world annotations mock\nreturn {}\n" + " ".repeat(1500)),
         } as unknown as Response);
       }
       return Promise.reject(new Error("Unexpected URL"));
     });
 
     try {
-      const resultPath = await downloadAndCacheAnnotations("commit-111", tempBaseDir, { quiet: true });
+      const resultPath = await downloadAndCacheAnnotations("commit-111", tempBaseDir, {
+        quiet: true,
+      });
       expect(fs.existsSync(resultPath)).toBe(true);
       expect(fs.readFileSync(resultPath, "utf-8")).toContain("nanos world annotations mock");
 
@@ -127,7 +130,7 @@ describe("annotations management and date-based caching", () => {
 
     try {
       await expect(
-        downloadAndCacheAnnotations("new-commit", tempBaseDir, { quiet: true })
+        downloadAndCacheAnnotations("new-commit", tempBaseDir, { quiet: true }),
       ).rejects.toThrow(/Network connection dropped/);
 
       // Verify original files were restored
@@ -147,7 +150,7 @@ describe("annotations management and date-based caching", () => {
       expect(resolved).toBe(path.resolve(customFile));
 
       await expect(
-        resolveAnnotations({ customPath: path.join(tempBaseDir, "non-existent.lua") })
+        resolveAnnotations({ customPath: path.join(tempBaseDir, "non-existent.lua") }),
       ).rejects.toThrow(/Custom annotations file not found/);
     });
 
@@ -160,7 +163,9 @@ describe("annotations management and date-based caching", () => {
       expect(resolved).toBe(path.resolve(envCustomFile));
 
       process.env.NANOS_ANNOTATIONS_PATH = path.join(tempBaseDir, "missing-env.lua");
-      await expect(resolveAnnotations()).rejects.toThrow(/Annotations file specified in environment not found/);
+      await expect(resolveAnnotations()).rejects.toThrow(
+        /Annotations file specified in environment not found/,
+      );
     });
 
     it("returns cached annotations immediately if checked today without making network calls", async () => {
@@ -200,7 +205,9 @@ describe("annotations management and date-based caching", () => {
       expect(resolved).toBe(path.resolve(envCustomFile));
 
       process.env.NANOS_ANNOTATIONS = path.join(tempBaseDir, "missing-alias.lua");
-      await expect(resolveAnnotations()).rejects.toThrow(/Annotations file specified in environment not found/);
+      await expect(resolveAnnotations()).rejects.toThrow(
+        /Annotations file specified in environment not found/,
+      );
     });
 
     it("reports filesystem cause rather than network error on EACCES/ENOSPC", async () => {
@@ -221,13 +228,13 @@ describe("annotations management and date-based caching", () => {
       });
 
       try {
-        await expect(
-          resolveAnnotations({ cacheDir: mockDir })
-        ).rejects.toThrow(/filesystem error|permission denied|EACCES/i);
+        await expect(resolveAnnotations({ cacheDir: mockDir })).rejects.toThrow(
+          /filesystem error|permission denied|EACCES/i,
+        );
 
-        await expect(
-          resolveAnnotations({ cacheDir: mockDir })
-        ).rejects.not.toThrow(/check your network connection/i);
+        await expect(resolveAnnotations({ cacheDir: mockDir })).rejects.not.toThrow(
+          /check your network connection/i,
+        );
       } finally {
         mkdirSpy.mockRestore();
         globalThis.fetch = originalFetch;
@@ -307,7 +314,9 @@ describe("annotations management and date-based caching", () => {
       });
 
       try {
-        const file = await downloadAndCacheAnnotations("abcdef1234567890", tempBaseDir, { quiet: false });
+        const file = await downloadAndCacheAnnotations("abcdef1234567890", tempBaseDir, {
+          quiet: false,
+        });
         expect(fs.existsSync(file)).toBe(true);
       } finally {
         globalThis.fetch = originalFetch;
@@ -339,14 +348,16 @@ describe("annotations management and date-based caching", () => {
       const originalFetch = globalThis.fetch;
 
       let capturedHeaders: Record<string, string> | undefined;
-      globalThis.fetch = vi.fn().mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
-        capturedHeaders = init?.headers as Record<string, string>;
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ sha: "0123456789abcdef0123456789abcdef01234567" }),
-        } as unknown as Response);
-      });
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
+          capturedHeaders = init?.headers as Record<string, string>;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ sha: "0123456789abcdef0123456789abcdef01234567" }),
+          } as unknown as Response);
+        });
 
       try {
         const commitId = await fetchLatestCommitId();
@@ -372,7 +383,9 @@ describe("annotations management and date-based caching", () => {
         statusText: "Not Found",
       } as unknown as Response);
 
-      await expect(fetchRawAnnotationsContent()).rejects.toThrow(/Failed to download annotations\.lua: 404 Not Found/);
+      await expect(fetchRawAnnotationsContent()).rejects.toThrow(
+        /Failed to download annotations\.lua: 404 Not Found/,
+      );
 
       // Truncated payload (< 1000 characters)
       globalThis.fetch = vi.fn().mockResolvedValueOnce({
@@ -381,7 +394,9 @@ describe("annotations management and date-based caching", () => {
         text: () => Promise.resolve("-- short content"),
       } as unknown as Response);
 
-      await expect(fetchRawAnnotationsContent()).rejects.toThrow(/Downloaded annotations\.lua appears truncated or invalid/);
+      await expect(fetchRawAnnotationsContent()).rejects.toThrow(
+        /Downloaded annotations\.lua appears truncated or invalid/,
+      );
 
       globalThis.fetch = originalFetch;
     });
@@ -426,7 +441,7 @@ describe("annotations management and date-based caching", () => {
 
       try {
         await expect(resolveAnnotations({ cacheDir: coldCacheDir })).rejects.toThrow(
-          /Failed to resolve nanos world API annotations\. Please check your network connection/
+          /Failed to resolve nanos world API annotations\. Please check your network connection/,
         );
       } finally {
         globalThis.fetch = originalFetch;
@@ -445,7 +460,7 @@ describe("annotations management and date-based caching", () => {
       expect(resolved).toBe(path.resolve(customFile));
 
       await expect(resolveAnnotations({ customPath: "/nonexistent/custom.lua" })).rejects.toThrow(
-        /Custom annotations file not found/
+        /Custom annotations file not found/,
       );
     });
 
@@ -453,19 +468,19 @@ describe("annotations management and date-based caching", () => {
       const dirPath = path.join(tempBaseDir, "custom-dir");
       fs.mkdirSync(dirPath);
       await expect(resolveAnnotations({ customPath: dirPath })).rejects.toThrow(
-        /Custom annotations path is not a file/
+        /Custom annotations path is not a file/,
       );
 
       const emptyFile = path.join(tempBaseDir, "empty-custom.lua");
       fs.writeFileSync(emptyFile, "");
       await expect(resolveAnnotations({ customPath: emptyFile })).rejects.toThrow(
-        /Custom annotations file is empty/
+        /Custom annotations file is empty/,
       );
 
       const binFile = path.join(tempBaseDir, "binary-custom.lua");
       fs.writeFileSync(binFile, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01]));
       await expect(resolveAnnotations({ customPath: binFile })).rejects.toThrow(
-        /appears to be a binary file/
+        /appears to be a binary file/,
       );
     });
 
@@ -501,7 +516,7 @@ describe("annotations management and date-based caching", () => {
 
       process.env.NANOS_ANNOTATIONS = "/nonexistent/env-annotations.lua";
       await expect(resolveAnnotations()).rejects.toThrow(
-        /Annotations file specified in environment not found/
+        /Annotations file specified in environment not found/,
       );
     });
 
@@ -510,22 +525,20 @@ describe("annotations management and date-based caching", () => {
       fs.mkdirSync(dirPath);
       process.env.NANOS_ANNOTATIONS_PATH = dirPath;
       await expect(resolveAnnotations()).rejects.toThrow(
-        /Annotations path specified in environment is not a file/
+        /Annotations path specified in environment is not a file/,
       );
 
       const emptyFile = path.join(tempBaseDir, "env-empty.lua");
       fs.writeFileSync(emptyFile, "");
       process.env.NANOS_ANNOTATIONS_PATH = emptyFile;
       await expect(resolveAnnotations()).rejects.toThrow(
-        /Annotations file specified in environment is empty/
+        /Annotations file specified in environment is empty/,
       );
 
       const binFile = path.join(tempBaseDir, "env-bin.lua");
       fs.writeFileSync(binFile, Buffer.from([0x00, 0x01, 0x02]));
       process.env.NANOS_ANNOTATIONS_PATH = binFile;
-      await expect(resolveAnnotations()).rejects.toThrow(
-        /appears to be a binary file/
-      );
+      await expect(resolveAnnotations()).rejects.toThrow(/appears to be a binary file/);
     });
 
     it("downloads and updates annotations when upstream commit changes", async () => {
@@ -571,7 +584,7 @@ describe("annotations management and date-based caching", () => {
     it("pins raw annotations download URL to resolved commit SHA (Issue #24)", async () => {
       expect(MIN_ANNOTATIONS_SIZE_BYTES).toBe(1000);
       expect(getRawAnnotationsUrl("abcdef0123456789")).toBe(
-        "https://raw.githubusercontent.com/nanos-world/vscode-extension/abcdef0123456789/annotations.lua"
+        "https://raw.githubusercontent.com/nanos-world/vscode-extension/abcdef0123456789/annotations.lua",
       );
       expect(getRawAnnotationsUrl("unknown")).toBe(RAW_ANNOTATIONS_URL);
       expect(getRawAnnotationsUrl(undefined)).toBe(RAW_ANNOTATIONS_URL);
@@ -737,4 +750,3 @@ describe("annotations management and date-based caching", () => {
     });
   });
 });
-

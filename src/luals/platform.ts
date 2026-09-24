@@ -26,7 +26,7 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
     throw new LuaLSError(
       `Unsupported Windows architecture: ${arch}. Supported: x64`,
       "ERR_LUALS_UNSUPPORTED_ARCH",
-      "LuaLS provides pre-built binaries for Windows x64. Use a compatible system or set LUALS_BIN to a custom binary."
+      "LuaLS provides pre-built binaries for Windows x64. Use a compatible system or set LUALS_BIN to a custom binary.",
     );
   }
 
@@ -50,7 +50,7 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
     throw new LuaLSError(
       `Unsupported Linux architecture: ${arch}. Supported: x64, arm64`,
       "ERR_LUALS_UNSUPPORTED_ARCH",
-      "LuaLS provides pre-built binaries for Linux x64 and arm64. Use LUALS_BIN to specify a custom build."
+      "LuaLS provides pre-built binaries for Linux x64 and arm64. Use LUALS_BIN to specify a custom build.",
     );
   }
 
@@ -67,7 +67,6 @@ export function getPlatformInfo(version: string = FALLBACK_LUALS_VERSION): Platf
   throw new LuaLSError(
     `Unsupported platform: ${platform}`,
     "ERR_LUALS_UNSUPPORTED_PLATFORM",
-    "LuaLS provides pre-built binaries for Windows, Linux, and macOS. Use LUALS_BIN to specify a custom build."
+    "LuaLS provides pre-built binaries for Windows, Linux, and macOS. Use LUALS_BIN to specify a custom build.",
   );
 }
-

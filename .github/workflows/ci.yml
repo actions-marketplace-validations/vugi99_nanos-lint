@@ -6,12 +6,12 @@ concurrency:
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master, main]
     tags:
-      - 'v*.*.*'
-      - '[0-9]+.[0-9]+.[0-9]+'
+      - "v*.*.*"
+      - "[0-9]+.[0-9]+.[0-9]+"
   pull_request:
-    branches: [ master, main, dev ]
+    branches: [master, main, dev]
 
 # Least privilege: this workflow only needs to read the repository. Declaring it
 # explicitly keeps the token read-only even when the repository or organization
@@ -27,8 +27,8 @@ jobs:
       fail-fast: false
       matrix:
         # No 1-vCPU "ubuntu-slim": its 15-minute limit would block releases.
-        os: [ ubuntu-latest, windows-latest, macos-latest, macos-26-intel, ubuntu-26.04-arm ]
-        node: [ 24, 26 ]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-26-intel, ubuntu-26.04-arm]
+        node: [24, 26]
     # Requires the live tests (one shared LuaLS download per run).
     env:
       NANOS_LIVE_TESTS: "1"
@@ -41,7 +41,7 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-          cache: 'npm'
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci

@@ -61,7 +61,7 @@ describe("config module", () => {
       for (const key of severityKeys) {
         expect(
           VALID_LUALS_DIAGNOSTIC_CODES.has(key),
-          `diagnostics.severity key "${key}" in templates/.luarc.json must belong to VALID_LUALS_DIAGNOSTIC_CODES`
+          `diagnostics.severity key "${key}" in templates/.luarc.json must belong to VALID_LUALS_DIAGNOSTIC_CODES`,
         ).toBe(true);
       }
 
@@ -71,7 +71,7 @@ describe("config module", () => {
       for (const key of neededFileStatusKeys) {
         expect(
           VALID_LUALS_DIAGNOSTIC_CODES.has(key),
-          `diagnostics.neededFileStatus key "${key}" in templates/.luarc.json must belong to VALID_LUALS_DIAGNOSTIC_CODES`
+          `diagnostics.neededFileStatus key "${key}" in templates/.luarc.json must belong to VALID_LUALS_DIAGNOSTIC_CODES`,
         ).toBe(true);
       }
     });
@@ -86,10 +86,10 @@ describe("config module", () => {
         expect(warnSpy).not.toHaveBeenCalled();
         expect(merged.diagnostics?.severity).toBeDefined();
         expect(Object.keys(merged.diagnostics?.severity ?? {}).length).toBe(
-          Object.keys(template.diagnostics?.severity ?? {}).length
+          Object.keys(template.diagnostics?.severity ?? {}).length,
         );
         expect(Object.keys(merged.diagnostics?.neededFileStatus ?? {}).length).toBe(
-          Object.keys(template.diagnostics?.neededFileStatus ?? {}).length
+          Object.keys(template.diagnostics?.neededFileStatus ?? {}).length,
         );
       } finally {
         warnSpy.mockRestore();
@@ -334,7 +334,8 @@ describe("config module", () => {
       try {
         fs.writeFileSync(path.join(tempDir, "main.lua"), "-- tool entry");
         fs.mkdirSync(path.join(tempDir, "bin"), { recursive: true });
-        const binName = process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
+        const binName =
+          process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
         fs.writeFileSync(path.join(tempDir, "bin", binName), "fake binary");
 
         const dummyAnnotations = path.join(tempDir, "annotations.lua");
@@ -345,7 +346,9 @@ describe("config module", () => {
         });
 
         expect(resolved.isTemp).toBe(true);
-        const writtenConfig = JSON.parse(fs.readFileSync(resolved.configPath, "utf-8")) as LuaRCConfig;
+        const writtenConfig = JSON.parse(
+          fs.readFileSync(resolved.configPath, "utf-8"),
+        ) as LuaRCConfig;
         expect(writtenConfig.files?.exclude).toContain("main.lua");
         expect(writtenConfig.files?.exclude).toContain("**/main.lua");
         expect(writtenConfig.files?.exclude).toContain("debugger.lua");
@@ -379,7 +382,9 @@ describe("config module", () => {
           ignore: ["packages/my-pkg/subfolder/**", "other/**"],
         });
 
-        const writtenConfig = JSON.parse(fs.readFileSync(resolved.configPath, "utf-8")) as LuaRCConfig;
+        const writtenConfig = JSON.parse(
+          fs.readFileSync(resolved.configPath, "utf-8"),
+        ) as LuaRCConfig;
         expect(writtenConfig.files?.exclude).toContain("packages/my-pkg/subfolder/**");
         expect(writtenConfig.files?.exclude).toContain("subfolder/**");
         expect(writtenConfig.files?.exclude).toContain("other/**");
@@ -422,4 +427,3 @@ describe("config module", () => {
     });
   });
 });
-

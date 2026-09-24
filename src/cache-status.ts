@@ -1,17 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import { systemPaths, getDirectorySize, formatBytes } from "./paths.js";
-import {
-  readLuaLSMetadata,
-  listCachedLuaLSVersionDirs,
-  getCacheDir,
-} from "./luals/cache.js";
+import { readLuaLSMetadata, listCachedLuaLSVersionDirs, getCacheDir } from "./luals/cache.js";
 import { getPlatformInfo } from "./luals/platform.js";
 import { isBinaryValid } from "./luals/validation.js";
-import {
-  readAnnotationsMetadata,
-  isAnnotationsValid,
-} from "./annotations.js";
+import { readAnnotationsMetadata, isAnnotationsValid } from "./annotations.js";
 
 export interface CachedLuaLSVersionInfo {
   version: string;

@@ -38,6 +38,8 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
+    "format:check": "prettier --check .",
+    "format:fix": "prettier --write .",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings=0",
     "lint:fix": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --fix --max-warnings=0",
     "lint:deps": "depcruise --config .dependency-cruiser.cjs src tests",
@@ -46,7 +48,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "gates": "npm run lint && npm run lint:deps && npm run lint:comments && npm run lint:docstrings && npm run typecheck && npm run build && npm run test:coverage",
+    "gates": "npm run format:check && npm run lint && npm run lint:deps && npm run lint:comments && npm run lint:docstrings && npm run typecheck && npm run build && npm run test:coverage",
     "check:all": "npm run gates",
     "prepare": "node -e \"try { require('node:child_process').execSync('git config core.hooksPath .githooks'); } catch {}\""
   },
@@ -60,8 +62,10 @@
     "dependency-cruiser": "^18.4.0",
     "env-paths": "^4.0.0",
     "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
     "glob": "^13.0.6",
     "jsonc-parser": "^3.3.1",
+    "prettier": "^3.9.9",
     "tsdown": "^0.23.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",

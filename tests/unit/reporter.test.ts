@@ -82,10 +82,10 @@ describe("reporter module", () => {
   it("formats GitHub Actions annotations correctly", () => {
     const annotations = formatGitHubAnnotations(mockFailingResult, mockCwd);
     expect(annotations).toContain(
-      "::warning file=scripts/test.lua,line=11,col=5,endLine=11,endColumn=13,title=nanos-lint::Cannot assign `string` to parameter `number`. (param-type-mismatch)"
+      "::warning file=scripts/test.lua,line=11,col=5,endLine=11,endColumn=13,title=nanos-lint::Cannot assign `string` to parameter `number`. (param-type-mismatch)",
     );
     expect(annotations).toContain(
-      "::error file=scripts/test.lua,line=21,col=1,endLine=21,endColumn=6,title=nanos-lint::unexpected symbol near '=' (syntax-error)"
+      "::error file=scripts/test.lua,line=21,col=1,endLine=21,endColumn=6,title=nanos-lint::unexpected symbol near '=' (syntax-error)",
     );
   });
 
@@ -104,7 +104,7 @@ describe("reporter module", () => {
 
   it("converts both Unix and Windows file URIs correctly", () => {
     expect(fileUriToPath("file:///home/runner/work/nanos-lint/test.lua")).toBe(
-      "/home/runner/work/nanos-lint/test.lua"
+      "/home/runner/work/nanos-lint/test.lua",
     );
     expect(fileUriToPath("file:///C:/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
     expect(fileUriToPath("file:///c%3A/Users/alexa/test.lua")).toBe("C:/Users/alexa/test.lua");
@@ -176,7 +176,9 @@ describe("reporter module", () => {
   describe("formatProblemSummary helper", () => {
     it("formats summary with errors and warnings breakdown", () => {
       const summary = formatProblemSummary(6, 2, 4, 5);
-      expect(summary).toBe("Diagnosis complete: 6 problems (2 errors, 4 warnings) found across 5 files.");
+      expect(summary).toBe(
+        "Diagnosis complete: 6 problems (2 errors, 4 warnings) found across 5 files.",
+      );
       expect(summary).not.toContain("(s)");
     });
 
@@ -197,7 +199,9 @@ describe("reporter module", () => {
 
     it("includes other diagnostics when present", () => {
       const summary = formatProblemSummary(3, 1, 1, 2);
-      expect(summary).toBe("Diagnosis complete: 3 problems (1 error, 1 warning, 1 other) found across 2 files.");
+      expect(summary).toBe(
+        "Diagnosis complete: 3 problems (1 error, 1 warning, 1 other) found across 2 files.",
+      );
     });
   });
 
@@ -247,7 +251,9 @@ describe("reporter module", () => {
         };
 
         const pretty = formatPretty(result, tempDir, false);
-        expect(pretty).toContain("sample.lua:3:7 [Error] Cannot add number and string (type-error)");
+        expect(pretty).toContain(
+          "sample.lua:3:7 [Error] Cannot add number and string (type-error)",
+        );
         expect(pretty).toContain("    print(x + y)");
         expect(pretty).toContain("          ^^^^^");
         expect(pretty).toContain("sample.lua:1:1 [Warning] Multiline error");
@@ -265,9 +271,24 @@ describe("reporter module", () => {
         totalFiles: 1,
         diagnostics: {
           "file:///test.lua": [
-            { code: "err1", message: "e1", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
-            { code: "warn1", message: "w1", range: { start: { line: 1, character: 0 }, end: { line: 1, character: 1 } }, severity: 2 },
-            { code: "info1", message: "i1", range: { start: { line: 2, character: 0 }, end: { line: 2, character: 1 } }, severity: 3 },
+            {
+              code: "err1",
+              message: "e1",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              severity: 1,
+            },
+            {
+              code: "warn1",
+              message: "w1",
+              range: { start: { line: 1, character: 0 }, end: { line: 1, character: 1 } },
+              severity: 2,
+            },
+            {
+              code: "info1",
+              message: "i1",
+              range: { start: { line: 2, character: 0 }, end: { line: 2, character: 1 } },
+              severity: 3,
+            },
           ],
         },
       };
@@ -301,8 +322,12 @@ describe("reporter module", () => {
       };
 
       const annotations = formatGitHubAnnotations(result, "/workspace");
-      expect(annotations).toContain("::notice file=scripts/test%252Cfile.lua,line=6,col=3,endLine=6,endColumn=9,title=nanos-lint::Special: 100%25 discount%0D%0Anext line");
-      expect(annotations).toContain("::notice file=scripts/test%252Cfile.lua,line=1,col=1,endLine=1,endColumn=2,title=nanos-lint::Hint message without code");
+      expect(annotations).toContain(
+        "::notice file=scripts/test%252Cfile.lua,line=6,col=3,endLine=6,endColumn=9,title=nanos-lint::Special: 100%25 discount%0D%0Anext line",
+      );
+      expect(annotations).toContain(
+        "::notice file=scripts/test%252Cfile.lua,line=1,col=1,endLine=1,endColumn=2,title=nanos-lint::Hint message without code",
+      );
     });
 
     it("formats report with github and default formats", () => {
@@ -315,7 +340,12 @@ describe("reporter module", () => {
       expect(githubFail).toContain("Diagnosis complete:");
 
       // default format
-      const defaultReport = formatReport(mockPassingResult, undefined as unknown as "pretty", mockCwd, false);
+      const defaultReport = formatReport(
+        mockPassingResult,
+        undefined as unknown as "pretty",
+        mockCwd,
+        false,
+      );
       expect(defaultReport).toContain("Diagnosis completed, no problems found");
     });
 
@@ -351,5 +381,3 @@ describe("reporter module", () => {
     });
   });
 });
-
-

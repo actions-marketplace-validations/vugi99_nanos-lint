@@ -59,7 +59,7 @@ function checkEscapedMember(member: string): void {
     throw new LuaLSError(
       `Archive member path escapes extraction directory: ${member}`,
       "ERR_LUALS_EXTRACT",
-      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
     );
   }
 }
@@ -70,14 +70,14 @@ function checkArchiveLimits(count: number, size: number): void {
     throw new LuaLSError(
       `Archive member count (${count}) exceeds maximum limit (${MAX_ARCHIVE_MEMBER_COUNT})`,
       "ERR_LUALS_EXTRACT",
-      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
     );
   }
   if (size > MAX_DECOMPRESSED_SIZE_BYTES) {
     throw new LuaLSError(
       `Archive declared decompressed size (${size} bytes) exceeds maximum limit (${MAX_DECOMPRESSED_SIZE_BYTES} bytes)`,
       "ERR_LUALS_EXTRACT",
-      "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space."
+      "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
     );
   }
 }
@@ -95,7 +95,7 @@ export function getTarBinary(): string {
 
 /** Pre-inspects archive members using tar listing to enforce extraction safety constraints (#31). */
 export async function validateArchiveMembers(
-  archivePath: string
+  archivePath: string,
 ): Promise<{ memberCount: number; totalDeclaredSize: number }> {
   let memberCount = 0;
   let totalDeclaredSize = 0;
@@ -123,7 +123,7 @@ export async function validateArchiveMembers(
         throw new LuaLSError(
           "Archive member is a symbolic or hard link. Refusing to extract archive-planted links.",
           "ERR_LUALS_EXTRACT",
-          "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity."
+          "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
         );
       }
       totalDeclaredSize += parseTarTvSize(line);
@@ -140,7 +140,11 @@ export async function validateArchiveMembers(
           '  foreach ($e in $z.Entries) { [Console]::WriteLine("{0}`t{1}", $e.Length, $e.FullName) }',
           "} finally { $z.Dispose() }",
         ].join("; ");
-        const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-Command", psCommand]);
+        const { stdout } = await execFileAsync("powershell.exe", [
+          "-NoProfile",
+          "-Command",
+          psCommand,
+        ]);
         memberCount = 0;
         totalDeclaredSize = 0;
         for (const rawLine of stdout.split(/\r?\n/)) {
@@ -163,7 +167,7 @@ export async function validateArchiveMembers(
           `Failed to inspect release archive before extraction: ${psErr instanceof Error ? psErr.message : String(psErr)}`,
           "ERR_LUALS_EXTRACT",
           "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
-          { cause: psErr }
+          { cause: psErr },
         );
       }
     }
@@ -171,7 +175,7 @@ export async function validateArchiveMembers(
       `Failed to inspect release archive before extraction: ${err instanceof Error ? err.message : String(err)}`,
       "ERR_LUALS_EXTRACT",
       "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
-      { cause: err }
+      { cause: err },
     );
   }
 
@@ -201,7 +205,7 @@ function reportsLuaLSVersion(binaryPath: string): boolean {
     return /^\d+\.\d+\.\d+/.test(output.trim());
   } catch (err) {
     logger.debug(
-      `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`
+      `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return false;
   }
@@ -223,7 +227,7 @@ export function isBinaryValid(binaryPath: string): boolean {
     return reportsLuaLSVersion(binaryPath);
   } catch (err) {
     logger.debug(
-      `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`
+      `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return false;
   }
@@ -241,7 +245,7 @@ export function isBinaryRunnable(binaryPath: string): boolean {
     }
   } catch (err) {
     logger.debug(
-      `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`
+      `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return false;
   }
@@ -271,7 +275,7 @@ export function assertValidLuaLSBinary(binaryPath: string, source: string): stri
       `${source} points to '${binaryPath}', which does not exist or cannot be read: ${err instanceof Error ? err.message : String(err)}`,
       "ERR_LUALS_BIN_INVALID",
       `Set ${source} to the full path of a lua-language-server executable, or leave it unset so nanos-lint resolves LuaLS automatically.`,
-      { cause: err }
+      { cause: err },
     );
   }
 
@@ -279,7 +283,7 @@ export function assertValidLuaLSBinary(binaryPath: string, source: string): stri
     throw new LuaLSError(
       `${source} points to '${binaryPath}', which is not a regular file (a directory or special file was found).`,
       "ERR_LUALS_BIN_INVALID",
-      `Point ${source} at the lua-language-server executable itself, or leave it unset so nanos-lint resolves LuaLS automatically.`
+      `Point ${source} at the lua-language-server executable itself, or leave it unset so nanos-lint resolves LuaLS automatically.`,
     );
   }
 
@@ -287,10 +291,9 @@ export function assertValidLuaLSBinary(binaryPath: string, source: string): stri
     throw new LuaLSError(
       `${source} points to '${binaryPath}', which is not a runnable LuaLS binary (running it with '--version' failed or printed no version).`,
       "ERR_LUALS_BIN_INVALID",
-      `Verify ${source} points at a working lua-language-server executable or wrapper script, or leave it unset so nanos-lint resolves LuaLS automatically.`
+      `Verify ${source} points at a working lua-language-server executable or wrapper script, or leave it unset so nanos-lint resolves LuaLS automatically.`,
     );
   }
 
   return binaryPath;
 }
-

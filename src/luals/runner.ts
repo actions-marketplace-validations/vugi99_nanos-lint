@@ -52,7 +52,7 @@ export interface ResolveLuaLSOptions {
 /** Resolves the executable path of a LuaLS binary from env, bundle, cache, or network download. */
 export async function resolveLuaLSBinary(
   version: string = DEFAULT_LUALS_VERSION,
-  options?: ResolveLuaLSOptions
+  options?: ResolveLuaLSOptions,
 ): Promise<string> {
   // 1. Environment variable override
   if (process.env.LUALS_BIN) {
@@ -104,21 +104,23 @@ export async function resolveLuaLSBinary(
           }
         } catch (err) {
           logger.debug(
-            `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`
+            `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }
       if (!isValid) {
         wasCorrupted = true;
         if (!options?.quiet) {
-          logger.warn(`[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`);
+          logger.warn(
+            `[luals] Cached LuaLS binary at ${cachedPath} is corrupted or incomplete. Repairing...`,
+          );
         }
       }
       try {
         fs.rmSync(cachedDir, { recursive: true, force: true });
       } catch (err) {
         logger.warn(
-          `[luals] Failed to remove corrupted cache directory ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
+          `[luals] Failed to remove corrupted cache directory ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -140,7 +142,7 @@ export async function resolveLuaLSBinary(
               }
             } catch (err) {
               logger.debug(
-                `[luals] Failed to read legacy complete marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`
+                `[luals] Failed to read legacy complete marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`,
               );
             }
           } else if (isBinaryValid(legacyPath)) {
@@ -156,7 +158,7 @@ export async function resolveLuaLSBinary(
               }
             } catch (err) {
               logger.warn(
-                `[luals] Failed to migrate legacy cache from ${legacyDir} to ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`
+                `[luals] Failed to migrate legacy cache from ${legacyDir} to ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`,
               );
             }
             return legacyPath;
@@ -176,7 +178,7 @@ export async function resolveLuaLSBinary(
         }
       } catch (err) {
         logger.debug(
-          `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`
+          `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -186,17 +188,21 @@ export async function resolveLuaLSBinary(
       return await downloadAndExtractLuaLS(
         resolvedVersion,
         getCacheDir(resolvedVersion, baseCacheDir),
-        options
+        options,
       );
     } catch (err) {
       if (wasCorrupted) {
         const isOffline = isOfflineError(err);
-        const reason = isOffline ? "while offline" : (err instanceof Error ? err.message : String(err));
+        const reason = isOffline
+          ? "while offline"
+          : err instanceof Error
+            ? err.message
+            : String(err);
         throw new LuaLSError(
           `Cached LuaLS binary at '${cachedPath}' is corrupted (failed execution/size check) and cannot be re-downloaded ${isOffline ? reason : `: ${reason}`}. Please ${isOffline ? "connect to the internet" : "verify your network connection"} to repair or run 'nanos-lint clean-cache'.`,
           "ERR_LUALS_CORRUPTED_CACHE",
           "Connect to the internet to repair the corrupted binary or run 'nanos-lint clean-cache'.",
-          { cause: err }
+          { cause: err },
         );
       }
       throw err;
@@ -209,7 +215,12 @@ export async function resolveLuaLSBinary(
 
   // Fast path first: enumerating the cache would spawn every cached binary.
   const safeLatest = metadata?.latestVersion ? sanitizeLuaLSVersion(metadata.latestVersion) : null;
-  if (options?.reuseExisting !== false && metadata && metadata.lastCheckedWeek === currentWeek && safeLatest) {
+  if (
+    options?.reuseExisting !== false &&
+    metadata &&
+    metadata.lastCheckedWeek === currentWeek &&
+    safeLatest
+  ) {
     const info = getPlatformInfo(safeLatest);
     const targetDir = path.resolve(getCacheDir(safeLatest, baseCacheDir));
     const resolvedBase = path.resolve(baseCacheDir);
@@ -221,11 +232,17 @@ export async function resolveLuaLSBinary(
     }
   }
 
-  const cachedVersions = options?.reuseExisting !== false ? listCachedLuaLSVersions(baseCacheDir) : [];
+  const cachedVersions =
+    options?.reuseExisting !== false ? listCachedLuaLSVersions(baseCacheDir) : [];
 
   // Same week, but the recorded version is unusable: reuse another cached one.
   const firstCachedVersion = cachedVersions[0];
-  if (options?.reuseExisting !== false && metadata && metadata.lastCheckedWeek === currentWeek && firstCachedVersion) {
+  if (
+    options?.reuseExisting !== false &&
+    metadata &&
+    metadata.lastCheckedWeek === currentWeek &&
+    firstCachedVersion
+  ) {
     const info = getPlatformInfo(firstCachedVersion);
     return path.join(getCacheDir(firstCachedVersion, baseCacheDir), info.binaryRelativePath);
   }
@@ -238,10 +255,14 @@ export async function resolveLuaLSBinary(
   if (onlineTag) {
     targetVersion = onlineTag;
   } else if (metadata?.latestVersion && cachedVersions.includes(metadata.latestVersion)) {
-    logger.info(`[luals] Network unreachable or rate limited; using cached LuaLS ${metadata.latestVersion}.`);
+    logger.info(
+      `[luals] Network unreachable or rate limited; using cached LuaLS ${metadata.latestVersion}.`,
+    );
     targetVersion = metadata.latestVersion;
   } else if (firstCachedVersion) {
-    logger.info(`[luals] Network unreachable or rate limited; using cached LuaLS ${firstCachedVersion}.`);
+    logger.info(
+      `[luals] Network unreachable or rate limited; using cached LuaLS ${firstCachedVersion}.`,
+    );
     targetVersion = firstCachedVersion;
   } else {
     targetVersion = FALLBACK_LUALS_VERSION;
@@ -254,7 +275,7 @@ export async function resolveLuaLSBinary(
       latestVersion: targetVersion,
       lastCheckedDate: today,
     },
-    baseCacheDir
+    baseCacheDir,
   );
 
   const info = getPlatformInfo(targetVersion);
@@ -285,7 +306,7 @@ export async function resolveLuaLSBinary(
       }
     } catch (err) {
       logger.debug(
-        `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`
+        `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -297,12 +318,12 @@ export async function resolveLuaLSBinary(
   } catch (err) {
     if (wasCorrupted) {
       const isOffline = isOfflineError(err);
-      const reason = isOffline ? "while offline" : (err instanceof Error ? err.message : String(err));
+      const reason = isOffline ? "while offline" : err instanceof Error ? err.message : String(err);
       throw new LuaLSError(
         `Cached LuaLS binary at '${targetBinaryPath}' is corrupted (failed execution/size check) and cannot be re-downloaded ${isOffline ? reason : `: ${reason}`}. Please ${isOffline ? "connect to the internet" : "verify your network connection"} to repair or run 'nanos-lint clean-cache'.`,
         "ERR_LUALS_CORRUPTED_CACHE",
         "Connect to the internet to repair the corrupted binary or run 'nanos-lint clean-cache'.",
-        { cause: err }
+        { cause: err },
       );
     }
     throw err;
@@ -318,7 +339,7 @@ export async function resolveLuaLSBinary(
 export async function runLuaLSCheck(
   targetPath: string,
   configPath: string,
-  options: CheckOptions
+  options: CheckOptions,
 ): Promise<CheckResult> {
   let absoluteTarget = path.resolve(targetPath);
   try {
@@ -326,13 +347,15 @@ export async function runLuaLSCheck(
       absoluteTarget = fs.realpathSync.native(absoluteTarget);
     }
   } catch (err) {
-    logger.debug(`[luals] Failed to resolve native realpath for target: ${err instanceof Error ? err.message : String(err)}`);
+    logger.debug(
+      `[luals] Failed to resolve native realpath for target: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
   if (!fs.existsSync(absoluteTarget)) {
     throw new LuaLSError(
       `Target path does not exist: ${targetPath}`,
       "ERR_TARGET_NOT_FOUND",
-      "Verify that the target path exists and is accessible."
+      "Verify that the target path exists and is accessible.",
     );
   }
 
@@ -352,7 +375,7 @@ export async function runLuaLSCheck(
   fs.mkdirSync(tempOutputDir, { recursive: true });
   const checkOutPath = path.join(
     tempOutputDir,
-    `check-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`
+    `check-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`,
   );
 
   const args: string[] = [
@@ -375,7 +398,7 @@ export async function runLuaLSCheck(
   } catch (err) {
     execError = err;
     logger.debug(
-      `[luals] LuaLS process exited with error or non-zero status: ${err instanceof Error ? err.message : String(err)}`
+      `[luals] LuaLS process exited with error or non-zero status: ${err instanceof Error ? err.message : String(err)}`,
     );
     // Process may exit with non-zero when diagnostics are found
   }
@@ -389,14 +412,14 @@ export async function runLuaLSCheck(
       parseSucceeded = true;
     } catch (err) {
       logger.error(
-        `[luals] Failed to read or parse diagnostic output from ${checkOutPath}: ${err instanceof Error ? err.message : String(err)}`
+        `[luals] Failed to read or parse diagnostic output from ${checkOutPath}: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       try {
         fs.unlinkSync(checkOutPath);
       } catch (err) {
         logger.debug(
-          `[luals] Failed to delete check output file ${checkOutPath}: ${err instanceof Error ? err.message : String(err)}`
+          `[luals] Failed to delete check output file ${checkOutPath}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -409,13 +432,13 @@ export async function runLuaLSCheck(
         `LuaLS check failed to execute or produce diagnostic output: ${execError instanceof Error ? execError.message : String(execError)}. ${cacheHint}`,
         "ERR_LUALS_EXECUTION",
         "Inspect the debug log with --log-level=debug or run 'nanos-lint clean-cache' to re-fetch LuaLS.",
-        { cause: execError }
+        { cause: execError },
       );
     }
     throw new LuaLSError(
       `LuaLS check failed to produce diagnostic output at: ${checkOutPath}. ${cacheHint}`,
       "ERR_LUALS_NO_OUTPUT",
-      "Ensure the temporary directory is writable and sufficient disk space is available."
+      "Ensure the temporary directory is writable and sufficient disk space is available.",
     );
   }
 
@@ -428,7 +451,9 @@ export async function runLuaLSCheck(
           return fs.realpathSync.native(p).replace(/\\/g, "/").toLowerCase();
         }
       } catch (err) {
-        logger.debug(`[luals] Failed to resolve native realpath for comparison: ${err instanceof Error ? err.message : String(err)}`);
+        logger.debug(
+          `[luals] Failed to resolve native realpath for comparison: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
       return path.resolve(p).replace(/\\/g, "/").toLowerCase();
     };
@@ -475,4 +500,3 @@ export async function runLuaLSCheck(
     diagnostics,
   };
 }
-

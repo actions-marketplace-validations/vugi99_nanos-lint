@@ -58,4 +58,3 @@ describe("system paths resolution via env-paths", () => {
     }
   });
 });
-

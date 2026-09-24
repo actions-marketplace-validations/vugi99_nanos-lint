@@ -73,7 +73,10 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
       "an absolute ignoreDir path",
       (tree) => ({ workspace: { ignoreDir: [path.join(tree, "vendor")] } }),
     ],
-    ["an absolute exclude pattern", (tree) => ({ files: { exclude: [`${path.join(tree, "vendor")}/**`] } })],
+    [
+      "an absolute exclude pattern",
+      (tree) => ({ files: { exclude: [`${path.join(tree, "vendor")}/**`] } }),
+    ],
     ["a basename exclude pattern", () => ({ files: { exclude: ["*.bak"] } })],
     ["a leading-globstar exclude pattern", () => ({ files: { exclude: ["**/nested/**"] } })],
     ["a leading-globstar directory pattern", () => ({ files: { exclude: ["**/deep/**"] } })],
@@ -83,7 +86,10 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
     ["Windows-style backslash separators", () => ({ files: { exclude: ["deep\\nested\\*.lua"] } })],
     ["a negation prefix", () => ({ files: { exclude: ["!keep.lua"] } })],
     ["a dot-directory exclude", () => ({ files: { exclude: [".dotdir/**"] } })],
-    ["brace alternatives with non-Lua extensions", () => ({ files: { exclude: ["**/*.{bak,tmp}"] } })],
+    [
+      "brace alternatives with non-Lua extensions",
+      () => ({ files: { exclude: ["**/*.{bak,tmp}"] } }),
+    ],
     [
       "ignoreDir and files.exclude together",
       () => ({ workspace: { ignoreDir: ["vendor"] }, files: { exclude: ["**/*.bak"] } }),
@@ -172,7 +178,7 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
           fs.symlinkSync(
             path.join(projectDir, "deep"),
             path.join(projectDir, "escape"),
-            process.platform === "win32" ? "junction" : "dir"
+            process.platform === "win32" ? "junction" : "dir",
           );
         } catch (err) {
           void err;
@@ -214,7 +220,7 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
         fs.writeFileSync(
           overBudget,
           JSON.stringify({ files: { exclude: ["**/*a*a*a*a.lua"] } }),
-          "utf-8"
+          "utf-8",
         );
         expect(countCheckedFiles(probeRoot, overBudget)).toBe(1);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("too complex"));
@@ -223,7 +229,7 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
         fs.writeFileSync(
           realistic,
           JSON.stringify({ files: { exclude: ["**/*a*a.lua"] } }),
-          "utf-8"
+          "utf-8",
         );
         expect(countCheckedFiles(probeRoot, realistic)).toBe(0);
       } finally {

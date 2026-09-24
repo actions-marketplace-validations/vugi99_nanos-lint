@@ -52,12 +52,7 @@ export function analyzeCommentDensity(filePath: string, content: string): FileCo
     return high + 1; // 1-indexed line number
   }
 
-  const sourceFile = ts.createSourceFile(
-    filePath,
-    content,
-    ts.ScriptTarget.Latest,
-    true
-  );
+  const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
 
   const linesWithComments = new Set<number>();
   const seenRanges = new Set<string>();
@@ -164,9 +159,11 @@ export function runCommentLint(): boolean {
       continue;
     }
     const status = stat.passed ? "PASS" : "FAIL";
-    const exceptionText = stat.exceptionReason ? ` (Exception: <= ${stat.maxAllowed.toFixed(1)}% - ${stat.exceptionReason})` : "";
+    const exceptionText = stat.exceptionReason
+      ? ` (Exception: <= ${stat.maxAllowed.toFixed(1)}% - ${stat.exceptionReason})`
+      : "";
     console.log(
-      `[${status}] ${stat.file.padEnd(35)} ${stat.density.toFixed(1).padStart(5)}% (${stat.commentLines}/${stat.totalLines} lines)${exceptionText}`
+      `[${status}] ${stat.file.padEnd(35)} ${stat.density.toFixed(1).padStart(5)}% (${stat.commentLines}/${stat.totalLines} lines)${exceptionText}`,
     );
   }
 
@@ -181,10 +178,10 @@ export function runCommentLint(): boolean {
 
 import { fileURLToPath } from "node:url";
 
-const isMain = process.argv[1] && (
-  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) ||
-  process.argv[1].endsWith("lint-comments.ts")
-);
+const isMain =
+  process.argv[1] &&
+  (path.resolve(process.argv[1]) === fileURLToPath(import.meta.url) ||
+    process.argv[1].endsWith("lint-comments.ts"));
 
 if (isMain) {
   const ok = runCommentLint();

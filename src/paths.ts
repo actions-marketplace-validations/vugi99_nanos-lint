@@ -45,13 +45,13 @@ export function getDirectorySize(targetPath: string): number {
         }
       } catch (err) {
         logger.debug(
-          `[paths] Failed to stat entry ${fullPath}: ${err instanceof Error ? err.message : String(err)}`
+          `[paths] Failed to stat entry ${fullPath}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
   } catch (err) {
     logger.debug(
-      `[paths] Failed to calculate directory size for ${targetPath}: ${err instanceof Error ? err.message : String(err)}`
+      `[paths] Failed to calculate directory size for ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
     return 0;
   }
@@ -83,4 +83,3 @@ export function formatBytes(bytes: number): string {
 }
 
 export default systemPaths;
-

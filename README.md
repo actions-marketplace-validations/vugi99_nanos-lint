@@ -33,11 +33,13 @@ A dedicated, fast linter and type-checker for **[nanos world](https://nanos-worl
 ### 1. Run via `npx` (No installation needed)
 
 Check the current directory:
+
 ```bash
 npx nanos-lint
 ```
 
 Check a specific directory or file:
+
 ```bash
 npx nanos-lint check ./my-package
 npx nanos-lint check ./my-package/Server/Index.lua
@@ -55,14 +57,17 @@ nanos-lint check .
 ### 3. Setup VS Code / Neovim IntelliSense
 
 To configure autocompletion, type annotations, and diagnostics in your local editor:
+
 ```bash
 npx nanos-lint init
 ```
+
 This generates a `.luarc.json` file in your workspace pointing to the nanos world definitions and schemas.
 
 ### 4. Pre-warm Cache for Offline / Docker Environments
 
 To pre-populate all required assets (both LuaLS binary and nanos world annotations) for air-gapped CI or container builds:
+
 ```bash
 npx nanos-lint warmup
 ```
@@ -78,9 +83,9 @@ name: Lint Lua Scripts
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
 
 jobs:
   lint:
@@ -92,23 +97,23 @@ jobs:
       - name: Lint nanos world Lua scripts
         uses: vugi99/nanos-lint@v2
         with:
-          path: '.'
-          checklevel: 'Warning'
+          path: "."
+          checklevel: "Warning"
 ```
 
 ### Action Inputs
 
-| Input | Description | Default |
-| :--- | :--- | :--- |
-| `path` | Path to workspace directory or Lua file to check | `.` |
-| `checklevel` | Minimum severity to report (`Error`, `Warning`, `Information`, `Hint`) | `Warning` |
-| `config` | Path to a custom `.luarc.json` configuration file | `""` |
-| `annotations` | Path to a custom `annotations.lua` file | `""` |
-| `ignore` | Files or directories to ignore (supports glob patterns, newline or comma separated) | `""` |
-| `luals-version` | Version of `lua-language-server` to use | `latest` |
-| `fail-on-error` | Fail the workflow step if diagnostics are found | `true` |
-| `quiet` | Suppress progress messages | `false` |
-| `cache` | Whether to cache the LuaLS binary and annotations across workflow runs | `true` |
+| Input           | Description                                                                         | Default   |
+| :-------------- | :---------------------------------------------------------------------------------- | :-------- |
+| `path`          | Path to workspace directory or Lua file to check                                    | `.`       |
+| `checklevel`    | Minimum severity to report (`Error`, `Warning`, `Information`, `Hint`)              | `Warning` |
+| `config`        | Path to a custom `.luarc.json` configuration file                                   | `""`      |
+| `annotations`   | Path to a custom `annotations.lua` file                                             | `""`      |
+| `ignore`        | Files or directories to ignore (supports glob patterns, newline or comma separated) | `""`      |
+| `luals-version` | Version of `lua-language-server` to use                                             | `latest`  |
+| `fail-on-error` | Fail the workflow step if diagnostics are found                                     | `true`    |
+| `quiet`         | Suppress progress messages                                                          | `false`   |
+| `cache`         | Whether to cache the LuaLS binary and annotations across workflow runs              | `true`    |
 
 When caching is enabled, the cache key rolls over each ISO week, so a freshly downloaded LuaLS binary is actually persisted under the new week's key; in the meantime the previous week's entry is restored from the cache.
 
@@ -152,14 +157,14 @@ OPTIONS:
 
 ### Environment Variables
 
-| Variable | Description |
-| :--- | :--- |
-| `LUALS_BIN` | Explicit path to a pre-installed `lua-language-server` binary; it must be a regular file that reports its version via `--version` (thin wrapper scripts are accepted), otherwise nanos-lint fails with `ERR_LUALS_BIN_INVALID` |
-| `NANOS_ANNOTATIONS_PATH`, `NANOS_ANNOTATIONS` | Explicit path to a custom `annotations.lua` file |
-| `NANOS_LOG_LEVEL` | Default logging level: `error`, `warn`, `info`, `debug`, `silent` (default: `warn`) |
-| `GITHUB_TOKEN` | GitHub personal access token used for authenticated GitHub API requests (avoids unauthenticated rate limits) |
-| `NO_COLOR` | Disables ANSI color output when set to any non-empty value |
-| `FORCE_COLOR` | Forces ANSI color output even in non-TTY environments |
+| Variable                                      | Description                                                                                                                                                                                                                    |
+| :-------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LUALS_BIN`                                   | Explicit path to a pre-installed `lua-language-server` binary; it must be a regular file that reports its version via `--version` (thin wrapper scripts are accepted), otherwise nanos-lint fails with `ERR_LUALS_BIN_INVALID` |
+| `NANOS_ANNOTATIONS_PATH`, `NANOS_ANNOTATIONS` | Explicit path to a custom `annotations.lua` file                                                                                                                                                                               |
+| `NANOS_LOG_LEVEL`                             | Default logging level: `error`, `warn`, `info`, `debug`, `silent` (default: `warn`)                                                                                                                                            |
+| `GITHUB_TOKEN`                                | GitHub personal access token used for authenticated GitHub API requests (avoids unauthenticated rate limits)                                                                                                                   |
+| `NO_COLOR`                                    | Disables ANSI color output when set to any non-empty value                                                                                                                                                                     |
+| `FORCE_COLOR`                                 | Forces ANSI color output even in non-TTY environments                                                                                                                                                                          |
 
 Only `NANOS_LOG_LEVEL` controls the logging level; a generic `LOG_LEVEL` environment variable is intentionally not read, because CI images commonly set it.
 
@@ -175,17 +180,14 @@ If your project already has a `.luarc.json`, `nanos-lint` automatically merges i
 {
   "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
   "diagnostics": {
-    "disable": [
-      "lowercase-global"
-    ],
-    "globals": [
-      "MyCustomGlobal"
-    ]
+    "disable": ["lowercase-global"],
+    "globals": ["MyCustomGlobal"]
   }
 }
 ```
 
 To scaffold a portable `.luarc.json` with vendored type annotations in your project, run:
+
 ```bash
 npx nanos-lint init
 # Or overwrite an existing configuration:
@@ -224,6 +226,7 @@ npm run gates
 npm run check:all
 
 # Run individual quality gates
+npm run format:check    # Prettier code formatting (auto-fix via npm run format:fix)
 npm run lint            # ESLint
 npm run lint:deps       # Dependency architecture & license checks (dependency-cruiser)
 npm run lint:comments   # Comment density limit (<= 15%)
@@ -240,10 +243,10 @@ NANOS_LIVE_TESTS=0 npm run test:coverage
 
 `tests/global-setup.ts` downloads the LuaLS binary and annotations **once per run** into an isolated temporary cache, so the real `~/.cache/nanos-lint` is never touched; the run fails if anything downloads LuaLS a second time.
 
-| Variable | Description |
-| :--- | :--- |
-| `NANOS_LIVE_TESTS` | `0` (or `false`/`no`/`off`) skips the live LuaLS/annotations tests, performs no network access, and does not enforce the coverage thresholds. Any other value or unset requires the shared fixtures; if they cannot be resolved the run fails. |
-| `NANOS_TEST_CACHE_ROOT` | Reuses the given directory as the isolated test cache instead of a fresh one, avoiding a re-download on repeat runs. |
+| Variable                | Description                                                                                                                                                                                                                                    |
+| :---------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NANOS_LIVE_TESTS`      | `0` (or `false`/`no`/`off`) skips the live LuaLS/annotations tests, performs no network access, and does not enforce the coverage thresholds. Any other value or unset requires the shared fixtures; if they cannot be resolved the run fails. |
+| `NANOS_TEST_CACHE_ROOT` | Reuses the given directory as the isolated test cache instead of a fresh one, avoiding a re-download on repeat runs.                                                                                                                           |
 
 ```bash
 NANOS_LIVE_TESTS=0 npm run test:coverage                          # fully offline

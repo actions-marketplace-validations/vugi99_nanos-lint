@@ -2,12 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
   "runtime": {
     "version": "Lua 5.4",
-    "path": [
-      "?.lua",
-      "Shared/?.lua",
-      "Client/?.lua",
-      "Server/?.lua"
-    ],
+    "path": ["?.lua", "Shared/?.lua", "Client/?.lua", "Server/?.lua"],
     "special": {
       "Package.Require": "require"
     }
@@ -30,9 +25,7 @@
     "library": []
   },
   "files": {
-    "exclude": [
-      ".nanos-lint/**"
-    ]
+    "exclude": [".nanos-lint/**"]
   },
   "diagnostics": {
     "enable": true,

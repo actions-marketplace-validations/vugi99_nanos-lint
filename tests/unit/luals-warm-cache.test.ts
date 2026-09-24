@@ -41,7 +41,7 @@ describe.skipIf(!isLiveTestsEnabled())("resolveLuaLSBinary cache handling", () =
           latestVersion: FALLBACK_LUALS_VERSION,
           lastCheckedDate: "2026-09-23",
         },
-        baseCacheDir
+        baseCacheDir,
       );
 
       execFileSyncCalls.length = 0;
@@ -65,7 +65,9 @@ describe.skipIf(!isLiveTestsEnabled())("resolveLuaLSBinary cache handling", () =
       expect(resolved).toBe(seeded);
       expect(fs.existsSync(path.join(baseCacheDir, "metadata.json"))).toBe(true);
       expect(readLuaLSMetadata(baseCacheDir)?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
-      expect(fs.existsSync(path.join(baseCacheDir, FALLBACK_LUALS_VERSION, ".complete"))).toBe(true);
+      expect(fs.existsSync(path.join(baseCacheDir, FALLBACK_LUALS_VERSION, ".complete"))).toBe(
+        true,
+      );
     } finally {
       fs.rmSync(baseCacheDir, { recursive: true, force: true });
     }
