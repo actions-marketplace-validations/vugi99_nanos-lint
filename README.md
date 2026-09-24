@@ -13,6 +13,7 @@ A dedicated, fast linter and type-checker for **[nanos world](https://nanos-worl
 
 ## Features
 
+- **Realm-aware diagnostics**: `Server/`, `Client/` and `Shared/` are checked against their real execution context, so cross-realm API misuse and client/server global leakage fail the build instead of crashing at runtime.
 - **Accurate nanos world Type Checking**: Bundles verified nanos world API annotations (Lua 5.4.9).
 - **Zero-Install Local CLI**: Run directly via `npx nanos-lint [path]` without installing anything.
 - **Native GitHub Action**: Use `vugi99/nanos-lint` directly in CI workflows with inline GitHub PR annotations.
@@ -113,6 +114,7 @@ jobs:
 | `luals-version` | Version of `lua-language-server` to use                                             | `latest`  |
 | `fail-on-error` | Fail the workflow step if diagnostics are found                                     | `true`    |
 | `log-level`     | Logging level (`error`, `warn`, `info`, `debug`, `silent`)                          | `warn`    |
+| `realm`         | Execution realm to check (`all`, `client`, `server`, `shared`)                      | `all`     |
 | `cache`         | Whether to cache the LuaLS binary and annotations across workflow runs              | `true`    |
 
 When caching is enabled, the cache key rolls over each ISO week, so a freshly downloaded LuaLS binary is actually persisted under the new week's key; in the meantime the previous week's entry is restored from the cache.
@@ -151,6 +153,7 @@ OPTIONS:
   --github                 Output in GitHub Actions format (shortcut for --format=github)
   --luals-version=<ver>    Version of LuaLS to use (default: latest, falling back to 3.19.1 when offline)
   --no-fail                Do not exit with code 1 if diagnostics are found
+  --realm <realm>          Execution realm to check: all, client, server, shared (default: all)
   -f, --force              (init command only) Overwrite existing .luarc.json
 ```
 
@@ -233,6 +236,35 @@ The `N files checked` figure is produced by matching `workspace.ignoreDir` and `
 - **Over-budget patterns** (excessive wildcards or brace alternatives) are skipped with a warning instead of risking a slow, backtracking-heavy match. Skipping can only over-count, never hide a file.
 - **Symlinks are never followed**: symlinked `.lua` files are not counted and symlinked directories are not traversed.
 - A `workspace.ignoreDir` list in your `.luarc.json` **replaces** the built-in defaults for that file, mirroring LuaLS. The configuration handed to LuaLS is always merged with nanos-lint's defaults, so `.git`, `.vscode`, `.nanos-lint` and `node_modules` stay ignored during a check.
+
+---
+
+## Realm-Aware Checking
+
+nanos world loads a package into two isolated Lua VMs: the **server** executes `Server/**` plus `Shared/**`, and the **client** executes `Client/**` plus `Shared/**`. `nanos-lint` mirrors that split so a `Client/` script can no longer call `Server.ChangeMap()` unnoticed, and a global defined in `Client/` no longer satisfies a `Server/` script.
+
+`nanos-lint check <path>` detects the conventional layout automatically and runs one LuaLS pass per realm (see [Realm Mapping](#realm-mapping-nanosrealms) to describe a custom layout):
+
+| Pass       | Files reported             | Context                                                                                                                |
+| :--------- | :------------------------- | :--------------------------------------------------------------------------------------------------------------------- |
+| **server** | `Server/**`                | Server annotations only; `Client/**` is excluded from the analysis.                                                    |
+| **client** | `Client/**`                | Client annotations only; `Server/**` is excluded from the analysis.                                                    |
+| **shared** | `Shared/**` and root files | The complete annotation set, because a shared script may legitimately call a side-specific API behind a runtime check. |
+
+Only the annotations that belong to a realm are loaded, so misuse is reported as `undefined-global` (for side-only classes such as `Client`, `Server`, `Database` or `WebUI`) or as `undefined-field` (for realm-specific members of classes that exist on both sides, such as `Character:SetTeam()` on the client).
+
+```bash
+nanos-lint check .                # every detected realm
+nanos-lint check . --realm server # server files + shared files
+nanos-lint check . --realm client # client files + shared files
+nanos-lint check . --realm shared # shared files only, with the complete context
+```
+
+Deliberate limits:
+
+- **Runtime guards are not analyzed.** `Shared/**` is checked with the complete context, so a guarded `Server.ChangeMap()` inside a `Package.IsUnloading()`-style branch is accepted, and so is an unguarded one. Real nanos world packages gate calls in too many ways for static detection to be reliable.
+- **`Package.Require` keeps resolving across realms**, because `runtime.path` keeps `?.lua`, `Shared/?.lua`, `Client/?.lua` and `Server/?.lua` in every pass. A shared file may require a realm-specific module behind a guard.
+- **Realm checking only activates when a configured pattern matches at least one checked Lua file**, so non-package repositories keep running a single standard pass. `"nanos": { "realms": {} }` disables it explicitly.
 
 ---
 

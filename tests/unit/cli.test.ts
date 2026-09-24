@@ -7,6 +7,7 @@ import { runCLI, isDirectExecution, collectIgnorePatterns, createProgram } from 
 import * as pathsModule from "../../src/paths.js";
 import * as lualsModule from "../../src/luals.js";
 import * as annotationsModule from "../../src/annotations.js";
+import * as realmsModule from "../../src/realms.js";
 import { logger } from "../../src/logger.js";
 
 describe("cli module flag and command parsing", () => {
@@ -294,6 +295,90 @@ describe("cli module flag and command parsing", () => {
       annotSpy.mockRestore();
       metaSpy.mockRestore();
       logSpy.mockRestore();
+    });
+
+    it("runs realm passes when a realm plan is available and always cleans it up", async () => {
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck");
+      const cleanup = vi.fn();
+      const plan = {
+        baseConfigPath: "/tmp/base.json",
+        passes: [
+          {
+            realm: "server" as const,
+            configPath: "/tmp/server.json",
+            reportFiles: new Set(["a.lua"]),
+          },
+        ],
+        cleanup,
+      };
+      const planSpy = vi.spyOn(realmsModule, "planRealmCheck").mockReturnValue(plan);
+      const realmRunSpy = vi.spyOn(realmsModule, "runRealmAwareCheck").mockResolvedValue({
+        passed: true,
+        totalProblems: 0,
+        totalFiles: 1,
+        diagnostics: {},
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        expect(await runCLI(["check", ".", "--realm", "client"])).toBe(0);
+        expect(planSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            selection: "client",
+            annotationsPath: "/mock/annotations.lua",
+          }),
+        );
+        expect(realmRunSpy).toHaveBeenCalledWith(plan, ".", expect.objectContaining({ path: "." }));
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(checkSpy).not.toHaveBeenCalled();
+      } finally {
+        annotSpy.mockRestore();
+        checkSpy.mockRestore();
+        planSpy.mockRestore();
+        realmRunSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it("cleans up the realm plan even when the realm run fails", async () => {
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const cleanup = vi.fn();
+      const planSpy = vi.spyOn(realmsModule, "planRealmCheck").mockReturnValue({
+        baseConfigPath: "/tmp/base.json",
+        passes: [],
+        cleanup,
+      });
+      const realmRunSpy = vi
+        .spyOn(realmsModule, "runRealmAwareCheck")
+        .mockRejectedValue(new Error("luals exploded"));
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        expect(await runCLI(["check", "."])).toBe(1);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("luals exploded"));
+      } finally {
+        annotSpy.mockRestore();
+        planSpy.mockRestore();
+        realmRunSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    });
+
+    it("rejects an unknown --realm value", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(await runCLI(["check", ".", "--realm", "banana"])).not.toBe(0);
+        const messages = errSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+        expect(messages).toContain("Allowed choices are all, client, server, shared");
+      } finally {
+        errSpy.mockRestore();
+      }
     });
 
     it("handles errors during clean-cache execution", async () => {

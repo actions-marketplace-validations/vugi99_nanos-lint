@@ -157,13 +157,12 @@ function toIgnorePatterns(patterns: readonly unknown[]): string[] {
   return ignore;
 }
 
-/** Counts candidate Lua files within targetPath, taking workspace ignoreDir and files.exclude into account (#27). */
-export function countCheckedFiles(targetPath: string, configPath?: string): number {
+/** Resolves and canonicalizes the target, returning null when it does not exist. */
+function resolveTargetPath(targetPath: string): string | null {
   let absPath = path.resolve(targetPath);
   if (!fs.existsSync(absPath)) {
-    return 0;
+    return null;
   }
-
   try {
     absPath = fs.realpathSync.native(absPath);
   } catch {
@@ -173,9 +172,22 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
       void err;
     }
   }
+  return absPath;
+}
+
+/**
+ * Lists the Lua files LuaLS checks under `targetPath` as slash-normalized relative paths,
+ * honoring `workspace.ignoreDir` and `files.exclude` (#27). Absolute paths are returned
+ * for single-file targets, and an empty list is returned when the walk fails.
+ */
+export function listCheckedFiles(targetPath: string, configPath?: string): string[] {
+  const absPath = resolveTargetPath(targetPath);
+  if (!absPath) {
+    return [];
+  }
 
   if (fs.statSync(absPath).isFile()) {
-    return absPath.toLowerCase().endsWith(".lua") ? 1 : 0;
+    return absPath.toLowerCase().endsWith(".lua") ? [absPath] : [];
   }
 
   let ignoreDirs: readonly unknown[] = DEFAULT_IGNORE_DIRS;
@@ -209,11 +221,16 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
       follow: false, // Disallow symlinks to prevent loops and directory escapes (#21)
       withFileTypes: true,
     });
-    return entries.filter((entry) => entry.isFile()).length;
+    return entries.filter((entry) => entry.isFile()).map((entry) => entry.relativePosix());
   } catch (err) {
     logger.warn(
-      `[luals] Failed to walk ${absPath} while counting checked files: ${err instanceof Error ? err.message : String(err)}`,
+      `[luals] Failed to walk ${absPath} while listing checked files: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return 0;
+    return [];
   }
+}
+
+/** Counts candidate Lua files within targetPath, taking workspace ignoreDir and files.exclude into account (#27). */
+export function countCheckedFiles(targetPath: string, configPath?: string): number {
+  return listCheckedFiles(targetPath, configPath).length;
 }

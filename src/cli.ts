@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
-import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.js";
+import { resolveWorkspaceConfig, initWorkspace, getPackageRoot, loadUserConfig } from "./config.js";
+import { planRealmCheck, runRealmAwareCheck, type RealmSelection } from "./realms.js";
 import { resolveAnnotations, readAnnotationsMetadata } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
@@ -52,6 +53,7 @@ interface CheckCommandOptions {
   logLevel?: string;
   github?: boolean;
   ignore?: string[];
+  realm?: RealmSelection;
 }
 
 export interface CreateProgramOptions {
@@ -123,6 +125,14 @@ export function createProgram(options?: CreateProgramOptions): Command {
       ).choices(["error", "warn", "info", "debug", "silent"]),
     )
     .option("--github", "Output in GitHub Actions format (shortcut for --format=github)")
+    .addOption(
+      new Option(
+        "--realm <realm>",
+        "Execution realm to check: all, client, server, shared (default: all)",
+      )
+        .choices(["all", "client", "server", "shared"])
+        .default("all"),
+    )
     .action(async (targetPath: string = ".", opts: CheckCommandOptions) => {
       if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
         logger.setLevel(opts.logLevel as LogLevel);
@@ -157,21 +167,38 @@ export function createProgram(options?: CreateProgramOptions): Command {
         customPath: opts.annotations,
       });
 
-      const resolved = resolveWorkspaceConfig(targetPath, checkOptions.configpath, {
-        ignore: checkOptions.ignore,
+      const realmPlan = planRealmCheck({
+        targetPath,
+        userConfig: loadUserConfig(targetPath, checkOptions.configpath),
+        selection: opts.realm ?? "all",
         annotationsPath,
+        customConfigPath: checkOptions.configpath,
+        ignore: checkOptions.ignore,
       });
+
       let result;
-      try {
-        result = await runLuaLSCheck(targetPath, resolved.configPath, checkOptions);
-      } finally {
-        if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
-          try {
-            fs.unlinkSync(resolved.configPath);
-          } catch (err) {
-            logger.warn(
-              `Failed to clean up temporary config file ${resolved.configPath}: ${err instanceof Error ? err.message : String(err)}`,
-            );
+      if (realmPlan) {
+        try {
+          result = await runRealmAwareCheck(realmPlan, targetPath, checkOptions);
+        } finally {
+          realmPlan.cleanup();
+        }
+      } else {
+        const resolved = resolveWorkspaceConfig(targetPath, checkOptions.configpath, {
+          ignore: checkOptions.ignore,
+          annotationsPath,
+        });
+        try {
+          result = await runLuaLSCheck(targetPath, resolved.configPath, checkOptions);
+        } finally {
+          if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+            try {
+              fs.unlinkSync(resolved.configPath);
+            } catch (err) {
+              logger.warn(
+                `Failed to clean up temporary config file ${resolved.configPath}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
           }
         }
       }
@@ -326,6 +353,7 @@ Examples:
   $ npx nanos-lint check ./my-package
   $ npx nanos-lint check . --checklevel=Error
   $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"
+  $ npx nanos-lint check . --realm server
   $ npx nanos-lint init
   $ npx nanos-lint clean-cache
 `,

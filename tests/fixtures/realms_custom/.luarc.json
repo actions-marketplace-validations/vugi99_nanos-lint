@@ -1,0 +1,9 @@
+{
+  "nanos": {
+    "realms": {
+      "src/server/**": "server",
+      "src/client/**": "client",
+      "common/**": "shared"
+    }
+  }
+}

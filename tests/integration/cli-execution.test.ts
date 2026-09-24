@@ -62,6 +62,46 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     }
   });
 
+  it("checks a package through dist/cli.js with realm-aware passes", async () => {
+    const fixture = path.join(rootDir, "tests", "fixtures", "realms");
+    try {
+      await execFileAsync(process.execPath, [distCli, "check", fixture]);
+      expect.fail("Expected realm violations to fail the check");
+    } catch (err: unknown) {
+      const execErr = err as { code?: number; stdout?: string };
+      expect(execErr.code).toBe(1);
+      // Server and client files are reported from their own strict realm pass.
+      expect(execErr.stdout).toContain("tests/fixtures/realms/Server/combat.lua");
+      expect(execErr.stdout).toContain("tests/fixtures/realms/Client/hud.lua");
+      expect(execErr.stdout).toContain("Undefined global");
+      // The guarded side-specific call in Shared/ stays unreported.
+      expect(execErr.stdout).not.toContain("tests/fixtures/realms/Shared/bridge.lua");
+    }
+  }, 120000);
+
+  it("restricts dist/cli.js check --realm client to the client realm", async () => {
+    const fixture = path.join(rootDir, "tests", "fixtures", "realms");
+    try {
+      await execFileAsync(process.execPath, [distCli, "check", fixture, "--realm", "client"]);
+      expect.fail("Expected the client realm violation to fail the check");
+    } catch (err: unknown) {
+      const execErr = err as { code?: number; stdout?: string };
+      expect(execErr.code).toBe(1);
+      expect(execErr.stdout).toContain("tests/fixtures/realms/Client/hud.lua");
+      expect(execErr.stdout).not.toContain("tests/fixtures/realms/Server/combat.lua");
+    }
+  }, 120000);
+
+  it("passes a clean realm-aware package through dist/cli.js", async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      distCli,
+      "check",
+      path.join(rootDir, "tests", "fixtures", "realms_clean"),
+    ]);
+
+    expect(stdout).toMatch(/Diagnosis completed, no problems found across \d+ files?\./);
+  }, 120000);
+
   it("executes bin/nanos-lint.js --help and matches dist/cli.js output", async () => {
     const { stdout: binStdout } = await execFileAsync(process.execPath, [binCli, "--help"]);
     const { stdout: distStdout } = await execFileAsync(process.execPath, [distCli, "--help"]);
