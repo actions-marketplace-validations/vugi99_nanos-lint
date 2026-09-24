@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Zero-dependency cross-process locking and atomic file replacement (`src/lock.ts`) so parallel `nanos-lint` runs can share one user cache (#7):
+  - `withFileLock()` acquires locks with `fs.openSync(..., "wx")` (`O_CREAT | O_EXCL`), records `{ pid, createdAt, token }`, queues contenders with jittered exponential backoff, reclaims abandoned locks (dead owner pid or older than 120s), and only unlinks the lock it still owns.
+  - `writeAtomicFileSync()` / `writeAtomicFile()` write to a unique sibling temp file and rename over the target with retries for transient `EBUSY`/`EPERM`/`EACCES` errors, so readers never observe a truncated file.
+- LuaLS installs now serialize on a per-version lock (`.luals-<version>.lock`) and repeat the `.complete` probe once the lock is held, so a cold cache with N parallel workers downloads and extracts exactly once while the others reuse the promoted directory (#7).
+- Annotations updates serialize on `.annotations.lock` and reuse the file a concurrent worker just wrote instead of re-downloading and overwriting it (#7).
+- `tests/unit/concurrency.test.ts` covering 25 racing metadata writers with concurrent readers, in-process mutual exclusion, separate-process mutual exclusion (four child processes verifying no interleaved critical sections), stale-lock recovery for dead and expired owners, lock-ownership safety, atomic-write retry and cleanup, ten parallel `resolveAnnotations()` callers on a cold cache (exactly one raw download), and four parallel `downloadAndExtractLuaLS()` workers (exactly one copy) (#7).
 - `new-release` agent skill (`.agents/skills/new-release/SKILL.md`) documenting the release procedure as guided by AGENTS.md: verifying the `master` branch, bumping the npm version, dropping security support for older versions in `SECURITY.md`, promoting `## [Unreleased]` in `CHANGELOG.md`, updating the pinned `npx --yes nanos-lint@<version>` fallback in `action.yml`, committing through the quality gates, and creating and pushing the `v<version>` tag.
 
 ### Changed
 
 - `countCheckedFiles()` semantics are pinned by golden tests instead of the pre-#27 differential harness (breaking for the test suite, not for users, #33): `tests/helpers/legacy-count.ts` and the `legacyCountCheckedFiles()` comparisons were deleted, the 19 parity configurations became explicit expected counts, and the `intended behaviour differences` block was renamed to `glob semantics`, since the retired walker is no longer the reference. The v3.0.0 semantics are now: `!`-prefixed and absolute patterns are rejected with a warning instead of being silently misinterpreted, symlinked files and directories are never counted, over-budget patterns stay skipped with a warning (which can only over-count), and a user `workspace.ignoreDir` keeps replacing the built-in defaults for that file while the merged config handed to LuaLS always includes them. Documented in the README under "File Counting and Glob Semantics".
+- `downloadAndCacheAnnotations()` no longer copies through a temp directory plus a rollback backup: the fetched payload and its metadata are written with atomic renames (metadata last), so an interrupted or failed update leaves the previous cache intact and is retried on the next run (#7).
 
 ### Removed
 

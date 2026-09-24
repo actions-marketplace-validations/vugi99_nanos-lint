@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { logger } from "./logger.js";
 import { AnnotationsError } from "./errors.js";
+import { withFileLock, writeAtomicFile } from "./lock.js";
 import {
   ANNOTATIONS_FILENAME,
   METADATA_FILENAME,
@@ -164,24 +164,12 @@ export async function fetchRawAnnotationsContent(commitSha?: string): Promise<st
   return text;
 }
 
-/** Copies a file with exponential backoff retries to handle transient file lock contention. */
-async function copyFileWithRetry(src: string, dest: string, maxRetries = 10): Promise<void> {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      fs.copyFileSync(src, dest);
-      return;
-    } catch (err: unknown) {
-      const code = (err as { code?: string })?.code;
-      if ((code === "EBUSY" || code === "EPERM") && attempt < maxRetries - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-/** Downloads annotations.lua and writes metadata in a chained atomic transaction with rollback. */
+/**
+ * Downloads annotations.lua and writes it with its metadata inside an exclusive cache
+ * lock (`.annotations.lock`). The completion check is repeated once the lock is held, so
+ * parallel callers reuse the file a concurrent worker just wrote instead of racing on
+ * the same paths, and both files are replaced atomically (#7).
+ */
 export async function downloadAndCacheAnnotations(
   commitId: string,
   cacheDir: string = getAnnotationsCacheDir(),
@@ -190,82 +178,38 @@ export async function downloadAndCacheAnnotations(
 
   const finalAnnotationsPath = path.join(cacheDir, ANNOTATIONS_FILENAME);
   const finalMetaPath = path.join(cacheDir, METADATA_FILENAME);
-  const tempDir = path.join(
-    os.tmpdir(),
-    `nanos-ann-tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  );
-  const backupDir = path.join(
-    os.tmpdir(),
-    `nanos-ann-bak-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  );
-  let hasBackup = false;
+  const lockPath = path.join(cacheDir, ".annotations.lock");
 
-  try {
-    fs.mkdirSync(tempDir, { recursive: true });
-    const label = commitId && commitId !== "unknown" ? ` (${commitId.slice(0, 7)})` : "";
-    logger.info(`[annotations] Downloading nanos world API annotations${label}...`);
+  return withFileLock(
+    lockPath,
+    async () => {
+      const existingMeta = readAnnotationsMetadata(cacheDir);
+      if (
+        existingMeta &&
+        existingMeta.commitId === commitId &&
+        fs.existsSync(finalAnnotationsPath) &&
+        isAnnotationsValid(finalAnnotationsPath)
+      ) {
+        logger.debug(`[annotations] Reusing cached annotations for commit ${commitId}.`);
+        return finalAnnotationsPath;
+      }
 
-    const content = await fetchRawAnnotationsContent(commitId);
-    const tempAnnotationsPath = path.join(tempDir, ANNOTATIONS_FILENAME);
-    fs.writeFileSync(tempAnnotationsPath, content, "utf-8");
+      const label = commitId && commitId !== "unknown" ? ` (${commitId.slice(0, 7)})` : "";
+      logger.info(`[annotations] Downloading nanos world API annotations${label}...`);
+      const content = await fetchRawAnnotationsContent(commitId);
+      const { dateStr, dateObj } = getTodayDateString();
+      const metadata: AnnotationsMetadata = { commitId, lastChecked: dateStr, date: dateObj };
 
-    const { dateStr, dateObj } = getTodayDateString();
-    const metadata: AnnotationsMetadata = { commitId, lastChecked: dateStr, date: dateObj };
-    const tempMetaPath = path.join(tempDir, METADATA_FILENAME);
-    fs.writeFileSync(tempMetaPath, JSON.stringify(metadata, null, 2), "utf-8");
+      // Atomic replacement keeps readers on either the previous or the new complete
+      // file. The metadata is written last, so an interrupted update is retried later.
+      await writeAtomicFile(finalAnnotationsPath, content);
+      await writeAtomicFile(finalMetaPath, JSON.stringify(metadata, null, 2));
 
-    const existingMeta = readAnnotationsMetadata(cacheDir);
-    if (
-      existingMeta &&
-      existingMeta.commitId === commitId &&
-      fs.existsSync(finalAnnotationsPath) &&
-      isAnnotationsValid(finalAnnotationsPath)
-    ) {
+      const commitLabel =
+        commitId && commitId !== "unknown" ? ` to commit ${commitId.slice(0, 7)}` : "";
+      logger.info(`[annotations] Updated annotations.lua${commitLabel}.`);
       return finalAnnotationsPath;
-    }
-
-    const oldAnnotationsExists = fs.existsSync(finalAnnotationsPath);
-    const oldMetaExists = fs.existsSync(finalMetaPath);
-    if (oldAnnotationsExists || oldMetaExists) {
-      fs.mkdirSync(backupDir, { recursive: true });
-      if (oldAnnotationsExists) {
-        await copyFileWithRetry(finalAnnotationsPath, path.join(backupDir, ANNOTATIONS_FILENAME));
-      }
-      if (oldMetaExists) {
-        await copyFileWithRetry(finalMetaPath, path.join(backupDir, METADATA_FILENAME));
-      }
-      hasBackup = true;
-    }
-
-    await copyFileWithRetry(tempAnnotationsPath, finalAnnotationsPath);
-    await copyFileWithRetry(tempMetaPath, finalMetaPath);
-
-    const commitLabel =
-      commitId && commitId !== "unknown" ? ` to commit ${commitId.slice(0, 7)}` : "";
-    logger.info(`[annotations] Updated annotations.lua${commitLabel}.`);
-    return finalAnnotationsPath;
-  } catch (err) {
-    if (hasBackup && fs.existsSync(backupDir)) {
-      try {
-        const bAnn = path.join(backupDir, ANNOTATIONS_FILENAME);
-        const bMeta = path.join(backupDir, METADATA_FILENAME);
-        if (fs.existsSync(bAnn)) await copyFileWithRetry(bAnn, finalAnnotationsPath);
-        if (fs.existsSync(bMeta)) await copyFileWithRetry(bMeta, finalMetaPath);
-      } catch (rollbackErr) {
-        logger.error(
-          `Failed to restore annotations from backup during rollback: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
-        );
-      }
-    }
-    throw err;
-  } finally {
-    try {
-      if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
-      if (fs.existsSync(backupDir)) fs.rmSync(backupDir, { recursive: true, force: true });
-    } catch (err) {
-      logger.warn(
-        `Failed to clean up annotations temporary or backup directory: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+    },
+    { label: "annotations" },
+  );
 }

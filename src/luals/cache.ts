@@ -6,6 +6,7 @@ import { getPackageRoot } from "../config.js";
 import { FALLBACK_LUALS_VERSION, sanitizeLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { isBinaryValid } from "./validation.js";
+import { writeAtomicFileSync } from "../lock.js";
 
 /** Returns the base directory in the system cache where LuaLS versions and metadata are stored. */
 export function getBaseLuaLSCacheDir(): string {
@@ -91,15 +92,17 @@ export function readLuaLSMetadata(
   return null;
 }
 
-/** Writes metadata.json containing the latest checked version and timestamp. */
+/**
+ * Writes metadata.json containing the latest checked version and timestamp.
+ * The write is atomic (#7), so a parallel reader never observes a half-written file.
+ */
 export function writeLuaLSMetadata(
   metadata: LuaLSMetadata,
   baseCacheDir: string = getBaseLuaLSCacheDir(),
 ): void {
   try {
-    fs.mkdirSync(baseCacheDir, { recursive: true });
     const metaPath = getLuaLSMetadataPath(baseCacheDir);
-    fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2), "utf-8");
+    writeAtomicFileSync(metaPath, JSON.stringify(metadata, null, 2));
   } catch (err) {
     logger.warn(
       `[luals] Failed to write LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`,

@@ -18,6 +18,7 @@ import {
 } from "./validation.js";
 import { LuaLSError } from "../errors.js";
 import { getDirectorySize } from "../paths.js";
+import { withFileLock } from "../lock.js";
 
 export {
   isBinaryValid,
@@ -104,7 +105,32 @@ export interface DownloadOptions {
   cacheDir?: string;
 }
 
-/** Downloads, verifies, and extracts the LuaLS release archive for the current platform. */
+/** Returns whether a cache directory holds a complete, executable LuaLS installation. */
+function isCompleteLuaLSInstall(
+  binaryPath: string,
+  completeMarker: string,
+  version: string,
+): boolean {
+  if (!fs.existsSync(binaryPath) || !fs.existsSync(completeMarker)) {
+    return false;
+  }
+  try {
+    return fs.readFileSync(completeMarker, "utf-8").trim() === version && isBinaryValid(binaryPath);
+  } catch (err) {
+    logger.debug(
+      `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+/**
+ * Downloads, verifies, and extracts the LuaLS release archive for the current platform.
+ *
+ * Concurrent callers targeting the same cache directory serialize on a version lock
+ * (`.luals-<version>.lock`) and the completion check is repeated once the lock is held,
+ * so exactly one worker downloads while the others reuse the promoted directory (#7).
+ */
 export async function downloadAndExtractLuaLS(
   version: string = DEFAULT_LUALS_VERSION,
   targetDir?: string,
@@ -115,6 +141,39 @@ export async function downloadAndExtractLuaLS(
   const destDir = targetDir || getCacheDir(resolvedVersion);
   const binaryPath = path.join(destDir, info.binaryRelativePath);
   const completeMarker = path.join(destDir, ".complete");
+
+  if (
+    options?.reuseExisting !== false &&
+    isCompleteLuaLSInstall(binaryPath, completeMarker, resolvedVersion)
+  ) {
+    return binaryPath;
+  }
+
+  const lockPath = path.join(path.dirname(destDir), `.${path.basename(destDir)}.lock`);
+  return withFileLock(
+    lockPath,
+    () =>
+      downloadAndPromoteLuaLS(resolvedVersion, info, destDir, binaryPath, completeMarker, options),
+    { label: `LuaLS ${resolvedVersion}` },
+  );
+}
+
+/** Performs the locked download/extraction work, skipping it when another worker won. */
+async function downloadAndPromoteLuaLS(
+  resolvedVersion: string,
+  info: ReturnType<typeof getPlatformInfo>,
+  destDir: string,
+  binaryPath: string,
+  completeMarker: string,
+  options?: DownloadOptions,
+): Promise<string> {
+  if (
+    options?.reuseExisting !== false &&
+    isCompleteLuaLSInstall(binaryPath, completeMarker, resolvedVersion)
+  ) {
+    logger.info(`[luals] LuaLS ${resolvedVersion} was installed by a concurrent run; reusing it.`);
+    return binaryPath;
+  }
 
   if (fs.existsSync(destDir)) {
     if (

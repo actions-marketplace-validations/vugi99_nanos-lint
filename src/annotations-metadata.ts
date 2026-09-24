@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { systemPaths } from "./paths.js";
 import { logger } from "./logger.js";
+import { writeAtomicFileSync } from "./lock.js";
 
 export interface AnnotationsDate {
   year: number;
@@ -118,21 +118,7 @@ export function updateLastCheckedDate(
   const metadata: AnnotationsMetadata = { commitId, lastChecked: dateStr, date: dateObj };
   fs.mkdirSync(cacheDir, { recursive: true });
   const metaPath = path.join(cacheDir, METADATA_FILENAME);
-  const tempMetaPath = path.join(
-    os.tmpdir(),
-    `.metadata-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.tmp`,
-  );
-  try {
-    fs.writeFileSync(tempMetaPath, JSON.stringify(metadata, null, 2), "utf-8");
-    fs.copyFileSync(tempMetaPath, metaPath);
-  } finally {
-    try {
-      if (fs.existsSync(tempMetaPath)) fs.unlinkSync(tempMetaPath);
-    } catch (err) {
-      logger.warn(
-        `Failed to clean up temporary metadata file ${tempMetaPath}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
+  // Atomic replacement (#7): concurrent readers always parse a complete file.
+  writeAtomicFileSync(metaPath, JSON.stringify(metadata, null, 2));
   return metadata;
 }
