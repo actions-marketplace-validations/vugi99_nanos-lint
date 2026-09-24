@@ -77,13 +77,16 @@ Alternatively, you can run the individual quality gates:
 # 1. Lint the codebase (must have 0 errors and 0 warnings)
 npm run lint
 
-# 2. Type-check TypeScript (must produce 0 type errors)
+# 2. Check comment density (<= 15% limit on files >= 50 lines)
+npm run lint:comments
+
+# 3. Type-check TypeScript (must produce 0 type errors)
 npm run typecheck
 
-# 3. Build distribution bundle
+# 4. Build distribution bundle
 npm run build
 
-# 4. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
+# 5. Run all Vitest unit and live LuaLS integration tests with coverage thresholds (must be 100% passing)
 npm run test:coverage
 ```
 

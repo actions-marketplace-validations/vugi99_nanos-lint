@@ -6,23 +6,10 @@ import { countCheckedFiles } from "../../src/luals/files.js";
 import { logger } from "../../src/logger.js";
 import { legacyCountCheckedFiles } from "../helpers/legacy-count.js";
 
-/**
- * Differential test for #27: the bundled-glob implementation is compared against
- * the pre-#27 implementation (`tests/helpers/legacy-count.ts`) on the same tree.
- *
- * The first block pins every configuration whose behaviour must not change, so a
- * future `glob`/`minimatch` upgrade cannot silently alter results. The second
- * block lists the differences #27 *intends* to introduce; each one is asserted
- * explicitly instead of being left implicit in the parity list.
- */
-
-/** Counted Lua files in the fixture tree with the built-in ignore list. */
+/** Differential test comparing bundled-glob against pre-#27 legacy implementation (#27). */
 const TOTAL_LUA_FILES = 13;
-/** Counted Lua files when a custom `workspace.ignoreDir` replaces the built-in list (node_modules and the three dot-directories are walked again). */
 const CUSTOM_IGNORE_LUA_FILES = 17;
-/** Lua files under `vendor/`. */
 const VENDOR_LUA_FILES = 2;
-/** `deep/nested/` holds six Lua files in the fixture tree. */
 const NESTED_LUA_FILES = 6;
 
 describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
@@ -156,8 +143,6 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
 
     it("supports character classes", () => {
       const configPath = writeConfig("char-class", { files: { exclude: ["**/item-[0-9].lua"] } });
-
-      // Legacy escaped "[" and matched it literally, excluding nothing.
       expect(legacyCountCheckedFiles(root, configPath)).toBe(TOTAL_LUA_FILES);
       expect(countCheckedFiles(root, configPath)).toBe(TOTAL_LUA_FILES - 1);
     });
@@ -190,12 +175,10 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
             process.platform === "win32" ? "junction" : "dir"
           );
         } catch (err) {
-          // Creating links can require elevated privileges on some Windows setups.
           void err;
           return;
         }
 
-        // The legacy walk followed the link and counted deep/nested/ twice.
         expect(legacyCountCheckedFiles(projectDir)).toBe(TOTAL_LUA_FILES + NESTED_LUA_FILES);
         expect(countCheckedFiles(projectDir)).toBe(TOTAL_LUA_FILES);
       } finally {
@@ -206,9 +189,6 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
 
   describe("absolute patterns (#27)", () => {
     it("skips absolute ignoreDir and exclude entries on every platform", () => {
-      // glob anchors absolute ignore patterns on some platforms but not others
-      // (macOS `/var` -> `/private/var`, Windows drive letters), so they are
-      // rejected everywhere to keep the same `.luarc.json` behaving identically.
       const ignoreDirConfig = writeConfig("absolute-ignore", {
         workspace: {
           ignoreDir: [path.join(root, "vendor"), "C:/somewhere/vendor", "/etc/lua"],
@@ -230,7 +210,6 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
       try {
         fs.writeFileSync(path.join(probeRoot, "aaaaaaa.lua"), "-- fixture");
 
-        // Four wildcards in one segment: within minimatch's reach, beyond ours.
         const overBudget = path.join(probeRoot, ".luarc-over-budget.json");
         fs.writeFileSync(
           overBudget,
@@ -240,7 +219,6 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
         expect(countCheckedFiles(probeRoot, overBudget)).toBe(1);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("too complex"));
 
-        // Two wildcards in the same shape stay supported and do exclude the file.
         const realistic = path.join(probeRoot, ".luarc-realistic.json");
         fs.writeFileSync(
           realistic,
@@ -263,7 +241,6 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
 
       try {
         const started = Date.now();
-        // Skipped, so every file is still counted and the walk stays fast.
         expect(countCheckedFiles(root, configPath)).toBe(TOTAL_LUA_FILES);
         expect(Date.now() - started).toBeLessThan(5000);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("too complex"));
@@ -277,7 +254,6 @@ describe("countCheckedFiles() parity with the pre-#27 implementation", () => {
         files: { exclude: ["**/{nested,{vendor,build}}/**", "**/*.min.*", "**/*test*/**/*.lua"] },
       });
 
-      // Everything except keep.lua, UPPER.LUA, .hidden.lua and .dotdir/inside.lua.
       expect(countCheckedFiles(root, configPath)).toBe(4);
     });
   });

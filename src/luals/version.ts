@@ -4,11 +4,7 @@ import { LuaLSError } from "../errors.js";
 export const FALLBACK_LUALS_VERSION = "3.19.1";
 export const DEFAULT_LUALS_VERSION = "latest";
 
-/**
- * Characters accepted in a LuaLS version/tag. Only ASCII letters, digits, dots,
- * dashes and underscores are allowed, so a version can never contain a path
- * separator, a drive letter or a traversal segment.
- */
+/** Characters accepted in a safe LuaLS version tag. */
 const SAFE_VERSION_CHARS: ReadonlyMap<string, string> = new Map(
   [..."0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._-"].map((ch) => [ch, ch])
 );
@@ -16,17 +12,8 @@ const SAFE_VERSION_CHARS: ReadonlyMap<string, string> = new Map(
 const MAX_VERSION_LENGTH = 64;
 
 /**
- * Validates a LuaLS version/tag and rebuilds it from the allow-list above.
- *
- * Version strings originate from untrusted sources: the GitHub releases API
- * response and user supplied `--luals-version` arguments. They are interpolated
- * into cache directory paths, download URLs, and the path of the binary that is
- * eventually executed, so they must be constrained to a single safe path
- * segment. Rebuilding the value character by character guarantees the returned
- * string only ever contains allow-listed characters (CodeQL: js/command-line-injection).
- *
- * @returns the normalized version (a single leading `v` is dropped), or `null`
- *          when the input cannot be used as a version tag.
+ * Validates and normalizes a LuaLS version string to prevent path traversal or injection.
+ * Drops a single leading 'v' and returns null on invalid characters.
  */
 export function sanitizeLuaLSVersion(raw: string): string | null {
   const trimmed = raw.trim();
@@ -48,8 +35,7 @@ export function sanitizeLuaLSVersion(raw: string): string | null {
     version = version.slice(1);
   }
 
-  // The first character must be alphanumeric, which rejects "", "v", ".", ".."
-  // and any other value that could escape or alias a directory as a path segment.
+  // First character must be alphanumeric to prevent directory traversal or alias.
   const first = version.charCodeAt(0);
   const startsAlphanumeric =
     (first >= 0x30 && first <= 0x39) || // 0-9

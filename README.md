@@ -225,6 +225,7 @@ npm run check:all
 
 # Run individual quality gates
 npm run lint           # ESLint
+npm run lint:comments  # Comment density limit (<= 15%)
 npm run typecheck      # TypeScript typecheck
 npm run build          # Build distribution bundle
 npm run test:coverage  # Vitest unit + live LuaLS integration tests with coverage

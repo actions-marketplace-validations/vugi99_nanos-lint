@@ -49,6 +49,9 @@ jobs:
       - name: Lint TypeScript code
         run: npm run lint
 
+      - name: Check comment density
+        run: npm run lint:comments
+
       - name: Typecheck TypeScript code
         run: npm run typecheck
 
