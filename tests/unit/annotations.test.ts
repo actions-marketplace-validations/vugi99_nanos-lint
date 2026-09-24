@@ -467,6 +467,24 @@ describe("annotations management and date-based caching", () => {
       );
     });
 
+    it("closes file descriptor when readSync throws during customPath validation", async () => {
+      const customFile = path.join(tempBaseDir, "throwing-read-custom.lua");
+      fs.writeFileSync(customFile, "-- valid text header");
+
+      const closeSpy = vi.spyOn(fs, "closeSync");
+      const readSpy = vi.spyOn(fs, "readSync").mockImplementationOnce(() => {
+        throw new Error("simulated EIO");
+      });
+      try {
+        const resolved = await resolveAnnotations({ customPath: customFile });
+        expect(resolved).toBe(path.resolve(customFile));
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        readSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
+    });
+
     it("resolves annotations from NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS environment variable", async () => {
       const customEnvFile = path.join(tempBaseDir, "env-custom.lua");
       fs.writeFileSync(customEnvFile, "-- env custom");

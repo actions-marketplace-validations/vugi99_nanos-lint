@@ -394,10 +394,15 @@ function validateCustomAnnotationsPath(filePath: string, source: "custom" | "env
 
   try {
     const fd = fs.openSync(resolved, "r");
-    const buffer = Buffer.alloc(Math.min(stat.size, 512));
-    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    fs.closeSync(fd);
-    if (buffer.subarray(0, bytesRead).includes(0)) {
+    let isBinary = false;
+    try {
+      const buffer = Buffer.alloc(Math.min(stat.size, 512));
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+      isBinary = buffer.subarray(0, bytesRead).includes(0);
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (isBinary) {
       throw new AnnotationsError(
         source === "custom"
           ? `Custom annotations file appears to be a binary file: ${resolved}`
