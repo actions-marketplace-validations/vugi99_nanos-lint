@@ -78,23 +78,27 @@ export async function resolveAndPinAnnotations(destPath: string): Promise<string
   return commitId;
 }
 
+export interface PackageReleaseOptions {
+  repoRoot?: string;
+  targetIds?: string[];
+  lualsVersion?: string;
+}
+
 export async function packageRelease(
   tagName: string,
-  repoRoot: string = process.cwd(),
-): Promise<void> {
+  options?: PackageReleaseOptions,
+): Promise<{ outputArchives: string[]; sumsPath: string }> {
   const cleanTag = sanitizeTag(tagName);
+  const repoRoot = options?.repoRoot ?? process.cwd();
   const token = process.env.GITHUB_TOKEN;
 
   console.log(`\n=== Starting Release Packaging for tag ${cleanTag} ===\n`);
 
-  const lualsVersion = await resolveLuaLSReleaseVersion(token);
+  const lualsVersion = options?.lualsVersion ?? (await resolveLuaLSReleaseVersion(token));
   console.log(`[release] Using LuaLS release version: ${lualsVersion}`);
 
   const releaseBuildsDir = path.join(repoRoot, "release-builds");
   fs.mkdirSync(releaseBuildsDir, { recursive: true });
-
-  const tempAnnotationsPath = path.join(repoRoot, "annotations.lua");
-  await resolveAndPinAnnotations(tempAnnotationsPath);
 
   const workDir = path.join(repoRoot, ".package-release-tmp");
   if (fs.existsSync(workDir)) {
@@ -102,8 +106,18 @@ export async function packageRelease(
   }
   fs.mkdirSync(workDir, { recursive: true });
 
+  const tempAnnotationsPath = path.join(workDir, "annotations.lua");
+  const annotationsCommitId = await resolveAndPinAnnotations(tempAnnotationsPath);
+
+  const targets = options?.targetIds
+    ? PACKAGE_TARGETS.filter((t) => options.targetIds!.includes(t.id))
+    : PACKAGE_TARGETS;
+
+  const outputArchives: string[] = [];
+  const checksumLines: string[] = [];
+
   try {
-    for (const target of PACKAGE_TARGETS) {
+    for (const target of targets) {
       console.log(`\n--- Packaging Target: ${target.id} ---`);
       const assetName = target.lualsAssetName(lualsVersion);
       const downloadUrl = `https://github.com/LuaLS/lua-language-server/releases/download/${lualsVersion}/${assetName}`;
@@ -113,7 +127,7 @@ export async function packageRelease(
       const archiveSha = await downloadAssetHardened(downloadUrl, downloadPath);
       console.log(`[release] Downloaded ${assetName} (SHA-256 ${archiveSha})`);
 
-      const extractedLualsDir = path.join(repoRoot, `${target.pkgDirName}-luals`);
+      const extractedLualsDir = path.join(workDir, `${target.pkgDirName}-luals`);
       console.log(`[release] Pre-validating and extracting to ${extractedLualsDir}...`);
       await safeExtractArchive(downloadPath, extractedLualsDir);
 
@@ -123,7 +137,7 @@ export async function packageRelease(
         expectedArch: target.expectedArch,
       });
 
-      const pkgDir = path.join(repoRoot, target.pkgDirName);
+      const pkgDir = path.join(workDir, target.pkgDirName);
       console.log(`[release] Assembling distribution package in ${pkgDir}...`);
       assemblePackageDir({
         pkgDir,
@@ -138,15 +152,40 @@ export async function packageRelease(
       console.log(`[release] Creating archive: ${archivePath}...`);
       await createReleaseArchive(pkgDir, archivePath, target.archiveFormat);
 
+      await (await import("./packaging/bundle.js")).verifyReleaseArchive(archivePath);
+
       const archiveStat = fs.statSync(archivePath);
-      console.log(`[release] Successfully packaged ${archiveName} (${archiveStat.size} bytes)`);
+      const createdSha = computeFileSha256(archivePath);
+      checksumLines.push(`${createdSha}  ${archiveName}`);
+      outputArchives.push(archivePath);
+      console.log(
+        `[release] Successfully packaged ${archiveName} (${archiveStat.size} bytes, SHA-256 ${createdSha})`,
+      );
     }
 
+    const sumsPath = path.join(releaseBuildsDir, "SHA256SUMS");
+    const sumsContent = [
+      "# nanos-lint release provenance",
+      `# Release tag: ${cleanTag}`,
+      `# LuaLS version: ${lualsVersion}`,
+      `# Annotations commit: ${annotationsCommitId}`,
+      "",
+      ...checksumLines,
+      "",
+    ].join("\n");
+    fs.writeFileSync(sumsPath, sumsContent, "utf-8");
+    console.log(`[release] Generated provenance checksums manifest at ${sumsPath}`);
+
     console.log("\n=== Release Packaging Completed Successfully ===");
+    return { outputArchives, sumsPath };
   } finally {
     try {
       if (fs.existsSync(workDir)) {
         fs.rmSync(workDir, { recursive: true, force: true });
+      }
+      const leftoverRootAnnotations = path.join(repoRoot, "annotations.lua");
+      if (fs.existsSync(leftoverRootAnnotations)) {
+        fs.unlinkSync(leftoverRootAnnotations);
       }
     } catch (err) {
       void err;

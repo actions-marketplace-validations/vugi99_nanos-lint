@@ -142,6 +142,7 @@ jobs:
             release-builds/nanos-lint-*-linux-arm64.tar.gz
             release-builds/nanos-lint-*-macos-arm64.tar.gz
             release-builds/nanos-lint-*-macos-x64.tar.gz
+            release-builds/SHA256SUMS
           draft: false
           prerelease: false
           generate_release_notes: true

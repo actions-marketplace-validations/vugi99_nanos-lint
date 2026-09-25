@@ -46,15 +46,19 @@ export function assemblePackageDir(options: AssembleOptions): void {
   fs.mkdirSync(path.join(pkgDir, "dist"), { recursive: true });
 
   const binSrc = path.join(extractedLualsDir, "bin");
-  if (fs.existsSync(binSrc)) {
-    fs.cpSync(binSrc, path.join(pkgDir, "bin"), { recursive: true });
+  if (!fs.existsSync(binSrc)) {
+    throw new Error(`Cannot assemble package: missing bin directory in ${extractedLualsDir}`);
   }
+  fs.cpSync(binSrc, path.join(pkgDir, "bin"), { recursive: true });
 
   for (const item of ["locale", "meta", "script", "main.lua"]) {
     const src = path.join(extractedLualsDir, item);
-    if (fs.existsSync(src)) {
-      fs.cpSync(src, path.join(pkgDir, item), { recursive: true });
+    if (!fs.existsSync(src)) {
+      throw new Error(
+        `Cannot assemble package: required LuaLS asset '${item}' is missing in ${extractedLualsDir}`,
+      );
     }
+    fs.cpSync(src, path.join(pkgDir, item), { recursive: true });
   }
 
   fs.cpSync(path.join(repoRoot, "dist"), path.join(pkgDir, "dist"), { recursive: true });
@@ -104,7 +108,17 @@ export async function createReleaseArchive(
         ]);
       }
     } else {
-      await execFileAsync("zip", ["-rq", resolvedOut, "."], { cwd: pkgDir });
+      try {
+        await execFileAsync("zip", ["-rq", resolvedOut, "."], { cwd: pkgDir });
+      } catch (err) {
+        try {
+          await execFileAsync("tar", ["-acf", resolvedOut, "."], { cwd: pkgDir });
+        } catch {
+          throw new Error(
+            `Failed to create zip archive '${outputFile}': neither 'zip' nor 'tar' could package it: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     }
   } else {
     const tarBin = process.platform === "win32" ? getTarBinary() : "tar";
@@ -113,5 +127,13 @@ export async function createReleaseArchive(
 
   if (!fs.existsSync(resolvedOut) || fs.statSync(resolvedOut).size === 0) {
     throw new Error(`Failed to create release archive or output is empty: ${resolvedOut}`);
+  }
+}
+
+export async function verifyReleaseArchive(archivePath: string): Promise<void> {
+  const { validateArchiveMembers } = await import("../../src/luals/validation.js");
+  const stats = await validateArchiveMembers(archivePath);
+  if (stats.memberCount === 0 || stats.totalDeclaredSize === 0) {
+    throw new Error(`Release archive ${archivePath} is empty or has 0 members.`);
   }
 }

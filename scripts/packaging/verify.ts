@@ -53,10 +53,19 @@ export function verifyBinaryArch(binaryPath: string, expectedArch: TargetArchite
   }
 }
 
+export const DEFAULT_REQUIRED_LUALS_ENTRIES: readonly string[] = [
+  "bin",
+  "main.lua",
+  "locale",
+  "meta",
+  "script",
+];
+
 export interface TreeInvariantOptions {
   expectedBinName: string;
   expectedArch: TargetArchitecture;
   maxTotalBytes?: number;
+  requiredEntries?: readonly string[];
 }
 
 export function verifyExtractedTreeInvariants(
@@ -92,6 +101,7 @@ export function verifyExtractedTreeInvariants(
       if (lstat.isDirectory()) {
         walk(fullPath);
       } else if (lstat.isFile()) {
+        // Reject hard links (nlink > 1) as intentional defense against archive-planted links escaping or modifying files.
         if (lstat.nlink > 1) {
           throw new Error(
             `Extracted tree invariant failed: hard link detected at ${fullPath} (nlink=${lstat.nlink})`,
@@ -112,9 +122,19 @@ export function verifyExtractedTreeInvariants(
 
   walk(extractedDir);
 
+  const required = options.requiredEntries ?? DEFAULT_REQUIRED_LUALS_ENTRIES;
+  for (const entry of required) {
+    const fullEntryPath = path.join(extractedDir, entry);
+    if (!fs.existsSync(fullEntryPath)) {
+      throw new Error(
+        `Extracted tree invariant failed: missing expected content set entry '${entry}' in ${extractedDir}`,
+      );
+    }
+  }
+
   const mainLuaPath = path.join(extractedDir, "main.lua");
-  if (!fs.existsSync(mainLuaPath) || !fs.statSync(mainLuaPath).isFile()) {
-    throw new Error(`Extracted tree invariant failed: missing main.lua in ${extractedDir}`);
+  if (!fs.statSync(mainLuaPath).isFile()) {
+    throw new Error(`Extracted tree invariant failed: main.lua is not a file in ${extractedDir}`);
   }
 
   const binaryPath = path.join(extractedDir, "bin", options.expectedBinName);
@@ -229,7 +249,17 @@ export async function safeExtractArchive(archivePath: string, targetDir: string)
     }
   } else {
     if (isZip) {
-      await execFileAsync("unzip", ["-q", "-o", path.resolve(archivePath), "-d", targetDir]);
+      try {
+        await execFileAsync("unzip", ["-q", "-o", path.resolve(archivePath), "-d", targetDir]);
+      } catch (err) {
+        try {
+          await execFileAsync("tar", ["-xf", path.resolve(archivePath), "-C", targetDir]);
+        } catch {
+          throw new Error(
+            `Failed to extract zip archive '${archivePath}': neither 'unzip' nor 'tar' could extract it: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     } else {
       await execFileAsync("tar", [
         "-xf",

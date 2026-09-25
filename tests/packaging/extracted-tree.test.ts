@@ -34,8 +34,23 @@ describe("extracted tree invariant checks", () => {
     fs.writeFileSync(binPath, elfBuf);
 
     fs.writeFileSync(path.join(tmpDir, "main.lua"), "-- main script\n");
+    fs.mkdirSync(path.join(tmpDir, "locale"), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, "meta"), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, "script"), { recursive: true });
     return { binName, binPath };
   }
+
+  it("fails if required content set entry (e.g. meta) is missing", () => {
+    const { binName } = setupValidTree("x64");
+    fs.rmSync(path.join(tmpDir, "meta"), { recursive: true, force: true });
+
+    expect(() =>
+      verifyExtractedTreeInvariants(tmpDir, {
+        expectedBinName: binName,
+        expectedArch: "x64",
+      }),
+    ).toThrow(/missing expected content set entry 'meta'/);
+  });
 
   it("accepts a well-formed extracted directory tree", () => {
     const { binName } = setupValidTree("x64");
@@ -67,7 +82,7 @@ describe("extracted tree invariant checks", () => {
         expectedBinName: binName,
         expectedArch: "x64",
       }),
-    ).toThrow(/missing main\.lua/);
+    ).toThrow(/missing .*main\.lua/);
   });
 
   it("fails if expected binary is missing", () => {

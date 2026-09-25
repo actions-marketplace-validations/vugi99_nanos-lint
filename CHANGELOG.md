@@ -11,12 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Hardened release workflow packaging pipeline (`.github/workflows/release.yml`, `scripts/package-release.ts`, `scripts/packaging/*`):
   - Pre-extraction archive validation: All five upstream LuaLS release archives are inspected before extraction with `validateArchiveMembers()`, rejecting symlinks/hardlinks, path traversals (`..`, leading `/`, drive letters, UNC paths), member counts exceeding 10,000, and declared decompressed sizes exceeding 500 MB.
-  - Safe extraction flags: Tar archives are extracted with `--no-same-owner --no-same-permissions` and zip archives are extracted with `unzip -q -o` into clean, dedicated target directories.
-  - Post-extraction tree invariants: The extracted directory tree is traversed to guarantee no symbolic links, hard links, or escaped paths exist, total decompressed size does not exceed 500 MB, core files (`bin/lua-language-server(.exe)`, `main.lua`) exist, and binary headers match the target architecture (ELF/PE/Mach-O).
-  - Transport hardening: Enforced HTTPS only, restricted redirects to allowlisted domains (`github.com`, `githubusercontent.com`), capped archive download streams to 150 MB, and recorded SHA-256 digests in build logs for audit trails.
-  - Pinned `annotations.lua`: Pinned upstream API annotations download to an immutable commit SHA resolved via GitHub API instead of mutable branch HEAD, enforced size bounds (1,000 bytes to 10 MiB), and verified SHA-256 digests.
+  - Safe extraction flags and fallbacks: Tar archives are extracted with `--no-same-owner --no-same-permissions` and zip archives are extracted with `unzip -q -o` (with resilient fallbacks) into clean, dedicated target directories.
+  - Post-extraction tree invariants: The extracted directory tree is traversed to guarantee no symbolic links, hard links, or escaped paths exist, total decompressed size does not exceed 500 MB, the complete expected file set (`bin/lua-language-server(.exe)`, `main.lua`, `locale/`, `meta/`, `script/`) exists, and binary headers match the target architecture (ELF/PE/Mach-O).
+  - Transport hardening: Enforced HTTPS only, restricted redirects to allowlisted domains (`github.com`, `githubusercontent.com`), capped archive download streams to 150 MB, and recorded SHA-256 digests for audit.
+  - Pinned `annotations.lua`: Pinned upstream API annotations download to an immutable commit SHA resolved via GitHub API instead of mutable branch HEAD, enforced size bounds (1,000 bytes to 10 MiB), and recorded SHA-256 digests for audit.
+  - Release provenance manifest: Writes `release-builds/SHA256SUMS` with release metadata (resolved LuaLS version, pinned annotations commit SHA) and asset SHA-256 checksums, published as a release asset.
   - Third-party Action pinning: Pinned `softprops/action-gh-release` in `.github/workflows/release.yml` to immutable commit SHA `efb35369e0ad2afab669f228072c1b0d510eae64` (`# v3`).
-  - Added dedicated packaging test suite under `tests/packaging/` separated from app tests, covering pre-extraction checks, tree invariants, binary architecture inspection, transport hardening, and annotations commit pinning.
+  - Added dedicated packaging test suite under `tests/packaging/` separated from app tests, covering pre-extraction checks, safe extraction, tree invariants, binary architecture inspection, transport hardening, and annotations commit pinning.
 
 ### Added
 
