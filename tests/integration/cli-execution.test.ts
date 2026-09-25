@@ -124,6 +124,66 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     );
   }, 120000);
 
+  it("executes dist/cli.js check with variadic paths and realm selection (#46)", async () => {
+    const fixture = path.join(rootDir, "tests", "fixtures", "realms");
+    const sharedDir = path.join(fixture, "Shared");
+    const serverDir = path.join(fixture, "Server");
+    try {
+      await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        sharedDir,
+        serverDir,
+        "--realm",
+        "server",
+        "--format=pretty",
+      ]);
+      expect.fail("Expected server realm violations to fail the check");
+    } catch (err: unknown) {
+      const execErr = err as { code?: number; stdout?: string };
+      const stdout = normalizeSlashes(execErr.stdout);
+      expect(execErr.code).toBe(1);
+      expect(stdout).toContain("tests/fixtures/realms/Server/combat.lua");
+      expect(stdout).not.toContain("tests/fixtures/realms/Client/hud.lua");
+      expect(stdout).not.toContain("tests/fixtures/realms/Shared/bridge.lua");
+    }
+  }, 120000);
+
+  it("passes clean package with variadic directory targets through dist/cli.js (#46)", async () => {
+    const cleanFixture = path.join(rootDir, "tests", "fixtures", "realms_clean");
+    const sharedDir = path.join(cleanFixture, "Shared");
+    const serverDir = path.join(cleanFixture, "Server");
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      distCli,
+      "check",
+      sharedDir,
+      serverDir,
+      "--format=pretty",
+    ]);
+
+    expect(normalizeSlashes(stdout)).toMatch(
+      /Diagnosis completed, no problems found across 3 files\./,
+    );
+  }, 120000);
+
+  it("executes dist/cli.js check with variadic file targets (#46)", async () => {
+    const file1 = path.join(rootDir, "tests", "pass", "character.lua");
+    const file2 = path.join(rootDir, "tests", "pass", "events.lua");
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      distCli,
+      "check",
+      file1,
+      file2,
+      "--format=pretty",
+    ]);
+
+    expect(normalizeSlashes(stdout)).toMatch(
+      /Diagnosis completed, no problems found across 2 files\./,
+    );
+  }, 120000);
+
   it("executes bin/nanos-lint.js --help and matches dist/cli.js output", async () => {
     const { stdout: binStdout } = await execFileAsync(process.execPath, [binCli, "--help"]);
     const { stdout: distStdout } = await execFileAsync(process.execPath, [distCli, "--help"]);

@@ -712,5 +712,66 @@ describe("cli module flag and command parsing", () => {
         errSpy.mockRestore();
       }
     });
+
+    it("supports variadic paths for check command (#46)", async () => {
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const cleanup = vi.fn();
+      const plan = {
+        baseConfigPath: "/tmp/base.json",
+        passes: [
+          {
+            realm: "server" as const,
+            configPath: "/tmp/server.json",
+            reportFiles: new Set(["Server/combat.lua"]),
+          },
+        ],
+        cleanup,
+      };
+      const planSpy = vi.spyOn(realmsModule, "planRealmCheck").mockReturnValue(plan);
+      const realmRunSpy = vi.spyOn(realmsModule, "runRealmAwareCheck").mockResolvedValue({
+        passed: true,
+        totalProblems: 0,
+        totalFiles: 1,
+        diagnostics: {},
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const code = await runCLI([
+          "check",
+          "tests/fixtures/realms/Shared",
+          "tests/fixtures/realms/Server",
+          "--realm",
+          "server",
+        ]);
+        expect(code).toBe(0);
+        expect(planSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            selection: "server",
+            targetPaths: ["tests/fixtures/realms/Shared", "tests/fixtures/realms/Server"],
+          }),
+        );
+        expect(cleanup).toHaveBeenCalledTimes(1);
+      } finally {
+        annotSpy.mockRestore();
+        planSpy.mockRestore();
+        realmRunSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it("errors when any variadic path does not exist", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const code = await runCLI(["check", "tests/pass", "nonexistent_dir_xyz"]);
+        expect(code).toBe(1);
+        const messages = errSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+        expect(messages).toContain("Target path does not exist: nonexistent_dir_xyz");
+      } finally {
+        errSpy.mockRestore();
+      }
+    });
   });
 });

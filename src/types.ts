@@ -26,7 +26,8 @@ export interface Diagnostic {
 export type DiagnosticReport = Record<string, Diagnostic[]>;
 
 export interface CheckOptions {
-  path: string;
+  path?: string;
+  paths?: string[];
   checklevel?: DiagnosticSeverity;
   configpath?: string;
   lualsVersion?: string;
