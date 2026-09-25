@@ -12,7 +12,7 @@ import { getCacheStatus, formatCacheStatusPretty } from "./cache-status.js";
 import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
 import { ConfigError, NanosLintError } from "./errors.js";
-import { resolveCheckTargets } from "./target-resolver.js";
+import { computeUnrequestedExclusions, resolveCheckTargets } from "./target-resolver.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
 
 /** Retrieves the formatted package name and version string from package.json. */
@@ -93,7 +93,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
 
   program
     .command("check [paths...]", { isDefault: true })
-    .description("Check a workspace or Lua file (default command)")
+    .description("Check workspace files or directories (default command)")
     .addOption(
       new Option(
         "--checklevel <level>",
@@ -147,7 +147,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
       }
 
       const rawPaths = targetPaths && targetPaths.length > 0 ? targetPaths : ["."];
-      const { rootPath, targetPaths: resolvedTargets } = resolveCheckTargets(rawPaths);
+      const { rootPath, targetPaths: canonicalTargets } = resolveCheckTargets(rawPaths);
 
       const format = opts.github
         ? "github"
@@ -155,7 +155,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
 
       const checkOptions: CheckOptions = {
         path: rootPath,
-        paths: rawPaths,
+        paths: canonicalTargets,
         configpath: opts.config,
         checklevel: opts.checklevel,
         format,
@@ -188,7 +188,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
         annotationsPath,
         customConfigPath: checkOptions.configpath,
         ignore: checkOptions.ignore,
-        targetPaths: resolvedTargets,
+        targetPaths: canonicalTargets,
         cliDeps: checkOptions.deps,
       });
 
@@ -201,10 +201,12 @@ export function createProgram(options?: CreateProgramOptions): Command {
         }
       } else {
         const resolvedDeps = resolvePackageDependencies(rootPath, userConfig, checkOptions.deps);
+        const unrequestedExclusions = computeUnrequestedExclusions(rootPath, canonicalTargets);
         const resolved = resolveWorkspaceConfig(rootPath, checkOptions.configpath, {
           ignore: checkOptions.ignore,
           annotationsPath,
           dependencyLibraries: resolvedDeps.all,
+          unrequestedExclusions,
         });
         try {
           result = await runLuaLSCheck(rootPath, resolved.configPath, checkOptions);

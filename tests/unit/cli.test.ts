@@ -746,11 +746,17 @@ describe("cli module flag and command parsing", () => {
           "--realm",
           "server",
         ]);
+        const expectedShared = fs.realpathSync.native
+          ? fs.realpathSync.native(path.resolve("tests/fixtures/realms/Shared"))
+          : path.resolve("tests/fixtures/realms/Shared");
+        const expectedServer = fs.realpathSync.native
+          ? fs.realpathSync.native(path.resolve("tests/fixtures/realms/Server"))
+          : path.resolve("tests/fixtures/realms/Server");
         expect(code).toBe(0);
         expect(planSpy).toHaveBeenCalledWith(
           expect.objectContaining({
             selection: "server",
-            targetPaths: ["tests/fixtures/realms/Shared", "tests/fixtures/realms/Server"],
+            targetPaths: [expectedShared, expectedServer],
           }),
         );
         expect(cleanup).toHaveBeenCalledTimes(1);

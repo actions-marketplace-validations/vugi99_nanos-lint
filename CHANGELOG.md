@@ -23,10 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated `CheckOptions` in `src/types.ts` to accept optional `paths?: string[]`.
   - Added unit tests in `tests/unit/target-resolver.test.ts` and `tests/unit/cli.test.ts`, and integration tests in `tests/integration/cli-execution.test.ts`.
 
-### Fixed
-
 - Replaced regex trailing slash removal with index-based scanning in `src/target-resolver.ts` to prevent polynomial ReDoS CodeQL warnings (`js/polynomial-redos`).
-- Canonicalized temporary test directories using `fs.realpathSync.native` and added canonical path fallback in `filterReportByFiles()` to support macOS (`/var` symlink to `/private/var`) and Windows 8.3 short-path resolution.
+- Fixed symlinked and non-canonical target paths silently discarding diagnostics by canonicalizing roots and targets via `getCanonicalPath()` in `resolveCheckTargets()`, `matchesTargetPaths()`, and `filterReportByTargetPaths()`.
+- Prevented unrequested sibling files under common ancestor directories from leaking globals and masking `undefined-global` diagnostics by computing and applying `computeUnrequestedExclusions()` to `files.exclude` in both realm-aware and fallback passes.
+- Discovered enclosing project root containing `.luarc.json` via `findProjectRoot()` when checking subpaths or single files, properly preserving realm configurations and package dependencies.
+- Added cross-volume (`ERR_MULTIPLE_ROOTS`) and filesystem root (`ERR_ROOT_ANCESTOR`) validation for target paths.
+- Emitted a warning (`logger.warn`) when a requested realm filter matches no target files before falling back to a standard check.
+- Cached parsed `.luarc.json` configurations in `src/deps.ts` to eliminate duplicate disk reads and JSON parsing during dependency graph traversal.
+- Added `paths` and `dep` inputs to GitHub Action composite definition (`action.yml`).
 
 ## [3.0.1] - 2026-09-25
 

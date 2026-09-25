@@ -26,7 +26,9 @@ export interface Diagnostic {
 export type DiagnosticReport = Record<string, Diagnostic[]>;
 
 export interface CheckOptions {
+  /** Single workspace path or file to check (legacy/convenience option). */
   path?: string;
+  /** One or more workspace target paths or files to check. If provided, takes precedence over `path`. */
   paths?: string[];
   checklevel?: DiagnosticSeverity;
   configpath?: string;
@@ -35,6 +37,7 @@ export interface CheckOptions {
   failOnError?: boolean;
   lualsBin?: string;
   ignore?: string[];
+  /** External package dependency directories or Lua files. */
   deps?: string[];
 }
 

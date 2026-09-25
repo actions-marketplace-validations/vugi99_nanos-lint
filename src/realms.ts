@@ -10,7 +10,11 @@ import {
 import { deriveRealmAnnotationFiles, type RealmPassName } from "./annotations-realms.js";
 import { logger } from "./logger.js";
 import { listCheckedFiles, runLuaLSCheck } from "./luals.js";
-import { matchesTargetPaths } from "./target-resolver.js";
+import {
+  computeUnrequestedExclusions,
+  getCanonicalPath,
+  matchesTargetPaths,
+} from "./target-resolver.js";
 import { resolvePackageDependencies } from "./deps.js";
 import {
   fileUriToPath,
@@ -179,9 +183,13 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
     return null;
   }
 
+  const unrequestedExclusions = options.targetPaths
+    ? computeUnrequestedExclusions(resolvedTarget, options.targetPaths)
+    : [];
   const baseConfig = buildWorkspaceConfig(resolvedTarget, options.customConfigPath, {
     ignore: options.ignore,
     annotationsPath,
+    unrequestedExclusions,
   });
   const tempConfigs: string[] = [];
   const baseConfigPath = writeTempConfig(baseConfig);
@@ -218,9 +226,15 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
 
     const wanted = selectedRealms(selection).filter((realm) => realmReportFiles[realm].size > 0);
     if (wanted.length === 0) {
-      logger.debug(
-        "[realms] No files to report for selected realm pass; running a single standard pass.",
-      );
+      if (selection !== "all") {
+        logger.warn(
+          `[realms] No target files match the requested realm "${selection}"; falling back to a standard check.`,
+        );
+      } else {
+        logger.debug(
+          "[realms] No files to report for selected realm pass; running a single standard pass.",
+        );
+      }
       for (const tempConfig of tempConfigs) {
         removeTempConfig(tempConfig);
       }
@@ -282,15 +296,6 @@ function removeTempConfig(configPath: string): void {
     logger.warn(
       `Failed to clean up temporary config file ${configPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
-  }
-}
-
-/** Resolves the canonical filesystem path, falling back to original path on failure. */
-function getCanonicalPath(p: string): string {
-  try {
-    return fs.realpathSync.native ? fs.realpathSync.native(p) : fs.realpathSync(p);
-  } catch {
-    return p;
   }
 }
 

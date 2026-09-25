@@ -48,6 +48,8 @@ nanos-lint/
 │   ├── lock.ts              # Cross-process file locks and atomic file replacement
 │   ├── luals.ts             # Binary download, caching, and execution manager
 │   ├── reporter.ts          # Terminal pretty, JSON, and GitHub Actions annotation formatters
+│   ├── deps.ts              # Package dependency resolution, transitive cycle detection, and realm partitioning
+│   ├── target-resolver.ts   # Multi-target resolution, common ancestor discovery, and path filtering
 │   ├── cli.ts               # CLI command-line parser
 │   └── index.ts             # Public programmatic exports
 ├── tests/

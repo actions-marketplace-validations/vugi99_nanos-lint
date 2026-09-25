@@ -71,6 +71,7 @@ export function resolvePackageDependencies(
 
   const resolvedFiles: string[] = [];
   const resolvedDirs: string[] = [];
+  const depConfigMap = new Map<string, LuaRCConfig>();
 
   const isWin = process.platform === "win32";
 
@@ -131,6 +132,7 @@ export function resolvePackageDependencies(
       if (fs.existsSync(candidateLuarc)) {
         try {
           const depConfig = loadUserConfig(canonical);
+          depConfigMap.set(canonical, depConfig);
           const transDeps = depConfig.nanos?.deps;
           if (transDeps !== undefined) {
             if (Array.isArray(transDeps)) {
@@ -174,11 +176,14 @@ export function resolvePackageDependencies(
     const normDepDir = normalizeSlash(depDir);
     allSet.add(normDepDir);
 
-    let depConfig: LuaRCConfig = {};
-    try {
-      depConfig = loadUserConfig(depDir);
-    } catch (err) {
-      void err;
+    let depConfig = depConfigMap.get(depDir);
+    if (!depConfig) {
+      try {
+        depConfig = loadUserConfig(depDir);
+      } catch (err) {
+        void err;
+        depConfig = {};
+      }
     }
 
     const { enabled, mappings } = resolveRealmMappings(depConfig);

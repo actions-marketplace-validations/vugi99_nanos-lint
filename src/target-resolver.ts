@@ -1,8 +1,34 @@
 import fs from "node:fs";
 import path from "node:path";
+import { stripTrailingSlashes } from "./config.js";
 import { fileUriToPath } from "./types.js";
 import type { DiagnosticReport } from "./types.js";
 import { LuaLSError, ConfigError } from "./errors.js";
+
+/** Resolves the canonical filesystem path, falling back to original path on failure. */
+export function getCanonicalPath(p: string): string {
+  try {
+    return fs.realpathSync.native ? fs.realpathSync.native(p) : fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/** Determines whether a path points to the root of a filesystem volume. */
+export function isFilesystemRoot(dir: string): boolean {
+  const stripped = dir.trim();
+  if (stripped === "/" || stripped === "\\" || stripped === "") {
+    return true;
+  }
+  if (/^[a-zA-Z]:[\\/]?$/.test(stripped)) {
+    return true;
+  }
+  const norm = path.resolve(stripped);
+  if (norm === "/" || norm === "\\") {
+    return true;
+  }
+  return /^[a-zA-Z]:[\\/]?$/.test(norm);
+}
 
 /**
  * Computes the lowest common ancestor directory for a set of paths.
@@ -29,16 +55,32 @@ export function findCommonAncestorDirectory(paths: string[]): string {
     return resolved[0];
   }
 
+  const isWin = process.platform === "win32";
   const splitPaths = resolved.map((p) => path.resolve(p).split(path.sep));
-  const minLen = Math.min(...splitPaths.map((p) => p.length));
-  let commonLen = 0;
 
   const first = splitPaths[0];
-  if (!first) {
+  if (!first || first.length === 0) {
     return path.resolve(".");
   }
 
-  const isWin = process.platform === "win32";
+  const firstRoot = first[0];
+  const sameDrive = splitPaths.every((p) => {
+    const rootSeg = p[0];
+    if (rootSeg === undefined) return false;
+    return isWin ? rootSeg.toLowerCase() === firstRoot?.toLowerCase() : rootSeg === firstRoot;
+  });
+
+  if (!sameDrive || firstRoot === undefined) {
+    throw new ConfigError(
+      `Cannot check paths across different root drives or volumes: ${paths.join(", ")}`,
+      "ERR_MULTIPLE_ROOTS",
+      "Ensure all checked paths are within the same workspace or project root.",
+    );
+  }
+
+  const minLen = Math.min(...splitPaths.map((p) => p.length));
+  let commonLen = 0;
+
   for (let i = 0; i < minLen; i++) {
     const segment = first[i];
     if (segment === undefined) {
@@ -76,15 +118,114 @@ export function findCommonAncestorDirectory(paths: string[]): string {
 }
 
 /**
- * Removes trailing `/` characters from a path-like string without regular expressions
- * to prevent polynomial ReDoS (CodeQL: js/polynomial-redos).
+ * Searches upward from a starting directory to locate an enclosing project root
+ * containing `.luarc.json`. Returns the start directory if not found.
  */
-function stripTrailingSlashes(value: string): string {
-  let end = value.length;
-  while (end > 0 && value.charCodeAt(end - 1) === 0x2f /* "/" */) {
-    end -= 1;
+export function findProjectRoot(startDir: string): string {
+  let curr = path.resolve(startDir);
+  while (true) {
+    if (fs.existsSync(path.join(curr, ".luarc.json"))) {
+      return curr;
+    }
+    if (fs.existsSync(path.join(curr, ".git"))) {
+      break;
+    }
+    const parent = path.dirname(curr);
+    if (parent === curr) {
+      break;
+    }
+    curr = parent;
   }
-  return end === value.length ? value : value.slice(0, end);
+  return startDir;
+}
+
+/**
+ * Computes glob exclusion patterns for directories and files under workspace root
+ * that are completely outside the requested target paths.
+ */
+export function computeUnrequestedExclusions(root: string, targetPaths: string[]): string[] {
+  if (
+    targetPaths.length === 0 ||
+    targetPaths.some((t) => t === "." || t === "" || path.resolve(root, t) === root)
+  ) {
+    return [];
+  }
+
+  const isWin = process.platform === "win32";
+  const canonicalRoot = getCanonicalPath(path.resolve(root));
+
+  const relTargets = targetPaths
+    .map((t) => {
+      const resolved = path.isAbsolute(t) ? t : path.resolve(canonicalRoot, t);
+      const canonical = getCanonicalPath(resolved);
+      const rel = path.relative(canonicalRoot, canonical).replace(/\\/g, "/");
+      return isWin ? rel.toLowerCase() : rel;
+    })
+    .filter((rel) => !rel.startsWith("../") && rel !== "..");
+
+  if (relTargets.length === 0 || relTargets.includes("") || relTargets.includes(".")) {
+    return [];
+  }
+
+  const exclusions: string[] = [];
+
+  /** Recursively scans directory entries to identify unrequested paths. */
+  function scanDir(dir: string, relPrefix: string) {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) {
+        continue;
+      }
+
+      const entryRel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+      const normEntry = isWin ? entryRel.toLowerCase() : entryRel;
+
+      let isExactTarget = false;
+      let isAncestorOfTarget = false;
+      let isDescendantOfTarget = false;
+
+      for (const target of relTargets) {
+        if (normEntry === target) {
+          isExactTarget = true;
+          break;
+        }
+        if (target.startsWith(`${normEntry}/`)) {
+          isAncestorOfTarget = true;
+          break;
+        }
+        if (normEntry.startsWith(`${target}/`)) {
+          isDescendantOfTarget = true;
+          break;
+        }
+      }
+
+      if (isExactTarget || isDescendantOfTarget) {
+        continue;
+      }
+
+      if (isAncestorOfTarget) {
+        if (entry.isDirectory()) {
+          scanDir(path.join(dir, entry.name), entryRel);
+        }
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        exclusions.push(`${entryRel}/**`);
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".lua")) {
+        exclusions.push(entryRel);
+      }
+    }
+  }
+
+  scanDir(canonicalRoot, "");
+  return exclusions;
 }
 
 /** Determines whether a workspace-relative file path matches any of the target paths. */
@@ -101,23 +242,22 @@ export function matchesTargetPaths(
   }
 
   const isWin = process.platform === "win32";
+  const canonicalRoot = getCanonicalPath(root);
   const normRel = isWin
     ? relativePath.replace(/\\/g, "/").toLowerCase()
     : relativePath.replace(/\\/g, "/");
 
   for (const rawTarget of targetPaths) {
-    let relTarget: string;
-    if (path.isAbsolute(rawTarget)) {
-      relTarget = path.relative(root, rawTarget).replace(/\\/g, "/");
-    } else {
-      const fromCwd = path.resolve(rawTarget);
-      const relFromCwd = path.relative(root, fromCwd).replace(/\\/g, "/");
-      if (!relFromCwd.startsWith("../") && relFromCwd !== "..") {
-        relTarget = relFromCwd;
-      } else {
-        relTarget = stripTrailingSlashes(rawTarget.replace(/\\/g, "/")).replace(/^\.\//, "");
-      }
-    }
+    const fromCwd = path.resolve(rawTarget);
+    const resolvedTarget = fs.existsSync(fromCwd)
+      ? fromCwd
+      : path.isAbsolute(rawTarget)
+        ? rawTarget
+        : path.resolve(canonicalRoot, rawTarget);
+    const canonicalTarget = getCanonicalPath(resolvedTarget);
+
+    let relTarget = path.relative(canonicalRoot, canonicalTarget).replace(/\\/g, "/");
+    relTarget = stripTrailingSlashes(relTarget).replace(/^\.\//, "");
 
     const normTarget = isWin ? relTarget.toLowerCase() : relTarget;
 
@@ -146,10 +286,13 @@ export function filterReportByTargetPaths(
   }
 
   const filtered: DiagnosticReport = {};
+  const canonicalRoot = getCanonicalPath(root);
+
   for (const [uri, diags] of Object.entries(report)) {
     const filePath = fileUriToPath(uri);
-    const relative = path.relative(root, path.resolve(filePath)).replace(/\\/g, "/");
-    if (matchesTargetPaths(relative, root, targetPaths)) {
+    const canonicalFile = getCanonicalPath(path.resolve(filePath));
+    const relative = path.relative(canonicalRoot, canonicalFile).replace(/\\/g, "/");
+    if (matchesTargetPaths(relative, canonicalRoot, targetPaths)) {
       filtered[uri] = diags;
     }
   }
@@ -165,7 +308,7 @@ export interface ResolvedCheckTargets {
 export function resolveCheckTargets(rawPaths?: string[]): ResolvedCheckTargets {
   const paths = rawPaths && rawPaths.length > 0 ? rawPaths : ["."];
 
-  for (const targetPath of paths) {
+  const canonicalTargets = paths.map((targetPath) => {
     const resolved = path.resolve(targetPath);
     if (!fs.existsSync(resolved)) {
       throw new LuaLSError(
@@ -174,13 +317,37 @@ export function resolveCheckTargets(rawPaths?: string[]): ResolvedCheckTargets {
         "Verify that the target path exists and is accessible.",
       );
     }
-  }
+    return getCanonicalPath(resolved);
+  });
 
   const first = paths[0];
   if (paths.length === 1 && first) {
-    return { rootPath: first, targetPaths: paths };
+    const canonicalFirst = canonicalTargets[0]!;
+    const isFile = fs.statSync(canonicalFirst).isFile();
+    const startDir = isFile ? path.dirname(canonicalFirst) : canonicalFirst;
+    const projRoot = findProjectRoot(startDir);
+    if (projRoot !== startDir) {
+      if (isFilesystemRoot(projRoot)) {
+        throw new ConfigError(
+          `Cannot check targets across the root filesystem (${projRoot}): checked paths must share a common project directory.`,
+          "ERR_ROOT_ANCESTOR",
+          "Ensure all checked paths reside within a common project directory.",
+        );
+      }
+      return { rootPath: projRoot, targetPaths: canonicalTargets };
+    }
+    return { rootPath: first, targetPaths: canonicalTargets };
   }
 
-  const rootPath = findCommonAncestorDirectory(paths);
-  return { rootPath, targetPaths: paths };
+  const ancestor = findCommonAncestorDirectory(canonicalTargets);
+  if (isFilesystemRoot(ancestor)) {
+    throw new ConfigError(
+      `Cannot check targets across the root filesystem (${ancestor}): checked paths must share a common project directory.`,
+      "ERR_ROOT_ANCESTOR",
+      "Ensure all checked paths reside within a common project directory.",
+    );
+  }
+
+  const rootPath = findProjectRoot(ancestor);
+  return { rootPath, targetPaths: canonicalTargets };
 }

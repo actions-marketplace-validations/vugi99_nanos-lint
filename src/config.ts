@@ -366,6 +366,7 @@ export interface ResolveWorkspaceConfigOptions {
   ignore?: string[];
   annotationsPath?: string;
   dependencyLibraries?: string[];
+  unrequestedExclusions?: string[];
 }
 
 /**
@@ -459,6 +460,12 @@ export function buildWorkspaceConfig(
         ]),
       ];
     }
+  }
+
+  if (options?.unrequestedExclusions && options.unrequestedExclusions.length > 0) {
+    merged.files = merged.files ?? {};
+    const existingExclude = merged.files.exclude ?? [];
+    merged.files.exclude = [...new Set([...existingExclude, ...options.unrequestedExclusions])];
   }
 
   return merged;

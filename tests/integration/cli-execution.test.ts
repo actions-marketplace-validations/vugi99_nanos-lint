@@ -38,7 +38,7 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     const { stdout, stderr } = await execFileAsync(process.execPath, [distCli, "--help"]);
     expect(stderr).toBe("");
     expect(stdout).toContain("Usage: nanos-lint");
-    expect(stdout).toContain("Check a workspace or Lua file");
+    expect(stdout).toContain("Check workspace files or directories");
     expect(stdout.trim().length).toBeGreaterThan(50);
   });
 
@@ -499,6 +499,90 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
       ]);
       expect(stdoutWarn).toMatch(/Diagnosis completed, no problems found/);
       expect(stderrWarn).toContain("Dependency path not found");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports diagnostics correctly when target path is accessed through a symlink", async () => {
+    const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-sym-integ-"));
+    const tempDir = fs.realpathSync.native
+      ? fs.realpathSync.native(rawTempDir)
+      : fs.realpathSync(rawTempDir);
+    try {
+      const flatDir = path.join(tempDir, "flat");
+      fs.mkdirSync(flatDir);
+      fs.writeFileSync(
+        path.join(flatDir, "broken.lua"),
+        "CallNonExistentFunctionInFlat()\n",
+        "utf-8",
+      );
+
+      const linkFlat = path.join(tempDir, "link-flat");
+      try {
+        fs.symlinkSync(flatDir, linkFlat, "dir");
+      } catch {
+        return;
+      }
+
+      // Check absolute symlinked path
+      try {
+        await execFileAsync(process.execPath, [distCli, "check", linkFlat]);
+        expect.fail("Expected check on symlinked path to fail");
+      } catch (err: unknown) {
+        const execErr = err as { code?: number; stdout?: string };
+        expect(execErr.code).toBe(1);
+        expect(execErr.stdout).toContain("1 problem");
+        expect(execErr.stdout).toContain("undefined-global");
+      }
+
+      // Check relative symlinked path from cwd = tempDir
+      try {
+        await execFileAsync(process.execPath, [distCli, "check", "link-flat"], { cwd: tempDir });
+        expect.fail("Expected relative symlinked check to fail");
+      } catch (err: unknown) {
+        const execErr = err as { code?: number; stdout?: string };
+        expect(execErr.code).toBe(1);
+        expect(execErr.stdout).toContain("1 problem");
+      }
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes unrequested sibling folders to prevent context leakage across targets", async () => {
+    const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unreq-integ-"));
+    const tempDir = fs.realpathSync.native
+      ? fs.realpathSync.native(rawTempDir)
+      : fs.realpathSync(rawTempDir);
+    try {
+      const subA = path.join(tempDir, "subA");
+      const subB = path.join(tempDir, "subB");
+      const unrelated = path.join(tempDir, "unrelated");
+      fs.mkdirSync(subA);
+      fs.mkdirSync(subB);
+      fs.mkdirSync(unrelated);
+
+      // subA calls undefined global
+      fs.writeFileSync(path.join(subA, "a.lua"), "CallLeakedGlobal()\n", "utf-8");
+      // subB has valid code
+      fs.writeFileSync(path.join(subB, "b.lua"), "local b = 1\n", "utf-8");
+      // unrelated defines the global
+      fs.writeFileSync(
+        path.join(unrelated, "provider.lua"),
+        "CallLeakedGlobal = function() end\n",
+        "utf-8",
+      );
+
+      // Checking subA and subB should NOT load unrelated/provider.lua, so subA must fail with undefined-global
+      try {
+        await execFileAsync(process.execPath, [distCli, "check", subA, subB]);
+        expect.fail("Expected check on subA subB to fail with undefined-global");
+      } catch (err: unknown) {
+        const execErr = err as { code?: number; stdout?: string };
+        expect(execErr.code).toBe(1);
+        expect(execErr.stdout).toContain("undefined-global");
+      }
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
