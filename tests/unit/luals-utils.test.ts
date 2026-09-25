@@ -567,6 +567,50 @@ describe("luals utilities", () => {
     );
 
     it.skipIf(!liveTestsEnabled)(
+      "filters diagnostics down to the requested target paths when several are passed",
+      async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-multi-path-"));
+        const requestedDir = path.join(tempDir, "Requested");
+        const otherDir = path.join(tempDir, "Other");
+        fs.mkdirSync(requestedDir);
+        fs.mkdirSync(otherDir);
+        fs.writeFileSync(
+          path.join(requestedDir, "kept.lua"),
+          "CallUndefinedInRequested()\n",
+          "utf-8",
+        );
+        fs.writeFileSync(path.join(otherDir, "skipped.lua"), "CallUndefinedInOther()\n", "utf-8");
+
+        const resolved = resolveWorkspaceConfig(tempDir, undefined, {
+          annotationsPath: await getSharedAnnotations(),
+        });
+        try {
+          const result = await runLuaLSCheck(tempDir, resolved.configPath, {
+            path: tempDir,
+            paths: [requestedDir],
+            checklevel: "Warning",
+            lualsBin: await getSharedLuaLSBinary(),
+          });
+
+          expect(result.passed).toBe(false);
+          // Compare basenames: LuaLS reports canonical paths, while `os.tmpdir()` is not
+          // canonical on macOS (`/var` -> `/private/var`) or Windows (8.3 short names),
+          // so a relative path built from `tempDir` would not match on those platforms.
+          const reported = Object.keys(result.diagnostics).map((uri) =>
+            path.basename(fileUriToPath(uri)),
+          );
+          expect(reported).toContain("kept.lua");
+          expect(reported).not.toContain("skipped.lua");
+        } finally {
+          if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+            fs.unlinkSync(resolved.configPath);
+          }
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.skipIf(!liveTestsEnabled)(
       "resolves an explicitly requested version from an injected cache without downloading",
       async () => {
         const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-explicit-cache-"));

@@ -22,6 +22,24 @@ function normalizeSlashes(output: string | undefined): string {
 const distCli = path.join(rootDir, "dist", "cli.js");
 const binCli = path.join(rootDir, "bin", "nanos-lint.js");
 
+/**
+ * `true` when this platform lets the suite create symlinks. Creating them needs
+ * elevation on Windows; returning early from inside a test would report success
+ * without asserting anything, so the capability is probed once and used with
+ * `it.skipIf` to surface the skip in the run report.
+ */
+const canCreateSymlinks = ((): boolean => {
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-symlink-probe-"));
+  try {
+    fs.symlinkSync(probeDir, path.join(probeDir, "link"), "dir");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(probeDir, { recursive: true, force: true });
+  }
+})();
+
 describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression tests", () => {
   beforeAll(async () => {
     // Cache hits: guarantees the fixtures exist before the first subprocess.
@@ -38,7 +56,7 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     const { stdout, stderr } = await execFileAsync(process.execPath, [distCli, "--help"]);
     expect(stderr).toBe("");
     expect(stdout).toContain("Usage: nanos-lint");
-    expect(stdout).toContain("Check a workspace or Lua file");
+    expect(stdout).toContain("Check workspace files or directories");
     expect(stdout.trim().length).toBeGreaterThan(50);
   });
 
@@ -121,6 +139,66 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
 
     expect(normalizeSlashes(stdout)).toMatch(
       /Diagnosis completed, no problems found across \d+ files?\./,
+    );
+  }, 120000);
+
+  it("executes dist/cli.js check with variadic paths and realm selection (#46)", async () => {
+    const fixture = path.join(rootDir, "tests", "fixtures", "realms");
+    const sharedDir = path.join(fixture, "Shared");
+    const serverDir = path.join(fixture, "Server");
+    try {
+      await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        sharedDir,
+        serverDir,
+        "--realm",
+        "server",
+        "--format=pretty",
+      ]);
+      expect.fail("Expected server realm violations to fail the check");
+    } catch (err: unknown) {
+      const execErr = err as { code?: number; stdout?: string };
+      const stdout = normalizeSlashes(execErr.stdout);
+      expect(execErr.code).toBe(1);
+      expect(stdout).toContain("tests/fixtures/realms/Server/combat.lua");
+      expect(stdout).not.toContain("tests/fixtures/realms/Client/hud.lua");
+      expect(stdout).not.toContain("tests/fixtures/realms/Shared/bridge.lua");
+    }
+  }, 120000);
+
+  it("passes clean package with variadic directory targets through dist/cli.js (#46)", async () => {
+    const cleanFixture = path.join(rootDir, "tests", "fixtures", "realms_clean");
+    const sharedDir = path.join(cleanFixture, "Shared");
+    const serverDir = path.join(cleanFixture, "Server");
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      distCli,
+      "check",
+      sharedDir,
+      serverDir,
+      "--format=pretty",
+    ]);
+
+    expect(normalizeSlashes(stdout)).toMatch(
+      /Diagnosis completed, no problems found across 3 files\./,
+    );
+  }, 120000);
+
+  it("executes dist/cli.js check with variadic file targets (#46)", async () => {
+    const file1 = path.join(rootDir, "tests", "pass", "character.lua");
+    const file2 = path.join(rootDir, "tests", "pass", "events.lua");
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      distCli,
+      "check",
+      file1,
+      file2,
+      "--format=pretty",
+    ]);
+
+    expect(normalizeSlashes(stdout)).toMatch(
+      /Diagnosis completed, no problems found across 2 files\./,
     );
   }, 120000);
 
@@ -370,6 +448,160 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
       fs.rmSync(annDir, { recursive: true, force: true });
+    }
+  });
+
+  it("checks a package with dependencies configured via nanos.deps and -d flag", async () => {
+    const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-pkg-deps-test-"));
+    const tempDir = fs.realpathSync.native
+      ? fs.realpathSync.native(rawTempDir)
+      : fs.realpathSync(rawTempDir);
+    try {
+      const depPkg = path.join(tempDir, "dep-pkg");
+      fs.mkdirSync(path.join(depPkg, "Shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(depPkg, "Shared", "dep.lua"),
+        "---@type fun(): void\nDepGlobalFunction = function() end\n",
+        "utf-8",
+      );
+
+      const targetPkg = path.join(tempDir, "target-pkg");
+      fs.mkdirSync(path.join(targetPkg, "Server"), { recursive: true });
+      fs.writeFileSync(
+        path.join(targetPkg, "Server", "server.lua"),
+        "DepGlobalFunction()\n",
+        "utf-8",
+      );
+
+      // Without dependency configured, it should fail with undefined-global
+      try {
+        await execFileAsync(process.execPath, [distCli, "check", targetPkg]);
+        expect.fail("Expected check without dependency to fail with undefined-global");
+      } catch (err: unknown) {
+        const execErr = err as { code?: number; stdout?: string };
+        expect(execErr.code).toBe(1);
+        expect(execErr.stdout).toContain("undefined-global");
+      }
+
+      // With -d flag pointing to dep-pkg, it passes cleanly
+      const { stdout: stdoutFlag } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        targetPkg,
+        "-d",
+        depPkg,
+      ]);
+      expect(stdoutFlag).toMatch(/Diagnosis completed, no problems found/);
+
+      // With nanos.deps configured inside .luarc.json, it passes cleanly
+      fs.writeFileSync(
+        path.join(targetPkg, ".luarc.json"),
+        JSON.stringify({ nanos: { deps: ["../dep-pkg"] } }, null, 2),
+        "utf-8",
+      );
+
+      const { stdout: stdoutConfig } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        targetPkg,
+      ]);
+      expect(stdoutConfig).toMatch(/Diagnosis completed, no problems found/);
+
+      // Missing dependency logs warning and does not crash
+      const { stdout: stdoutWarn, stderr: stderrWarn } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        targetPkg,
+        "-d",
+        path.join(tempDir, "missing-dep"),
+      ]);
+      expect(stdoutWarn).toMatch(/Diagnosis completed, no problems found/);
+      expect(stderrWarn).toContain("Dependency path not found");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(!canCreateSymlinks)(
+    "reports diagnostics correctly when target path is accessed through a symlink",
+    async () => {
+      const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-sym-integ-"));
+      const tempDir = fs.realpathSync.native
+        ? fs.realpathSync.native(rawTempDir)
+        : fs.realpathSync(rawTempDir);
+      try {
+        const flatDir = path.join(tempDir, "flat");
+        fs.mkdirSync(flatDir);
+        fs.writeFileSync(
+          path.join(flatDir, "broken.lua"),
+          "CallNonExistentFunctionInFlat()\n",
+          "utf-8",
+        );
+
+        const linkFlat = path.join(tempDir, "link-flat");
+        fs.symlinkSync(flatDir, linkFlat, "dir");
+
+        // Check absolute symlinked path
+        try {
+          await execFileAsync(process.execPath, [distCli, "check", linkFlat]);
+          expect.fail("Expected check on symlinked path to fail");
+        } catch (err: unknown) {
+          const execErr = err as { code?: number; stdout?: string };
+          expect(execErr.code).toBe(1);
+          expect(execErr.stdout).toContain("1 problem");
+          expect(execErr.stdout).toContain("undefined-global");
+        }
+
+        // Check relative symlinked path from cwd = tempDir
+        try {
+          await execFileAsync(process.execPath, [distCli, "check", "link-flat"], { cwd: tempDir });
+          expect.fail("Expected relative symlinked check to fail");
+        } catch (err: unknown) {
+          const execErr = err as { code?: number; stdout?: string };
+          expect(execErr.code).toBe(1);
+          expect(execErr.stdout).toContain("1 problem");
+        }
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it("excludes unrequested sibling folders to prevent context leakage across targets", async () => {
+    const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unreq-integ-"));
+    const tempDir = fs.realpathSync.native
+      ? fs.realpathSync.native(rawTempDir)
+      : fs.realpathSync(rawTempDir);
+    try {
+      const subA = path.join(tempDir, "subA");
+      const subB = path.join(tempDir, "subB");
+      const unrelated = path.join(tempDir, "unrelated");
+      fs.mkdirSync(subA);
+      fs.mkdirSync(subB);
+      fs.mkdirSync(unrelated);
+
+      // subA calls undefined global
+      fs.writeFileSync(path.join(subA, "a.lua"), "CallLeakedGlobal()\n", "utf-8");
+      // subB has valid code
+      fs.writeFileSync(path.join(subB, "b.lua"), "local b = 1\n", "utf-8");
+      // unrelated defines the global
+      fs.writeFileSync(
+        path.join(unrelated, "provider.lua"),
+        "CallLeakedGlobal = function() end\n",
+        "utf-8",
+      );
+
+      // Checking subA and subB should NOT load unrelated/provider.lua, so subA must fail with undefined-global
+      try {
+        await execFileAsync(process.execPath, [distCli, "check", subA, subB]);
+        expect.fail("Expected check on subA subB to fail with undefined-global");
+      } catch (err: unknown) {
+        const execErr = err as { code?: number; stdout?: string };
+        expect(execErr.code).toBe(1);
+        expect(execErr.stdout).toContain("undefined-global");
+      }
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 });

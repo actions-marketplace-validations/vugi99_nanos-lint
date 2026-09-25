@@ -104,18 +104,22 @@ jobs:
 
 ### Action Inputs
 
-| Input           | Description                                                                         | Default   |
-| :-------------- | :---------------------------------------------------------------------------------- | :-------- |
-| `path`          | Path to workspace directory or Lua file to check                                    | `.`       |
-| `checklevel`    | Minimum severity to report (`Error`, `Warning`, `Information`, `Hint`)              | `Warning` |
-| `config`        | Path to a custom `.luarc.json` configuration file                                   | `""`      |
-| `annotations`   | Path to a custom `annotations.lua` file                                             | `""`      |
-| `ignore`        | Files or directories to ignore (supports glob patterns, newline or comma separated) | `""`      |
-| `luals-version` | Version of `lua-language-server` to use                                             | `latest`  |
-| `fail-on-error` | Fail the workflow step if diagnostics are found                                     | `true`    |
-| `log-level`     | Logging level (`error`, `warn`, `info`, `debug`, `silent`)                          | `warn`    |
-| `realm`         | Execution realm to check (`all`, `client`, `server`, `shared`)                      | `all`     |
-| `cache`         | Whether to cache the LuaLS binary and annotations across workflow runs              | `true`    |
+| Input           | Description                                                                           | Default   |
+| :-------------- | :------------------------------------------------------------------------------------ | :-------- |
+| `path`          | Path to workspace directory or Lua file to check                                      | `.`       |
+| `paths`         | One or more workspace target paths or Lua files to check (newline or comma-separated) | `""`      |
+| `dep`           | External package dependency paths or definition files (newline or comma-separated)    | `""`      |
+| `checklevel`    | Minimum severity to report (`Error`, `Warning`, `Information`, `Hint`)                | `Warning` |
+| `config`        | Path to a custom `.luarc.json` configuration file                                     | `""`      |
+| `annotations`   | Path to a custom `annotations.lua` file                                               | `""`      |
+| `ignore`        | Files or directories to ignore (supports glob patterns, newline or comma separated)   | `""`      |
+| `luals-version` | Version of `lua-language-server` to use                                               | `latest`  |
+| `fail-on-error` | Fail the workflow step if diagnostics are found                                       | `true`    |
+| `log-level`     | Logging level (`error`, `warn`, `info`, `debug`, `silent`)                            | `warn`    |
+| `realm`         | Execution realm to check (`all`, `client`, `server`, `shared`)                        | `all`     |
+| `cache`         | Whether to cache the LuaLS binary and annotations across workflow runs                | `true`    |
+
+`paths` takes precedence over `path` when both are set; `path` is kept for backwards compatibility with the single-target form.
 
 When caching is enabled, the cache key rolls over each ISO week, so a freshly downloaded LuaLS binary is actually persisted under the new week's key; in the meantime the previous week's entry is restored from the cache.
 
@@ -126,10 +130,10 @@ When running inside GitHub Actions, `nanos-lint` automatically outputs **workflo
 ## CLI Reference
 
 ```
-nanos-lint [command] [options] [path]
+nanos-lint [command] [options] [paths...]
 
 COMMANDS:
-  check [path]             Check a workspace or Lua file (default)
+  check [paths...]         Check workspace files or directories (default)
   init [path]              Scaffold a .luarc.json configuration in the workspace (copies definitions to .nanos-lint/; supports --annotations <path>)
   warmup, download         Pre-fetch and cache both LuaLS binary and annotations for offline execution
   cache status, cache info Show cache status, installed versions, and disk usage (supports --json)
@@ -142,6 +146,7 @@ COMMANDS:
 
 OPTIONS:
   -i, --ignore <pattern>   Files or directories to ignore (supports globs, repeatable, comma/newline-separated)
+  -d, --dep <path>         Path to package dependency directory or Lua definition file (repeatable; resolves relative to cwd)
   -l, --log-level <level>  Logging level: error, warn, info, debug, silent (default: warn)
                            silent suppresses all output, including the final report (only the exit code remains)
                            error and warn (the default) suppress progress messages but still print the report
@@ -225,6 +230,23 @@ nanos world runs two isolated Lua VMs: the server executes `Server/**` + `Shared
 
 The `nanos` key is nanos-lint specific and ignored by LuaLS, so the same `.luarc.json` keeps working in the editor.
 
+### Package Dependencies (`nanos.deps`)
+
+When packages depend on other packages (e.g. located in `Server/Packages/` or external integration folders), you can declare them in `.luarc.json` under `nanos.deps` or via the `-d, --dep` CLI option:
+
+```json
+{
+  "nanos": {
+    "deps": ["../base_package", "../integration_package", "../definitions/common.lua"]
+  }
+}
+```
+
+- **Path Resolution**: Paths defined in `nanos.deps` resolve relative to the package directory containing the `.luarc.json`. In contrast, paths passed via the `-d, --dep <path>` CLI option resolve relative to the current working directory (`process.cwd()`).
+- **Transitive Dependencies & Cycle Detection**: Dependencies are traversed recursively. If a dependency defines its own `nanos.deps` in `.luarc.json`, those dependencies are loaded automatically. Circular dependencies are detected and visited only once.
+- **Realm Partitioning**: Dependency directories are inspected for realm conventions (`Server/`, `Client/`, `Shared/`). Server passes only include `Server/` and `Shared/` folders of dependencies; client passes only include `Client/` and `Shared/` folders. Single definition `.lua` files and non-partitioned dependency directories are included in all passes.
+- **Resilience**: If a declared dependency path does not exist, `nanos-lint` emits a warning and continues without failing the lint pass.
+
 ### File Counting and Glob Semantics
 
 The `N files checked` figure is produced by matching `workspace.ignoreDir` and `files.exclude` with the bundled `glob` engine. The v3.0.0 contract is:
@@ -265,6 +287,22 @@ Deliberate limits:
 - **Runtime guards are not analyzed.** `Shared/**` is checked with the complete context, so a guarded `Server.ChangeMap()` inside a `Package.IsUnloading()`-style branch is accepted, and so is an unguarded one. Real nanos world packages gate calls in too many ways for static detection to be reliable.
 - **`Package.Require` keeps resolving across realms**, because `runtime.path` keeps `?.lua`, `Shared/?.lua`, `Client/?.lua` and `Server/?.lua` in every pass. A shared file may require a realm-specific module behind a guard.
 - **Realm checking only activates when a configured pattern matches at least one checked Lua file**, so non-package repositories keep running a single standard pass. `"nanos": { "realms": {} }` disables it explicitly.
+
+### Variadic Target Paths & Scoped Context
+
+`nanos-lint` accepts multiple files or directories on the command line:
+
+```bash
+# Lint both Shared and Server folders in one pass
+npx nanos-lint check Shared/ Server/ --realm server
+
+# Lint multiple specific files
+npx nanos-lint check Shared/utility.lua Server/main.lua
+```
+
+- **Project Root Discovery**: When checking subpaths or individual files (e.g. `Server/main.lua`), `nanos-lint` searches upward to locate the enclosing project root containing `.luarc.json` so custom realm mappings and dependencies are properly loaded.
+- **Unrequested Sibling Exclusion**: To prevent unrelated files under the common ancestor directory from defining globals that mask `undefined-global` diagnostics in requested files, `nanos-lint` automatically excludes unrequested siblings during the check.
+- **Root Filesystem Protection**: Target paths must share a common project directory. Passing disjoint paths spanning the filesystem root (or different drive letters on Windows) is rejected with an error.
 
 ---
 

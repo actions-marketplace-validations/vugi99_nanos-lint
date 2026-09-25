@@ -26,7 +26,10 @@ export interface Diagnostic {
 export type DiagnosticReport = Record<string, Diagnostic[]>;
 
 export interface CheckOptions {
-  path: string;
+  /** Single workspace path or file to check (legacy/convenience option). */
+  path?: string;
+  /** One or more workspace target paths or files to check. If provided, takes precedence over `path`. */
+  paths?: string[];
   checklevel?: DiagnosticSeverity;
   configpath?: string;
   lualsVersion?: string;
@@ -34,6 +37,8 @@ export interface CheckOptions {
   failOnError?: boolean;
   lualsBin?: string;
   ignore?: string[];
+  /** External package dependency directories or Lua files. */
+  deps?: string[];
 }
 
 export interface CheckResult {
@@ -53,6 +58,8 @@ export type RealmName = "client" | "server" | "shared" | "global";
 export interface NanosConfig {
   /** Maps glob patterns (relative to the checked root) to realm names. */
   realms?: Record<string, RealmName>;
+  /** Package dependency paths or definition files. */
+  deps?: string[];
   [key: string]: unknown;
 }
 

@@ -3,6 +3,7 @@ import path from "node:path";
 import { globSync } from "glob";
 import { logger } from "../logger.js";
 import type { LuaRCConfig } from "../types.js";
+import { matchesTargetPaths } from "../target-resolver.js";
 
 /** Directories skipped unless the workspace config overrides `workspace.ignoreDir`. */
 const DEFAULT_IGNORE_DIRS = [".git", ".vscode", ".nanos-lint", "node_modules"];
@@ -180,7 +181,11 @@ function resolveTargetPath(targetPath: string): string | null {
  * honoring `workspace.ignoreDir` and `files.exclude` (#27). Absolute paths are returned
  * for single-file targets, and an empty list is returned when the walk fails.
  */
-export function listCheckedFiles(targetPath: string, configPath?: string): string[] {
+export function listCheckedFiles(
+  targetPath: string,
+  configPath?: string,
+  targetPaths?: string[],
+): string[] {
   const absPath = resolveTargetPath(targetPath);
   if (!absPath) {
     return [];
@@ -221,7 +226,11 @@ export function listCheckedFiles(targetPath: string, configPath?: string): strin
       follow: false, // Disallow symlinks to prevent loops and directory escapes (#21)
       withFileTypes: true,
     });
-    return entries.filter((entry) => entry.isFile()).map((entry) => entry.relativePosix());
+    const files = entries.filter((entry) => entry.isFile()).map((entry) => entry.relativePosix());
+    if (targetPaths && targetPaths.length > 0) {
+      return files.filter((f) => matchesTargetPaths(f, absPath, targetPaths));
+    }
+    return files;
   } catch (err) {
     logger.warn(
       `[luals] Failed to walk ${absPath} while listing checked files: ${err instanceof Error ? err.message : String(err)}`,
@@ -231,6 +240,10 @@ export function listCheckedFiles(targetPath: string, configPath?: string): strin
 }
 
 /** Counts candidate Lua files within targetPath, taking workspace ignoreDir and files.exclude into account (#27). */
-export function countCheckedFiles(targetPath: string, configPath?: string): number {
-  return listCheckedFiles(targetPath, configPath).length;
+export function countCheckedFiles(
+  targetPath: string,
+  configPath?: string,
+  targetPaths?: string[],
+): number {
+  return listCheckedFiles(targetPath, configPath, targetPaths).length;
 }

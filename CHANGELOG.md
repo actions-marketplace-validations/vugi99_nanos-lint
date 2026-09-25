@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Support for package dependencies via `nanos.deps` in `.luarc.json` and `-d, --dep <path>` CLI option (#47):
+  - Added repeatable `-d, --dep <path>` CLI option to `check` command, supporting package directories and single `.lua` definition files.
+  - Added support for `nanos.deps` array in `.luarc.json` to declare dependencies relative to package configuration files.
+  - Implemented `src/deps.ts` resolving transitive package dependencies with cycle detection.
+  - Partitioned resolved dependency libraries across realm passes: server pass receives `Server/`, `Shared/`, and root `.lua` files; client pass receives `Client/`, `Shared/`, and root `.lua` files; shared pass receives `Shared/` and root `.lua` files. When realms are disabled, all dependency paths are supplied to the single standard pass.
+  - Non-existent dependency paths emit a non-fatal warning (`logger.warn`) and are skipped without failing the check or contributing to problem counts.
+  - Added unit tests in `tests/unit/deps.test.ts` and `tests/unit/cli.test.ts`, and live integration test in `tests/integration/cli-execution.test.ts`.
+- Variadic target paths for `check` command (`npx nanos-lint check [paths...]`) (#46):
+  - Changed CLI `check` argument definition to `check [paths...]`, allowing multiple directories and/or files to be passed simultaneously (e.g. `npx nanos-lint check Shared/ Server/ --realm server`).
+  - Added `src/target-resolver.ts` to compute the lowest common ancestor directory across multiple targets and filter reported diagnostics and file counts to only match the requested paths.
+  - In realm-aware checks (`planRealmCheck()`), targets are mapped within the common workspace root, enabling server scripts to reference shared declarations without undefined-global errors while skipping unrequested passes (such as client).
+  - Updated `CheckOptions` in `src/types.ts` to accept optional `paths?: string[]`.
+  - Added unit tests in `tests/unit/target-resolver.test.ts` and `tests/unit/cli.test.ts`, and integration tests in `tests/integration/cli-execution.test.ts`.
+- Added `paths` and `dep` inputs to the GitHub Action composite definition (`action.yml`).
+
+### Changed
+
+- Cached parsed `.luarc.json` configurations in `src/deps.ts` to eliminate duplicate disk reads and JSON parsing during dependency graph traversal.
+- Logged the discovered project root at debug level when a check is re-parented to an enclosing directory holding `.luarc.json`.
+
+### Fixed
+
+- Symlinked and non-canonical target paths no longer discard diagnostics: roots and targets are canonicalized via `getCanonicalPath()` in `resolveCheckTargets()`, `matchesTargetPaths()` and `filterReportByTargetPaths()`.
+- Unrequested sibling files under a common ancestor directory no longer leak globals that mask `undefined-global` diagnostics, by computing and applying `computeUnrequestedExclusions()` to `files.exclude` in both realm-aware and fallback passes.
+- Escaped glob metacharacters (`*`, `?`, `[`, `]`, `{`, `}`, `,`) in the computed `files.exclude` entries, so siblings with such names are really excluded instead of being read as character ranges or brace groups by the LuaLS `glob.gitignore` matcher.
+- Excluded unrequested siblings inside dot-directories: the previous blanket skip left their Lua files visible to LuaLS, where they could still define globals.
+- Discovered the enclosing project root containing `.luarc.json` via `findProjectRoot()` when checking subpaths or single files, properly preserving realm configurations and package dependencies.
+- Corrected the "target is the workspace root" guard in `computeUnrequestedExclusions()`, which compared a resolved path against the raw root argument and therefore never matched.
+- Added cross-volume (`ERR_MULTIPLE_ROOTS`) and filesystem root (`ERR_ROOT_ANCESTOR`) validation for target paths.
+- Emitted a warning (`logger.warn`) when a requested realm filter matches no target files before falling back to a standard check.
+- Hardened the cross-process lock heartbeat test margins (1000 ms hold, 500 ms staleness, 100 ms heartbeat) so a stalled Windows runner cannot falsely reclaim a live lock; a disabled heartbeat still fails the test (#49).
+- Replaced regex trailing slash removal with index-based scanning in `src/target-resolver.ts` to prevent polynomial ReDoS CodeQL warnings (`js/polynomial-redos`).
+
 ## [3.0.1] - 2026-09-25
 
 ### Added
