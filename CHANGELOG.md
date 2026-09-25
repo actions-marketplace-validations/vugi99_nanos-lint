@@ -10,10 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Periodic lock heartbeat in `withFileLock()` (`src/lock.ts`) for long-running cache extractions and downloads (#44):
-  - Added `heartbeatIntervalMs?: number` to `FileLockOptions`, defaulting to `Math.min(staleMs / 4, 15_000)` (or disabled when `staleMs <= 0`).
-  - Implemented `touchLockFile()` to atomically update the lock file's `createdAt` metadata while validating token ownership.
-  - An unreferenced interval timer refreshes the lock during task execution and cleans up reliably in `finally` upon completion or error.
-  - Added unit tests in `tests/unit/concurrency.test.ts` verifying ownership validation, advancement of `createdAt`, clean timer disposal on success and failure, and postponement of stale lock reclamation.
+  - Added `heartbeatIntervalMs?: number` to `FileLockOptions`, defaulting to `staleMs / 4` capped at 15s (or disabled when `staleMs <= 0`).
+  - Implemented non-destructive `touchLockFile()` using `fs.utimesSync()`, ensuring an active heartbeat updates the file's modification timestamp without rewriting metadata or risking clobbering another worker's acquired lock.
+  - Paired with `Math.max(createdAt, mtime)` freshness calculation in `isLockStale()` and `lockAgeMs()`.
+  - Added immediate heartbeat timer cancellation with a warning when lock ownership is lost, and a warn-once report if timestamp updates fail.
+  - Note: synchronous operations executed inside the locked section (such as hashing archives or synchronous recursive directory copies) block the event loop, so heartbeat ticks only fire during asynchronous phases.
+  - Reduced `DEFAULT_LOCK_STALE_MS` from 120s to 30s: with the 60s default timeout (`DEFAULT_LOCK_TIMEOUT_MS`), abandoned locks from hard-killed processes (`SIGKILL` / power loss) can now be reclaimed automatically before timeout, while live processes stay protected by the heartbeat.
+  - Added comprehensive unit tests in `tests/unit/concurrency.test.ts` verifying non-destructive touching, mtime advancement, clean timer disposal, error handling, lost-ownership cancellation, disabled heartbeat modes, and cross-process mutual exclusion across slow tasks.
 
 ### Security
 
