@@ -323,4 +323,26 @@ describe("realm check planning (#15)", () => {
       plan!.cleanup();
     }
   });
+
+  it("warns and falls back to single pass when requested realm matches no files", () => {
+    const root = makeTempDir("nanos-realm-plan-nomatch-");
+    writeTree(root, {
+      "Server/a.lua": "-- s",
+    });
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const plan = planRealmCheck({
+        targetPath: root,
+        userConfig: {},
+        selection: "client",
+        annotationsPath: path.join(root, "annotations.lua"),
+      });
+      expect(plan).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('No target files match the requested realm "client"'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
 });

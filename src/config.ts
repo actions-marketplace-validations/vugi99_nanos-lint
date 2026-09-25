@@ -119,6 +119,7 @@ export function stripTrailingSlashes(value: string): string {
 
 export interface MergeConfigOptions {
   cliIgnore?: string[];
+  dependencyLibraries?: string[];
 }
 
 /**
@@ -228,7 +229,13 @@ export function mergeConfigs(
   // Merge library paths
   const baseLibraries = base.workspace?.library ?? [];
   const overrideLibraries = override.workspace?.library ?? [];
-  const librarySet = new Set<string>([normalizedDefPath, ...baseLibraries, ...overrideLibraries]);
+  const depLibraries = (options?.dependencyLibraries ?? []).map((p) => p.replace(/\\/g, "/"));
+  const librarySet = new Set<string>([
+    normalizedDefPath,
+    ...baseLibraries,
+    ...overrideLibraries,
+    ...depLibraries,
+  ]);
 
   // Merge globals
   const baseGlobals = base.diagnostics?.globals ?? [];
@@ -358,6 +365,8 @@ export function mergeConfigs(
 export interface ResolveWorkspaceConfigOptions {
   ignore?: string[];
   annotationsPath?: string;
+  dependencyLibraries?: string[];
+  unrequestedExclusions?: string[];
 }
 
 /**
@@ -427,6 +436,7 @@ export function buildWorkspaceConfig(
 
   const merged = mergeConfigs(defaultTemplate, userConfig, activeAnnotationsPath, {
     cliIgnore,
+    dependencyLibraries: options?.dependencyLibraries,
   });
 
   // Only apply hardcoded tool directory exclusions when CLI ignore was NOT provided
@@ -450,6 +460,12 @@ export function buildWorkspaceConfig(
         ]),
       ];
     }
+  }
+
+  if (options?.unrequestedExclusions && options.unrequestedExclusions.length > 0) {
+    merged.files = merged.files ?? {};
+    const existingExclude = merged.files.exclude ?? [];
+    merged.files.exclude = [...new Set([...existingExclude, ...options.unrequestedExclusions])];
   }
 
   return merged;

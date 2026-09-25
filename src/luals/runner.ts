@@ -8,6 +8,7 @@ import { systemPaths } from "../paths.js";
 import { fileUriToPath } from "../types.js";
 import type { CheckOptions, CheckResult, DiagnosticReport } from "../types.js";
 import { LuaLSError } from "../errors.js";
+import { filterReportByTargetPaths } from "../target-resolver.js";
 import {
   DEFAULT_LUALS_VERSION,
   FALLBACK_LUALS_VERSION,
@@ -419,6 +420,8 @@ export async function runLuaLSCheck(
       }
     }
     diagnostics = filtered;
+  } else if (options.paths && options.paths.length > 0) {
+    diagnostics = filterReportByTargetPaths(diagnostics, checkDir, options.paths);
   }
 
   let totalProblems = 0;
@@ -441,7 +444,7 @@ export async function runLuaLSCheck(
   }
 
   const passed = totalProblems === 0;
-  const filesChecked = countCheckedFiles(targetPath, configPath);
+  const filesChecked = countCheckedFiles(targetPath, configPath, options.paths);
   const totalFiles = passed ? filesChecked : problemFiles;
 
   return {

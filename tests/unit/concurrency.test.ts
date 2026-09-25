@@ -560,10 +560,10 @@ describe("lock heartbeat (#44)", () => {
         for (let i = 0; i < 3; i++) {
           await delay(35);
           timestamps.push(fs.statSync(lockPath).mtimeMs);
-          expect(isLockStale(lockPath, 40)).toBe(false);
+          expect(isLockStale(lockPath, 80)).toBe(false);
         }
       },
-      { heartbeatIntervalMs: 20 },
+      { heartbeatIntervalMs: 15 },
     );
 
     expect(timestamps).toHaveLength(3);
@@ -767,6 +767,12 @@ describe("lock heartbeat (#44)", () => {
     const workerScript = path.join(dir, "worker.mjs");
     const lockUrl = pathToFileURL(path.join(repoRoot, "src", "lock.ts")).href;
 
+    // Margins are deliberately generous. The child must be able to miss several
+    // heartbeats without looking stale, because a loaded Windows runner can delay a tick
+    // well past a few dozen milliseconds (scheduler jitter, AV scanning the lock file,
+    // transient sharing errors inside `touchLockFile`). A broken heartbeat still fails
+    // the test: the lock goes stale at 500 ms, far inside the 1000 ms hold, so the parent
+    // reclaims it while the marker file still exists. See #49.
     fs.writeFileSync(
       workerScript,
       [
@@ -775,9 +781,9 @@ describe("lock heartbeat (#44)", () => {
         "const [lockPath, markerPath] = process.argv.slice(2);",
         "await withFileLock(lockPath, async () => {",
         "  fs.writeFileSync(markerPath, 'running');",
-        "  await new Promise((resolve) => setTimeout(resolve, 120));",
+        "  await new Promise((resolve) => setTimeout(resolve, 1000));",
         "  fs.unlinkSync(markerPath);",
-        "}, { staleMs: 50, heartbeatIntervalMs: 12 });",
+        "}, { staleMs: 500, heartbeatIntervalMs: 100 });",
       ].join("\n"),
       "utf-8",
     );
@@ -800,7 +806,7 @@ describe("lock heartbeat (#44)", () => {
           parentAcquiredWhileWorkerRan = true;
         }
       },
-      { staleMs: 50, timeoutMs: 5000, reclaimGraceMs: 0 },
+      { staleMs: 500, timeoutMs: 10_000, reclaimGraceMs: 0 },
     );
 
     await child;

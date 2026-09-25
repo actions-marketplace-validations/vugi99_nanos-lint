@@ -10,6 +10,14 @@ inputs:
     description: "Path to workspace directory or Lua file to check"
     required: false
     default: "."
+  paths:
+    description: "One or more workspace target paths or Lua files to check (supports newline or comma-separated entries)"
+    required: false
+    default: ""
+  dep:
+    description: "External package dependency paths or definition files (supports newline or comma-separated entries)"
+    required: false
+    default: ""
   checklevel:
     description: "Minimum diagnostic severity level to report (Error, Warning, Information, Hint)"
     required: false
@@ -79,6 +87,8 @@ runs:
       shell: bash
       env:
         INPUT_PATH: ${{ inputs.path }}
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_DEP: ${{ inputs.dep }}
         INPUT_CHECKLEVEL: ${{ inputs.checklevel }}
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_ANNOTATIONS: ${{ inputs.annotations }}
@@ -89,7 +99,27 @@ runs:
         INPUT_IGNORE: ${{ inputs.ignore }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
-        ARGS=("check" "$INPUT_PATH" "--checklevel=$INPUT_CHECKLEVEL" "--luals-version=$INPUT_LUALS_VERSION" "--format=github")
+        TARGET_PATHS=()
+        if [ -n "$INPUT_PATHS" ]; then
+          while IFS= read -r line || [ -n "$line" ]; do
+            trimmed=$(echo "$line" | xargs)
+            if [ -n "$trimmed" ]; then
+              IFS=',' read -ra ADDR <<< "$trimmed"
+              for i in "${ADDR[@]}"; do
+                sub_trimmed=$(echo "$i" | xargs)
+                if [ -n "$sub_trimmed" ]; then
+                  TARGET_PATHS+=("$sub_trimmed")
+                fi
+              done
+            fi
+          done <<< "$INPUT_PATHS"
+        elif [ -n "$INPUT_PATH" ]; then
+          TARGET_PATHS+=("$INPUT_PATH")
+        else
+          TARGET_PATHS+=(".")
+        fi
+
+        ARGS=("check" "${TARGET_PATHS[@]}" "--checklevel=$INPUT_CHECKLEVEL" "--luals-version=$INPUT_LUALS_VERSION" "--format=github")
 
         if [ -n "$INPUT_CONFIG" ]; then
           ARGS+=("--config=$INPUT_CONFIG")
@@ -97,6 +127,21 @@ runs:
 
         if [ -n "$INPUT_ANNOTATIONS" ]; then
           ARGS+=("--annotations=$INPUT_ANNOTATIONS")
+        fi
+
+        if [ -n "$INPUT_DEP" ]; then
+          while IFS= read -r line || [ -n "$line" ]; do
+            trimmed=$(echo "$line" | xargs)
+            if [ -n "$trimmed" ]; then
+              IFS=',' read -ra ADDR <<< "$trimmed"
+              for i in "${ADDR[@]}"; do
+                sub_trimmed=$(echo "$i" | xargs)
+                if [ -n "$sub_trimmed" ]; then
+                  ARGS+=("--dep=$sub_trimmed")
+                fi
+              done
+            fi
+          done <<< "$INPUT_DEP"
         fi
 
         if [ -n "$INPUT_IGNORE" ]; then
@@ -127,5 +172,5 @@ runs:
         else
           # Exact version: a range could run a different release than the pinned
           # tag. Bump together with "version" in package.json.
-          npx --yes nanos-lint@3.0.1 "${ARGS[@]}"
+          npx --yes nanos-lint@3.1.0 "${ARGS[@]}"
         fi

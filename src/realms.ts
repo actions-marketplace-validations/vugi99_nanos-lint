@@ -11,6 +11,12 @@ import { deriveRealmAnnotationFiles, type RealmPassName } from "./annotations-re
 import { logger } from "./logger.js";
 import { listCheckedFiles, runLuaLSCheck } from "./luals.js";
 import {
+  computeUnrequestedExclusions,
+  getCanonicalPath,
+  matchesTargetPaths,
+} from "./target-resolver.js";
+import { resolvePackageDependencies } from "./deps.js";
+import {
   fileUriToPath,
   type CheckOptions,
   type CheckResult,
@@ -114,6 +120,8 @@ export interface PlanRealmCheckOptions {
   annotationsPath: string;
   customConfigPath?: string;
   ignore?: string[];
+  targetPaths?: string[];
+  cliDeps?: string[];
 }
 
 /** Returns the passes selected by `--realm`, always pairing a side with the shared pass. */
@@ -134,6 +142,7 @@ function buildPassConfig(
   annotationsPath: string,
   realmAnnotationPath: string,
   excludedPatterns: string[],
+  dependencyLibraries: string[] = [],
 ): Record<string, unknown> {
   const config = JSON.parse(JSON.stringify(baseConfig)) as {
     workspace?: { library?: string[] };
@@ -145,7 +154,7 @@ function buildPassConfig(
   );
   config.workspace = {
     ...(config.workspace ?? {}),
-    library: [realmAnnotationPath, ...libraries],
+    library: Array.from(new Set([realmAnnotationPath, ...libraries, ...dependencyLibraries])),
   };
   if (realm !== "shared" && excludedPatterns.length > 0) {
     config.files = {
@@ -174,9 +183,13 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
     return null;
   }
 
+  const unrequestedExclusions = options.targetPaths
+    ? computeUnrequestedExclusions(resolvedTarget, options.targetPaths)
+    : [];
   const baseConfig = buildWorkspaceConfig(resolvedTarget, options.customConfigPath, {
     ignore: options.ignore,
     annotationsPath,
+    unrequestedExclusions,
   });
   const tempConfigs: string[] = [];
   const baseConfigPath = writeTempConfig(baseConfig);
@@ -185,12 +198,21 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
     const checkedFiles = listCheckedFiles(resolvedTarget, baseConfigPath);
     const realmFiles = collectRealmFiles(resolvedTarget, mappings, checkedFiles);
 
+    const isTargetFile = (file: string): boolean => {
+      if (!options.targetPaths || options.targetPaths.length === 0) {
+        return true;
+      }
+      return matchesTargetPaths(file, resolvedTarget, options.targetPaths);
+    };
+
     // Report sets are keyed by normalized paths: diagnostics arrive as real file paths,
     // so membership must survive Windows' case-insensitive file system.
     const realmReportFiles: Record<RealmPassName, Set<string>> = {
-      client: new Set(realmFiles.client.map(normalizeRelative)),
-      server: new Set(realmFiles.server.map(normalizeRelative)),
-      shared: new Set([...realmFiles.shared, ...realmFiles.unmatched].map(normalizeRelative)),
+      client: new Set(realmFiles.client.filter(isTargetFile).map(normalizeRelative)),
+      server: new Set(realmFiles.server.filter(isTargetFile).map(normalizeRelative)),
+      shared: new Set(
+        [...realmFiles.shared, ...realmFiles.unmatched].filter(isTargetFile).map(normalizeRelative),
+      ),
     };
     const hasRealmFolders =
       realmFiles.client.length > 0 || realmFiles.server.length > 0 || realmFiles.shared.length > 0;
@@ -203,21 +225,44 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
     }
 
     const wanted = selectedRealms(selection).filter((realm) => realmReportFiles[realm].size > 0);
+    if (wanted.length === 0) {
+      if (selection !== "all") {
+        logger.warn(
+          `[realms] No target files match the requested realm "${selection}"; falling back to a standard check.`,
+        );
+      } else {
+        logger.debug(
+          "[realms] No files to report for selected realm pass; running a single standard pass.",
+        );
+      }
+      for (const tempConfig of tempConfigs) {
+        removeTempConfig(tempConfig);
+      }
+      return null;
+    }
     const needsSplitLibraries = wanted.some((realm) => realm !== "shared");
     const derived = needsSplitLibraries
       ? deriveRealmAnnotationFiles(annotationsPath)
       : { client: annotationsPath, server: annotationsPath };
+    const resolvedDeps = resolvePackageDependencies(resolvedTarget, userConfig, options.cliDeps);
     const passes: RealmPass[] = [];
     for (const realm of wanted) {
       const excluded = mappings
         .filter((mapping) => mapping.realm !== realm && mapping.realm !== "shared")
         .map((mapping) => mapping.pattern);
+      const depLibraries =
+        realm === "server"
+          ? resolvedDeps.server
+          : realm === "client"
+            ? resolvedDeps.client
+            : resolvedDeps.shared;
       const passConfig = buildPassConfig(
         baseConfig as unknown as Record<string, unknown>,
         realm,
         annotationsPath,
         realm === "client" ? derived.client : realm === "server" ? derived.server : annotationsPath,
         excluded,
+        depLibraries,
       );
       const configPath = writeTempConfig(passConfig);
       tempConfigs.push(configPath);
@@ -261,9 +306,15 @@ function filterReportByFiles(
   reportFiles: Set<string>,
 ): DiagnosticReport {
   const filtered: DiagnosticReport = {};
+  const canonicalRoot = getCanonicalPath(root);
   for (const [uri, diagnostics] of Object.entries(report)) {
     const filePath = fileUriToPath(uri);
-    const relative = normalizeRelative(path.relative(root, path.resolve(filePath)));
+    const resolvedFile = path.resolve(filePath);
+    let relative = normalizeRelative(path.relative(root, resolvedFile));
+    if (!reportFiles.has(relative)) {
+      const canonicalFile = getCanonicalPath(resolvedFile);
+      relative = normalizeRelative(path.relative(canonicalRoot, canonicalFile));
+    }
     if (reportFiles.has(relative)) {
       filtered[uri] = diagnostics;
     }

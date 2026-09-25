@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
 import { resolveWorkspaceConfig, initWorkspace, getPackageRoot, loadUserConfig } from "./config.js";
 import { planRealmCheck, runRealmAwareCheck, type RealmSelection } from "./realms.js";
+import { collectDeps, resolvePackageDependencies } from "./deps.js";
 import { resolveAnnotations, readAnnotationsMetadata } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
@@ -11,6 +12,7 @@ import { getCacheStatus, formatCacheStatusPretty } from "./cache-status.js";
 import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
 import { ConfigError, NanosLintError } from "./errors.js";
+import { computeUnrequestedExclusions, resolveCheckTargets } from "./target-resolver.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
 
 /** Retrieves the formatted package name and version string from package.json. */
@@ -53,6 +55,7 @@ interface CheckCommandOptions {
   logLevel?: string;
   github?: boolean;
   ignore?: string[];
+  dep?: string[];
   realm?: RealmSelection;
 }
 
@@ -89,8 +92,8 @@ export function createProgram(options?: CreateProgramOptions): Command {
     });
 
   program
-    .command("check [path]", { isDefault: true })
-    .description("Check a workspace or Lua file (default command)")
+    .command("check [paths...]", { isDefault: true })
+    .description("Check workspace files or directories (default command)")
     .addOption(
       new Option(
         "--checklevel <level>",
@@ -113,6 +116,11 @@ export function createProgram(options?: CreateProgramOptions): Command {
       collectIgnorePatterns,
     )
     .option(
+      "-d, --dep <path>",
+      "Path to package dependency or Lua definition file (repeatable)",
+      collectDeps,
+    )
+    .option(
       "--luals-version <ver>",
       `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`,
       DEFAULT_LUALS_VERSION,
@@ -133,23 +141,28 @@ export function createProgram(options?: CreateProgramOptions): Command {
         .choices(["all", "client", "server", "shared"])
         .default("all"),
     )
-    .action(async (targetPath: string = ".", opts: CheckCommandOptions) => {
+    .action(async (targetPaths: string[] = ["."], opts: CheckCommandOptions) => {
       if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
         logger.setLevel(opts.logLevel as LogLevel);
       }
+
+      const rawPaths = targetPaths && targetPaths.length > 0 ? targetPaths : ["."];
+      const { rootPath, targetPaths: canonicalTargets } = resolveCheckTargets(rawPaths);
 
       const format = opts.github
         ? "github"
         : opts.format || (process.env.GITHUB_ACTIONS ? "github" : "pretty");
 
       const checkOptions: CheckOptions = {
-        path: targetPath,
+        path: rootPath,
+        paths: canonicalTargets,
         configpath: opts.config,
         checklevel: opts.checklevel,
         format,
         lualsVersion: opts.lualsVersion,
         failOnError: opts.fail !== false,
         ignore: opts.ignore,
+        deps: opts.dep,
       };
 
       if (opts.config) {
@@ -167,29 +180,36 @@ export function createProgram(options?: CreateProgramOptions): Command {
         customPath: opts.annotations,
       });
 
+      const userConfig = loadUserConfig(rootPath, checkOptions.configpath);
       const realmPlan = planRealmCheck({
-        targetPath,
-        userConfig: loadUserConfig(targetPath, checkOptions.configpath),
+        targetPath: rootPath,
+        userConfig,
         selection: opts.realm ?? "all",
         annotationsPath,
         customConfigPath: checkOptions.configpath,
         ignore: checkOptions.ignore,
+        targetPaths: canonicalTargets,
+        cliDeps: checkOptions.deps,
       });
 
       let result;
       if (realmPlan) {
         try {
-          result = await runRealmAwareCheck(realmPlan, targetPath, checkOptions);
+          result = await runRealmAwareCheck(realmPlan, rootPath, checkOptions);
         } finally {
           realmPlan.cleanup();
         }
       } else {
-        const resolved = resolveWorkspaceConfig(targetPath, checkOptions.configpath, {
+        const resolvedDeps = resolvePackageDependencies(rootPath, userConfig, checkOptions.deps);
+        const unrequestedExclusions = computeUnrequestedExclusions(rootPath, canonicalTargets);
+        const resolved = resolveWorkspaceConfig(rootPath, checkOptions.configpath, {
           ignore: checkOptions.ignore,
           annotationsPath,
+          dependencyLibraries: resolvedDeps.all,
+          unrequestedExclusions,
         });
         try {
-          result = await runLuaLSCheck(targetPath, resolved.configPath, checkOptions);
+          result = await runLuaLSCheck(rootPath, resolved.configPath, checkOptions);
         } finally {
           if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
             try {
@@ -354,6 +374,7 @@ Examples:
   $ npx nanos-lint check . --checklevel=Error
   $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"
   $ npx nanos-lint check . --realm server
+  $ npx nanos-lint check Shared/ Server/ --realm server
   $ npx nanos-lint init
   $ npx nanos-lint clean-cache
 `,
