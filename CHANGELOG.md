@@ -16,17 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Partitioned resolved dependency libraries across realm passes: server pass receives `Server/`, `Shared/`, and root `.lua` files; client pass receives `Client/`, `Shared/`, and root `.lua` files; shared pass receives `Shared/` and root `.lua` files. When realms are disabled, all dependency paths are supplied to the single standard pass.
   - Non-existent dependency paths emit a non-fatal warning (`logger.warn`) and are skipped without failing the check or contributing to problem counts.
   - Added unit tests in `tests/unit/deps.test.ts` and `tests/unit/cli.test.ts`, and live integration test in `tests/integration/cli-execution.test.ts`.
-
-## [3.0.1] - 2026-09-25
-
-### Added
-
 - Variadic target paths for `check` command (`npx nanos-lint check [paths...]`) (#46):
   - Changed CLI `check` argument definition to `check [paths...]`, allowing multiple directories and/or files to be passed simultaneously (e.g. `npx nanos-lint check Shared/ Server/ --realm server`).
   - Added `src/target-resolver.ts` to compute the lowest common ancestor directory across multiple targets and filter reported diagnostics and file counts to only match the requested paths.
   - In realm-aware checks (`planRealmCheck()`), targets are mapped within the common workspace root, enabling server scripts to reference shared declarations without undefined-global errors while skipping unrequested passes (such as client).
   - Updated `CheckOptions` in `src/types.ts` to accept optional `paths?: string[]`.
   - Added unit tests in `tests/unit/target-resolver.test.ts` and `tests/unit/cli.test.ts`, and integration tests in `tests/integration/cli-execution.test.ts`.
+
+## [3.0.1] - 2026-09-25
+
+### Added
+
 - Periodic lock heartbeat in `withFileLock()` (`src/lock.ts`) for long-running cache extractions and downloads (#44):
   - Added `heartbeatIntervalMs?: number` to `FileLockOptions`, defaulting to `staleMs / 4` capped at 15s (or disabled when `staleMs <= 0`).
   - Implemented non-destructive `touchLockFile()` using `fs.utimesSync()`, ensuring an active heartbeat updates the file's modification timestamp without rewriting metadata or risking clobbering another worker's acquired lock.
