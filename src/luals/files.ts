@@ -69,22 +69,52 @@ function isPatternWithinBudget(pattern: string): boolean {
     .every((segment) => countWildcards(segment) <= MAX_WILDCARDS_PER_SEGMENT);
 }
 
-/** Normalizes a user pattern to slash-separated form, dropping trailing slashes and invalid inputs. */
-function normalizePattern(pattern: unknown): string | null {
+/** Outcome of normalizing one user-supplied glob pattern. */
+interface NormalizedPattern {
+  pattern: string | null;
+  reason: string | null;
+  /** `true` when the rejection is a likely user error worth warning about (#33). */
+  actionable: boolean;
+}
+
+/**
+ * Normalizes a user pattern to slash-separated form, dropping trailing slashes.
+ *
+ * v3.0.0 (#33) rejects two shapes that used to be silently misread:
+ * - absolute patterns, because LuaLS matches patterns relative to the workspace root
+ *   and `glob` anchors them inconsistently across platforms;
+ * - `!`-prefixed patterns, because LuaLS uses a gitignore-style matcher without
+ *   negation support, so honoring negation here would count files LuaLS never checks.
+ */
+function normalizePattern(pattern: unknown): NormalizedPattern {
+  const unusable = (reason: string, actionable = false): NormalizedPattern => ({
+    pattern: null,
+    reason,
+    actionable,
+  });
   if (typeof pattern !== "string") {
-    return null;
+    return unusable("the value is not a string");
   }
   const normalized = pattern.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  if (
-    !normalized ||
-    normalized === "." ||
-    normalized.length > MAX_PATTERN_LENGTH ||
-    normalized.includes("\0") ||
-    isAbsolutePattern(normalized)
-  ) {
-    return null;
+  if (!normalized) {
+    return unusable("the value is empty");
   }
-  return normalized;
+  if (normalized === ".") {
+    return unusable('"." refers to the workspace root');
+  }
+  if (normalized.length > MAX_PATTERN_LENGTH) {
+    return unusable(`the pattern exceeds ${MAX_PATTERN_LENGTH} characters`);
+  }
+  if (normalized.includes("\0")) {
+    return unusable("the pattern contains a NUL byte");
+  }
+  if (isAbsolutePattern(normalized)) {
+    return unusable("absolute patterns are not supported", true);
+  }
+  if (normalized.startsWith("!")) {
+    return unusable("negation prefixes are not supported by LuaLS", true);
+  }
+  return { pattern: normalized, reason: null, actionable: false };
 }
 
 /** Drive-letter prefixes, recognized on every platform (not just Windows). */
@@ -104,31 +134,35 @@ function expandIgnorePattern(pattern: string): string[] {
 function toIgnorePatterns(patterns: readonly unknown[]): string[] {
   const ignore: string[] = [];
   for (const raw of patterns) {
-    const normalized = normalizePattern(raw);
-    if (!normalized) {
-      logger.debug(
-        `[luals] Skipping unusable glob pattern "${String(raw)}" while counting checked files.`,
-      );
+    const { pattern, reason, actionable } = normalizePattern(raw);
+    if (!pattern) {
+      const message = `[luals] Skipping glob pattern "${String(raw)}" while counting checked files: ${reason}.`;
+      if (actionable) {
+        logger.warn(
+          `${message} LuaLS never applies it either, so the file count stays consistent.`,
+        );
+      } else {
+        logger.debug(message);
+      }
       continue;
     }
-    if (!isPatternWithinBudget(normalized)) {
+    if (!isPatternWithinBudget(pattern)) {
       logger.warn(
         `[luals] Skipping glob pattern "${raw}": it is too complex to match safely and would slow down file counting.`,
       );
       continue;
     }
-    ignore.push(...expandIgnorePattern(normalized));
+    ignore.push(...expandIgnorePattern(pattern));
   }
   return ignore;
 }
 
-/** Counts candidate Lua files within targetPath, taking workspace ignoreDir and files.exclude into account (#27). */
-export function countCheckedFiles(targetPath: string, configPath?: string): number {
+/** Resolves and canonicalizes the target, returning null when it does not exist. */
+function resolveTargetPath(targetPath: string): string | null {
   let absPath = path.resolve(targetPath);
   if (!fs.existsSync(absPath)) {
-    return 0;
+    return null;
   }
-
   try {
     absPath = fs.realpathSync.native(absPath);
   } catch {
@@ -138,9 +172,22 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
       void err;
     }
   }
+  return absPath;
+}
+
+/**
+ * Lists the Lua files LuaLS checks under `targetPath` as slash-normalized relative paths,
+ * honoring `workspace.ignoreDir` and `files.exclude` (#27). Absolute paths are returned
+ * for single-file targets, and an empty list is returned when the walk fails.
+ */
+export function listCheckedFiles(targetPath: string, configPath?: string): string[] {
+  const absPath = resolveTargetPath(targetPath);
+  if (!absPath) {
+    return [];
+  }
 
   if (fs.statSync(absPath).isFile()) {
-    return absPath.toLowerCase().endsWith(".lua") ? 1 : 0;
+    return absPath.toLowerCase().endsWith(".lua") ? [absPath] : [];
   }
 
   let ignoreDirs: readonly unknown[] = DEFAULT_IGNORE_DIRS;
@@ -174,11 +221,16 @@ export function countCheckedFiles(targetPath: string, configPath?: string): numb
       follow: false, // Disallow symlinks to prevent loops and directory escapes (#21)
       withFileTypes: true,
     });
-    return entries.filter((entry) => entry.isFile()).length;
+    return entries.filter((entry) => entry.isFile()).map((entry) => entry.relativePosix());
   } catch (err) {
     logger.warn(
-      `[luals] Failed to walk ${absPath} while counting checked files: ${err instanceof Error ? err.message : String(err)}`,
+      `[luals] Failed to walk ${absPath} while listing checked files: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return 0;
+    return [];
   }
+}
+
+/** Counts candidate Lua files within targetPath, taking workspace ignoreDir and files.exclude into account (#27). */
+export function countCheckedFiles(targetPath: string, configPath?: string): number {
+  return listCheckedFiles(targetPath, configPath).length;
 }

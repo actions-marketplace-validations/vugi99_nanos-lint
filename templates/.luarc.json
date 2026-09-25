@@ -38,5 +38,12 @@
       "unused-local": "Warning",
       "unused-vararg": "Warning"
     }
+  },
+  "nanos": {
+    "realms": {
+      "Server/**": "server",
+      "Client/**": "client",
+      "Shared/**": "shared"
+    }
   }
 }

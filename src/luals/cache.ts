@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { systemPaths } from "../paths.js";
 import { logger } from "../logger.js";
 import { getPackageRoot } from "../config.js";
 import { FALLBACK_LUALS_VERSION, sanitizeLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { isBinaryValid } from "./validation.js";
+import { writeAtomicFileSync } from "../lock.js";
 
 /** Returns the base directory in the system cache where LuaLS versions and metadata are stored. */
 export function getBaseLuaLSCacheDir(): string {
@@ -22,17 +22,6 @@ export function getCacheDir(
   baseCacheDir: string = getBaseLuaLSCacheDir(),
 ): string {
   return path.join(baseCacheDir, version);
-}
-
-/**
- * Returns the legacy cache directory used in nanos-lint <= 2.2.1.
- */
-export function getLegacyCacheDir(version: string = FALLBACK_LUALS_VERSION): string {
-  const base =
-    process.platform === "win32"
-      ? process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local")
-      : process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache");
-  return path.join(base, "nanos-lint", "luals", version);
 }
 
 export const LUALS_METADATA_FILENAME = "metadata.json";
@@ -103,15 +92,17 @@ export function readLuaLSMetadata(
   return null;
 }
 
-/** Writes metadata.json containing the latest checked version and timestamp. */
+/**
+ * Writes metadata.json containing the latest checked version and timestamp.
+ * The write is atomic (#7), so a parallel reader never observes a half-written file.
+ */
 export function writeLuaLSMetadata(
   metadata: LuaLSMetadata,
   baseCacheDir: string = getBaseLuaLSCacheDir(),
 ): void {
   try {
-    fs.mkdirSync(baseCacheDir, { recursive: true });
     const metaPath = getLuaLSMetadataPath(baseCacheDir);
-    fs.writeFileSync(metaPath, JSON.stringify(metadata, null, 2), "utf-8");
+    writeAtomicFileSync(metaPath, JSON.stringify(metadata, null, 2));
   } catch (err) {
     logger.warn(
       `[luals] Failed to write LuaLS metadata: ${err instanceof Error ? err.message : String(err)}`,
@@ -238,7 +229,7 @@ export function cleanupOldCachedLuaLSVersions(
 
 /**
  * Locates an existing, valid LuaLS directory for the specified version in the
- * primary cache (`baseCacheDir`), the legacy cache, or the package root.
+ * primary cache (`baseCacheDir`) or the package root.
  */
 export function findExistingLuaLSDir(
   version: string,
@@ -262,25 +253,7 @@ export function findExistingLuaLSDir(
     }
   }
 
-  // 2. Legacy cache (nanos-lint <= 2.2.1)
-  const legacyCache = getLegacyCacheDir(version);
-  if (path.resolve(legacyCache) !== path.resolve(primaryCache)) {
-    const legacyBin = path.join(legacyCache, info.binaryRelativePath);
-    const legacyMarker = path.join(legacyCache, ".complete");
-    if (fs.existsSync(legacyMarker)) {
-      try {
-        if (fs.readFileSync(legacyMarker, "utf-8").trim() === version && isBinaryValid(legacyBin)) {
-          return legacyCache;
-        }
-      } catch (err) {
-        logger.debug(
-          `[luals] Error checking legacy LuaLS cache marker at ${legacyMarker}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-  }
-
-  // 3. Package bundled root (release distributions)
+  // 2. Package bundled root (release distributions)
   const pkgRoot = getPackageRoot();
   const pkgBin = path.join(pkgRoot, info.binaryRelativePath);
   if (fs.existsSync(pkgBin) && isBinaryValid(pkgBin)) {

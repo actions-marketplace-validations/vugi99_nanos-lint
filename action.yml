@@ -30,10 +30,14 @@ inputs:
     description: "Whether to fail the action step if diagnostic errors/warnings are found"
     required: false
     default: "true"
-  quiet:
-    description: "Suppress progress output"
+  log-level:
+    description: "Logging level: error, warn, info, debug, silent"
     required: false
-    default: "false"
+    default: "warn"
+  realm:
+    description: "Execution realm to check: all, client, server, shared"
+    required: false
+    default: "all"
   ignore:
     description: "Files or directories to ignore (supports glob patterns, multiple entries can be newline or comma separated)"
     required: false
@@ -80,7 +84,8 @@ runs:
         INPUT_ANNOTATIONS: ${{ inputs.annotations }}
         INPUT_LUALS_VERSION: ${{ inputs.luals-version }}
         INPUT_FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
-        INPUT_QUIET: ${{ inputs.quiet }}
+        INPUT_LOG_LEVEL: ${{ inputs.log-level }}
+        INPUT_REALM: ${{ inputs.realm }}
         INPUT_IGNORE: ${{ inputs.ignore }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
@@ -107,8 +112,12 @@ runs:
           ARGS+=("--no-fail")
         fi
 
-        if [ "$INPUT_QUIET" = "true" ]; then
-          ARGS+=("--quiet")
+        if [ -n "$INPUT_LOG_LEVEL" ]; then
+          ARGS+=("--log-level=$INPUT_LOG_LEVEL")
+        fi
+
+        if [ -n "$INPUT_REALM" ]; then
+          ARGS+=("--realm=$INPUT_REALM")
         fi
 
         # dist/ is gitignored, so `uses: vugi99/nanos-lint@<ref>` consumers always

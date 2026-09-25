@@ -19,6 +19,7 @@ import {
   getAnnotationsMetadataFilePath,
   type AnnotationsMetadata,
 } from "../../src/annotations.js";
+import { logger } from "../../src/logger.js";
 
 describe("annotations management and date-based caching", () => {
   let tempBaseDir: string;
@@ -101,9 +102,7 @@ describe("annotations management and date-based caching", () => {
     });
 
     try {
-      const resultPath = await downloadAndCacheAnnotations("commit-111", tempBaseDir, {
-        quiet: true,
-      });
+      const resultPath = await downloadAndCacheAnnotations("commit-111", tempBaseDir);
       expect(fs.existsSync(resultPath)).toBe(true);
       expect(fs.readFileSync(resultPath, "utf-8")).toContain("nanos world annotations mock");
 
@@ -129,9 +128,9 @@ describe("annotations management and date-based caching", () => {
     globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network connection dropped"));
 
     try {
-      await expect(
-        downloadAndCacheAnnotations("new-commit", tempBaseDir, { quiet: true }),
-      ).rejects.toThrow(/Network connection dropped/);
+      await expect(downloadAndCacheAnnotations("new-commit", tempBaseDir)).rejects.toThrow(
+        /Network connection dropped/,
+      );
 
       // Verify original files were restored
       expect(fs.readFileSync(existingAnnotations, "utf-8")).toBe("-- original good annotations");
@@ -291,19 +290,22 @@ describe("annotations management and date-based caching", () => {
         } as unknown as Response);
       });
 
+      const previousLevel = logger.getLevel();
       try {
-        await downloadAndCacheAnnotations("unknown", tempBaseDir, { quiet: false });
+        logger.setLevel("info");
+        await downloadAndCacheAnnotations("unknown", tempBaseDir);
         for (const call of consoleSpy.mock.calls) {
           const msg = call.join(" ");
           expect(msg).not.toContain("commit unknown");
         }
       } finally {
+        logger.setLevel(previousLevel);
         consoleSpy.mockRestore();
         globalThis.fetch = originalFetch;
       }
     });
 
-    it("logs commit id when quiet is false and commitId is known", async () => {
+    it("logs the commit id at info level when the commitId is known", async () => {
       const originalFetch = globalThis.fetch;
       globalThis.fetch = vi.fn().mockImplementation((_url: string | URL | Request) => {
         return Promise.resolve({
@@ -313,12 +315,18 @@ describe("annotations management and date-based caching", () => {
         } as unknown as Response);
       });
 
+      const previousLevel = logger.getLevel();
+      const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
       try {
-        const file = await downloadAndCacheAnnotations("abcdef1234567890", tempBaseDir, {
-          quiet: false,
-        });
+        logger.setLevel("info");
+        const file = await downloadAndCacheAnnotations("abcdef1234567890", tempBaseDir);
         expect(fs.existsSync(file)).toBe(true);
+        expect(consoleSpy.mock.calls.map((c) => c.join(" ")).join("\n")).toContain(
+          "to commit abcdef1",
+        );
       } finally {
+        logger.setLevel(previousLevel);
+        consoleSpy.mockRestore();
         globalThis.fetch = originalFetch;
       }
     });
@@ -572,7 +580,7 @@ describe("annotations management and date-based caching", () => {
       });
 
       try {
-        const resolved = await resolveAnnotations({ cacheDir: cacheSubdir, quiet: true });
+        const resolved = await resolveAnnotations({ cacheDir: cacheSubdir });
         expect(resolved).toBe(cachedLua);
         const updatedMeta = readAnnotationsMetadata(cacheSubdir);
         expect(updatedMeta?.commitId).toBe("abcdef0123456789");

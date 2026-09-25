@@ -319,7 +319,7 @@ describe("LuaLS weekly cache check and version management", () => {
         });
 
         try {
-          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          const bin = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
           expect(bin).toBe(seeded);
           expect(fs.existsSync(bin)).toBe(true);
           expect(fetchCalls).toBe(0);
@@ -351,7 +351,7 @@ describe("LuaLS weekly cache check and version management", () => {
         });
 
         try {
-          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          const bin = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
           expect(typeof bin).toBe("string");
           expect(fs.existsSync(bin)).toBe(true);
 
@@ -383,7 +383,7 @@ describe("LuaLS weekly cache check and version management", () => {
 
         const restoreFetch = mockFetch(() => Promise.reject(new Error("Offline")));
         try {
-          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          const bin = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
           expect(bin).toBe(seeded);
 
           const updated = readLuaLSMetadata(baseCacheDir);
@@ -406,10 +406,9 @@ describe("LuaLS weekly cache check and version management", () => {
         try {
           await expect(
             resolveLuaLSBinary("latest", {
-              quiet: true,
               cacheDir: baseCacheDir,
-              // Force the network path: otherwise the shared test cache (probed as
-              // the legacy cache location) legitimately satisfies the request.
+              // Force the network path: otherwise the shared test cache
+              // legitimately satisfies the request.
               reuseExisting: false,
             }),
           ).rejects.toThrow(/Offline without cache/);
@@ -452,7 +451,7 @@ describe("LuaLS weekly cache check and version management", () => {
         );
 
         try {
-          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          const bin = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
           expect(bin).toBe(seeded);
           expect(fs.existsSync(bin)).toBe(true);
           // The stale version directory was purged after the weekly check.
@@ -482,7 +481,7 @@ describe("LuaLS weekly cache check and version management", () => {
         });
 
         try {
-          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          const bin = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
           expect(bin).toBe(seeded);
           expect(fetchCalls).toBe(0);
         } finally {
@@ -510,7 +509,7 @@ describe("LuaLS weekly cache check and version management", () => {
         });
 
         try {
-          const bin = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+          const bin = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
           expect(bin).toBe(seeded);
 
           const updated = readLuaLSMetadata(baseCacheDir);

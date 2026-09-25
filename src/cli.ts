@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
-import { resolveWorkspaceConfig, initWorkspace, getPackageRoot } from "./config.js";
+import { resolveWorkspaceConfig, initWorkspace, getPackageRoot, loadUserConfig } from "./config.js";
+import { planRealmCheck, runRealmAwareCheck, type RealmSelection } from "./realms.js";
 import { resolveAnnotations, readAnnotationsMetadata } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
@@ -49,10 +50,10 @@ interface CheckCommandOptions {
   format?: "pretty" | "json" | "github";
   lualsVersion: string;
   fail: boolean;
-  quiet?: boolean;
   logLevel?: string;
   github?: boolean;
   ignore?: string[];
+  realm?: RealmSelection;
 }
 
 export interface CreateProgramOptions {
@@ -75,11 +76,9 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .hook("preAction", (thisCommand, actionCommand) => {
       const target = actionCommand || thisCommand;
       const opts = target.optsWithGlobals
-        ? target.optsWithGlobals<{ logLevel?: string; quiet?: boolean }>()
-        : target.opts<{ logLevel?: string; quiet?: boolean }>();
-      if (opts.quiet) {
-        logger.setLevel("error");
-      } else if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
+        ? target.optsWithGlobals<{ logLevel?: string }>()
+        : target.opts<{ logLevel?: string }>();
+      if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
         logger.setLevel(opts.logLevel as LogLevel);
       }
     })
@@ -119,7 +118,6 @@ export function createProgram(options?: CreateProgramOptions): Command {
       DEFAULT_LUALS_VERSION,
     )
     .option("--no-fail", "Do not exit with code 1 if diagnostics are found")
-    .option("--quiet", "Suppress progress output")
     .addOption(
       new Option(
         "-l, --log-level <level>",
@@ -127,10 +125,16 @@ export function createProgram(options?: CreateProgramOptions): Command {
       ).choices(["error", "warn", "info", "debug", "silent"]),
     )
     .option("--github", "Output in GitHub Actions format (shortcut for --format=github)")
+    .addOption(
+      new Option(
+        "--realm <realm>",
+        "Execution realm to check: all, client, server, shared (default: all)",
+      )
+        .choices(["all", "client", "server", "shared"])
+        .default("all"),
+    )
     .action(async (targetPath: string = ".", opts: CheckCommandOptions) => {
-      if (opts.quiet) {
-        logger.setLevel("error");
-      } else if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
+      if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
         logger.setLevel(opts.logLevel as LogLevel);
       }
 
@@ -145,7 +149,6 @@ export function createProgram(options?: CreateProgramOptions): Command {
         format,
         lualsVersion: opts.lualsVersion,
         failOnError: opts.fail !== false,
-        quiet: opts.quiet,
         ignore: opts.ignore,
       };
 
@@ -162,24 +165,40 @@ export function createProgram(options?: CreateProgramOptions): Command {
 
       const annotationsPath = await resolveAnnotations({
         customPath: opts.annotations,
-        quiet: opts.quiet,
       });
 
-      const resolved = resolveWorkspaceConfig(targetPath, checkOptions.configpath, {
-        ignore: checkOptions.ignore,
+      const realmPlan = planRealmCheck({
+        targetPath,
+        userConfig: loadUserConfig(targetPath, checkOptions.configpath),
+        selection: opts.realm ?? "all",
         annotationsPath,
+        customConfigPath: checkOptions.configpath,
+        ignore: checkOptions.ignore,
       });
+
       let result;
-      try {
-        result = await runLuaLSCheck(targetPath, resolved.configPath, checkOptions);
-      } finally {
-        if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
-          try {
-            fs.unlinkSync(resolved.configPath);
-          } catch (err) {
-            logger.warn(
-              `Failed to clean up temporary config file ${resolved.configPath}: ${err instanceof Error ? err.message : String(err)}`,
-            );
+      if (realmPlan) {
+        try {
+          result = await runRealmAwareCheck(realmPlan, targetPath, checkOptions);
+        } finally {
+          realmPlan.cleanup();
+        }
+      } else {
+        const resolved = resolveWorkspaceConfig(targetPath, checkOptions.configpath, {
+          ignore: checkOptions.ignore,
+          annotationsPath,
+        });
+        try {
+          result = await runLuaLSCheck(targetPath, resolved.configPath, checkOptions);
+        } finally {
+          if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+            try {
+              fs.unlinkSync(resolved.configPath);
+            } catch (err) {
+              logger.warn(
+                `Failed to clean up temporary config file ${resolved.configPath}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
           }
         }
       }
@@ -219,15 +238,13 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .description("Pre-fetch and cache both LuaLS binary and annotations for offline execution")
     .option("--luals-version <ver>", `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`)
     .option("--annotations <path>", "Path to custom annotations.lua file")
-    .option("-q, --quiet", "Suppress download progress logging")
-    .action(async (opts?: { lualsVersion?: string; annotations?: string; quiet?: boolean }) => {
+    .action(async (opts?: { lualsVersion?: string; annotations?: string }) => {
       const ver = opts?.lualsVersion || DEFAULT_LUALS_VERSION;
-      const bin = await resolveLuaLSBinary(ver, { quiet: opts?.quiet });
+      const bin = await resolveLuaLSBinary(ver);
       writeOutput(`[warmup] LuaLS binary ready: ${bin}`);
 
       const annotationsPath = await resolveAnnotations({
         customPath: opts?.annotations,
-        quiet: opts?.quiet,
       });
       const meta = readAnnotationsMetadata();
       const commitInfo =
@@ -336,6 +353,7 @@ Examples:
   $ npx nanos-lint check ./my-package
   $ npx nanos-lint check . --checklevel=Error
   $ npx nanos-lint check . --ignore "myfolder/hello-*.lua"
+  $ npx nanos-lint check . --realm server
   $ npx nanos-lint init
   $ npx nanos-lint clean-cache
 `,

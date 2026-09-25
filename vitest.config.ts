@@ -33,7 +33,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json"],
-      include: ["src/**/*.ts"],
+      include: ["src/**/*.ts", "scripts/packaging/**/*.ts", "scripts/package-release.ts"],
       exclude: ["src/index.ts", "src/luals.ts", "src/luals/index.ts"],
       // Enforced for complete runs only: the offline subset cannot meet them.
       thresholds: liveTestsEnabled
@@ -61,6 +61,30 @@ export default defineConfig({
               functions: 85,
               branches: 50,
               statements: 65,
+            },
+            "scripts/packaging/verify.ts": {
+              lines: 75,
+              functions: 55,
+              branches: 70,
+              statements: 75,
+            },
+            "scripts/packaging/bundle.ts": {
+              lines: 75,
+              functions: 90,
+              branches: 55,
+              statements: 75,
+            },
+            "scripts/packaging/types.ts": {
+              lines: 95,
+              functions: 95,
+              branches: 95,
+              statements: 95,
+            },
+            "scripts/package-release.ts": {
+              lines: 80,
+              functions: 85,
+              branches: 65,
+              statements: 80,
             },
           }
         : undefined,

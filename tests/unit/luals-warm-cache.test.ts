@@ -45,7 +45,7 @@ describe.skipIf(!isLiveTestsEnabled())("resolveLuaLSBinary cache handling", () =
       );
 
       execFileSyncCalls.length = 0;
-      const resolved = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+      const resolved = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
 
       expect(resolved).toBe(latest);
       // One spawn in total: the fast path must not enumerate the cache.
@@ -60,7 +60,7 @@ describe.skipIf(!isLiveTestsEnabled())("resolveLuaLSBinary cache handling", () =
     try {
       const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
 
-      const resolved = await resolveLuaLSBinary("latest", { quiet: true, cacheDir: baseCacheDir });
+      const resolved = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
 
       expect(resolved).toBe(seeded);
       expect(fs.existsSync(path.join(baseCacheDir, "metadata.json"))).toBe(true);

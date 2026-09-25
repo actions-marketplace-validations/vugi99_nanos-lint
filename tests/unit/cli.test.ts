@@ -7,6 +7,7 @@ import { runCLI, isDirectExecution, collectIgnorePatterns, createProgram } from 
 import * as pathsModule from "../../src/paths.js";
 import * as lualsModule from "../../src/luals.js";
 import * as annotationsModule from "../../src/annotations.js";
+import * as realmsModule from "../../src/realms.js";
 import { logger } from "../../src/logger.js";
 
 describe("cli module flag and command parsing", () => {
@@ -260,8 +261,8 @@ describe("cli module flag and command parsing", () => {
 
       const codeDefault = await runCLI(["warmup"]);
       expect(codeDefault).toBe(0);
-      expect(lualsSpy).toHaveBeenCalledWith("latest", { quiet: undefined });
-      expect(annotSpy).toHaveBeenCalledWith({ customPath: undefined, quiet: undefined });
+      expect(lualsSpy).toHaveBeenCalledWith("latest");
+      expect(annotSpy).toHaveBeenCalledWith({ customPath: undefined });
       expect(logSpy).toHaveBeenCalledWith(
         expect.stringContaining("[warmup] LuaLS binary ready: /mock/bin/luals"),
       );
@@ -283,16 +284,144 @@ describe("cli module flag and command parsing", () => {
         "3.19.0",
         "--annotations",
         "/custom/annotations.lua",
-        "--quiet",
+        "-l",
+        "error",
       ]);
       expect(codeDownload).toBe(0);
-      expect(lualsSpy).toHaveBeenCalledWith("3.19.0", { quiet: true });
-      expect(annotSpy).toHaveBeenCalledWith({ customPath: "/custom/annotations.lua", quiet: true });
+      expect(lualsSpy).toHaveBeenCalledWith("3.19.0");
+      expect(annotSpy).toHaveBeenCalledWith({ customPath: "/custom/annotations.lua" });
 
       lualsSpy.mockRestore();
       annotSpy.mockRestore();
       metaSpy.mockRestore();
       logSpy.mockRestore();
+    });
+
+    it("auto-selects GitHub annotations when GITHUB_ACTIONS is set", async () => {
+      const originalGithubActions = process.env.GITHUB_ACTIONS;
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck").mockResolvedValue({
+        passed: false,
+        totalProblems: 1,
+        totalErrors: 0,
+        totalWarnings: 1,
+        totalFiles: 1,
+        diagnostics: {
+          "file:///workspace/Server/combat.lua": [
+            {
+              code: "undefined-global",
+              message: "Undefined global `Client`.",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } },
+              severity: 2 as const,
+            },
+          ],
+        },
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        process.env.GITHUB_ACTIONS = "true";
+        expect(await runCLI(["check", "."])).toBe(1);
+        const output = logSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+        expect(output).toContain("::warning file=");
+        // Annotation paths are always slash-normalized, unlike the pretty reporter.
+        expect(output).toContain("Server/combat.lua");
+      } finally {
+        if (originalGithubActions === undefined) {
+          delete process.env.GITHUB_ACTIONS;
+        } else {
+          process.env.GITHUB_ACTIONS = originalGithubActions;
+        }
+        annotSpy.mockRestore();
+        checkSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it("runs realm passes when a realm plan is available and always cleans it up", async () => {
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck");
+      const cleanup = vi.fn();
+      const plan = {
+        baseConfigPath: "/tmp/base.json",
+        passes: [
+          {
+            realm: "server" as const,
+            configPath: "/tmp/server.json",
+            reportFiles: new Set(["a.lua"]),
+          },
+        ],
+        cleanup,
+      };
+      const planSpy = vi.spyOn(realmsModule, "planRealmCheck").mockReturnValue(plan);
+      const realmRunSpy = vi.spyOn(realmsModule, "runRealmAwareCheck").mockResolvedValue({
+        passed: true,
+        totalProblems: 0,
+        totalFiles: 1,
+        diagnostics: {},
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        expect(await runCLI(["check", ".", "--realm", "client"])).toBe(0);
+        expect(planSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            selection: "client",
+            annotationsPath: "/mock/annotations.lua",
+          }),
+        );
+        expect(realmRunSpy).toHaveBeenCalledWith(plan, ".", expect.objectContaining({ path: "." }));
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(checkSpy).not.toHaveBeenCalled();
+      } finally {
+        annotSpy.mockRestore();
+        checkSpy.mockRestore();
+        planSpy.mockRestore();
+        realmRunSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
+    it("cleans up the realm plan even when the realm run fails", async () => {
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const cleanup = vi.fn();
+      const planSpy = vi.spyOn(realmsModule, "planRealmCheck").mockReturnValue({
+        baseConfigPath: "/tmp/base.json",
+        passes: [],
+        cleanup,
+      });
+      const realmRunSpy = vi
+        .spyOn(realmsModule, "runRealmAwareCheck")
+        .mockRejectedValue(new Error("luals exploded"));
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      try {
+        expect(await runCLI(["check", "."])).toBe(1);
+        expect(cleanup).toHaveBeenCalledTimes(1);
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("luals exploded"));
+      } finally {
+        annotSpy.mockRestore();
+        planSpy.mockRestore();
+        realmRunSpy.mockRestore();
+        errSpy.mockRestore();
+      }
+    });
+
+    it("rejects an unknown --realm value", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(await runCLI(["check", ".", "--realm", "banana"])).not.toBe(0);
+        const messages = errSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+        expect(messages).toContain("Allowed choices are all, client, server, shared");
+      } finally {
+        errSpy.mockRestore();
+      }
     });
 
     it("handles errors during clean-cache execution", async () => {
@@ -351,7 +480,7 @@ describe("cli module flag and command parsing", () => {
         totalFiles: 1,
         diagnostics: {},
       });
-      const codePass = await runCLI(["check", ".", "--github", "--quiet"]);
+      const codePass = await runCLI(["check", ".", "--github", "-l", "error"]);
       expect(codePass).toBe(0);
 
       // Failing check with --no-fail should return 0
@@ -430,14 +559,14 @@ describe("cli module flag and command parsing", () => {
       const codePretty = await runCLI(["check", ".", "--format", "pretty", "--no-fail"]);
       expect(codePretty).toBe(0);
 
-      // Check with --ignore option and --quiet
+      // Check with --ignore option and --log-level
       checkSpy.mockResolvedValueOnce({
         passed: true,
         totalProblems: 0,
         totalFiles: 1,
         diagnostics: {},
       });
-      const codeIgnore = await runCLI(["check", ".", "--ignore", "myfolder/*.lua", "--quiet"]);
+      const codeIgnore = await runCLI(["check", ".", "--ignore", "myfolder/*.lua", "-l", "error"]);
       expect(codeIgnore).toBe(0);
 
       // Check with -l info
@@ -522,7 +651,7 @@ describe("cli module flag and command parsing", () => {
         expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("test.lua"));
 
         logSpy.mockClear();
-        expect(await runCLI(["check", ".", "--quiet"])).toBe(1);
+        expect(await runCLI(["check", ".", "--log-level", "warn"])).toBe(1);
         expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("test.lua"));
       } finally {
         logger.setLevel("warn");
@@ -568,6 +697,19 @@ describe("cli module flag and command parsing", () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
         cleanSpy.mockRestore();
         logSpy.mockRestore();
+      }
+    });
+
+    it("rejects the removed --quiet flag on every command (issue #3)", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        expect(await runCLI(["check", ".", "--quiet"])).not.toBe(0);
+        expect(await runCLI(["warmup", "--quiet"])).not.toBe(0);
+        expect(await runCLI(["warmup", "-q"])).not.toBe(0);
+        const messages = errSpy.mock.calls.map((call) => call.join(" ")).join("\n");
+        expect(messages).toContain("unknown option");
+      } finally {
+        errSpy.mockRestore();
       }
     });
   });

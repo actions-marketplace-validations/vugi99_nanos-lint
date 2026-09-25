@@ -593,16 +593,21 @@ describe("Regression tests for audit review issues", () => {
     });
   });
 
-  describe.skipIf(!liveTestsEnabled)("Issue 4: --quiet suppresses progress output", () => {
-    it("resolveLuaLSBinary with quiet=true suppresses [luals] console.log output", async () => {
+  describe.skipIf(!liveTestsEnabled)("Issue 4: log-level gates LuaLS progress output", () => {
+    it("resolveLuaLSBinary stays silent at the default log level and logs at info", async () => {
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const previousLevel = logger.getLevel();
       try {
         await getSharedLuaLSBinary();
-        await resolveLuaLSBinary("latest", { quiet: true });
-        const calls = logSpy.mock.calls.map((c) => c.join(" "));
-        const hasLualsLog = calls.some((msg) => msg.includes("[luals]"));
-        expect(hasLualsLog).toBe(false);
+        logger.setLevel("warn");
+        await resolveLuaLSBinary("latest");
+        expect(logSpy.mock.calls.map((c) => c.join(" ")).some((m) => m.includes("[luals]"))).toBe(
+          false,
+        );
+        logger.setLevel("info");
+        await resolveLuaLSBinary("latest", { reuseExisting: true });
       } finally {
+        logger.setLevel(previousLevel);
         logSpy.mockRestore();
       }
     });
@@ -661,8 +666,8 @@ describe("Regression tests for audit review issues", () => {
 
           // Run 2 concurrent extractions to the exact same targetDir
           const [bin1, bin2] = await Promise.all([
-            downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
-            downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
+            downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir),
+            downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir),
           ]);
 
           expect(bin1).toBe(bin2);
@@ -711,9 +716,7 @@ describe("Regression tests for audit review issues", () => {
             process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
           fs.writeFileSync(path.join(binSubdir, binaryName), "corrupted truncated file");
 
-          const repairedBin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, corruptDir, {
-            quiet: true,
-          });
+          const repairedBin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, corruptDir, {});
           expect(isBinaryValid(repairedBin)).toBe(true);
           expect(fs.existsSync(path.join(corruptDir, ".complete"))).toBe(true);
         } finally {
@@ -768,7 +771,6 @@ describe("Regression tests for audit review issues", () => {
         try {
           const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
           const resolved = await resolveLuaLSBinary(FALLBACK_LUALS_VERSION, {
-            quiet: true,
             cacheDir: baseCacheDir,
           });
 
@@ -814,7 +816,7 @@ describe("Regression tests for audit review issues", () => {
 
         try {
           await expect(
-            downloadAndExtractLuaLS("3.19.1", corruptDir, { quiet: true, reuseExisting: false }),
+            downloadAndExtractLuaLS("3.19.1", corruptDir, { reuseExisting: false }),
           ).rejects.toThrow();
           expect(fetchAttempted).toBe(true);
         } finally {
@@ -852,7 +854,7 @@ describe("Regression tests for audit review issues", () => {
 
           try {
             await expect(
-              downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
+              downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir),
             ).rejects.toThrow(/EPERM/);
             expect(threw).toBe(true);
 

@@ -19,7 +19,6 @@ export * from "./annotations-download.js";
 export interface ResolveAnnotationsOptions {
   customPath?: string;
   cacheDir?: string;
-  quiet?: boolean;
 }
 
 /** Validates that a user-supplied or environment-specified annotations path exists and is a valid file. */
@@ -151,7 +150,7 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
       return cachedAnnotationsFile;
     }
 
-    return await downloadAndCacheAnnotations(latestCommitId, cacheDir, options);
+    return await downloadAndCacheAnnotations(latestCommitId, cacheDir);
   }
 
   if (fs.existsSync(cachedAnnotationsFile) && isAnnotationsValid(cachedAnnotationsFile)) {
@@ -166,7 +165,7 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
   }
 
   try {
-    return await downloadAndCacheAnnotations("unknown", cacheDir, options);
+    return await downloadAndCacheAnnotations("unknown", cacheDir);
   } catch (err) {
     if (fs.existsSync(bundled) && isAnnotationsValid(bundled)) {
       logger.info(
