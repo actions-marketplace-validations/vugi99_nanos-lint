@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Reduced `DEFAULT_LOCK_STALE_MS` from 120s to 30s: with the 60s default timeout (`DEFAULT_LOCK_TIMEOUT_MS`), abandoned locks from hard-killed processes (`SIGKILL` / power loss) can now be reclaimed automatically before timeout, while live processes stay protected by the heartbeat.
   - Added comprehensive unit tests in `tests/unit/concurrency.test.ts` verifying non-destructive touching, mtime advancement, clean timer disposal, error handling, lost-ownership cancellation, disabled heartbeat modes, and cross-process mutual exclusion across slow tasks.
 
+### Changed
+
+- Upgraded devDependencies `vitest` and `@vitest/coverage-v8` to `5.0.2`.
+
 ### Security
 
 - In `downloadAndExtractLuaLS()` (`src/luals/download.ts`), fail fast when an HTTP redirect targets an untrusted, off-allowlist domain instead of retrying up to three times, log a warning at warn level, and preserve the typed `LuaLSError` with its security remediation instructions.
