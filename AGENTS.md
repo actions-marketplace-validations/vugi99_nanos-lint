@@ -139,6 +139,7 @@ Whenever preparing or publishing a new tagged release or cutting a new version:
 - **Pre-Release Requirement**: Record and commit the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
 - **Verify the Release Tag Matches `package.json`**: Confirm the release tag (e.g. `v2.6.1`) matches the `version` field in `package.json`; `.github/workflows/release.yml` enforces this and fails the release on a mismatch.
 - **Update the Action Fallback Version**: Bump the pinned `npx --yes nanos-lint@<version>` fallback version in `action.yml` to the version being released.
+- **Marketplace Publishing for Releases**: GitHub does not provide an API to publish or update actions to GitHub Marketplace automatically, and Marketplace requires full SemVer tags (rejecting floating tags like `v3`). After CI creates the GitHub Release, edit the release in GitHub Web UI and ensure **"Publish this Action to the GitHub Marketplace"** is checked so the Marketplace catalog stays up-to-date.
 
 ---
 

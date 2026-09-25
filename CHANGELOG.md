@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-25
+
 ### Added
 
+- Updated GitHub Actions workflow snippet in README.md to recommend floating major tag `uses: vugi99/nanos-lint@v3` and documented post-release manual GitHub Marketplace publishing procedure in `.agents/skills/new-release/SKILL.md` and `AGENTS.md` (#4).
 - Realm-aware checking (#15): `nanos-lint check` now mirrors the two nanos world VMs instead of analyzing one merged workspace.
   - The server pass indexes `Server/**` + `Shared/**` with shared+server annotations and excludes client-only files; the client pass is its mirror image; the shared pass keeps the complete annotation set and reports `Shared/**` plus files matched by no realm pattern, so a guarded side-specific call stays legal.
   - Realm libraries are derived mechanically from the cached upstream `annotations.lua` by reading its side markers (`both`, `client-only`, `server-only`, `authority-only`, `network-authority`): unmarked declarations inherit their class or sibling member realm, and a realm-specific class table (such as `Weapon`, declared server-only but with 35 shared instance methods) keeps only the members that realm can actually use. Derived files are cached under the system cache keyed by the annotations revision.
@@ -64,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added dedicated packaging test suite under `tests/packaging/` separated from app tests, covering pre-extraction checks, safe extraction, tree invariants, binary architecture inspection, transport hardening, and annotations commit pinning with coverage thresholds enforced.
 - Closed the fail-open bypass in the `inspectZipMembers()` ZIP pre-extraction inspection added for #31 (GHSA-4x3m-f5v4-qvp4): a release asset whose EOCD declared zero members, or whose declared central directory offset was out of range or the `0xFFFFFFFF` ZIP64 sentinel, previously walked nothing and returned `{ memberCount: 0, totalDeclaredSize: 0 }`, letting archive-planted symlinks, path-escaping members and oversized/inflated archives pass every check before extraction. Such archives are now rejected with `ERR_LUALS_EXTRACT`.
 - Closed two further ways to be extracted while uninspected, both reachable with an archive whose central directory alone looked valid: a second end of central directory record hidden in the first record's comment (the inspector and the extraction backends previously selected different records), and local file headers that no central directory record references (libarchive's streamable reader extracts them when the EOCD sits outside its 16 KiB search window). With both closed, the member path, link, count (10,000) and declared size (500 MB) constraints apply to the same member set the extraction backends will actually extract, and the `tar.exe`-then-`Expand-Archive` fallback in `src/luals/download.ts` no longer changes which members are extracted.
+- Dropped security support for versions < 3.0.0 in SECURITY.md.
 
 ## [2.8.2] - 2026-09-24
 

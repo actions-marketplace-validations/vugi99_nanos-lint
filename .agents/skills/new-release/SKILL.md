@@ -86,14 +86,24 @@ git push origin "v$VERSION"
 - `release.yml` fires on the tag-triggered CI run: it verifies the tag matches `package.json`, builds all five standalone distributions, creates the GitHub Release with generated notes, updates the floating major tag, and publishes to npm via trusted publishing.
 - Do not push tags with `--force`, and do not re-create an existing tag.
 
+### 7. Post-Release: GitHub Marketplace Publishing
+
+GitHub does not provide an API to publish or update actions on the GitHub Marketplace automatically, and the Marketplace strictly requires full Semantic Versioning (`MAJOR.MINOR.PATCH`, refusing floating tags like `v3`). After `release.yml` creates the GitHub Release for a release:
+
+1. Navigate to the repository's Releases page on GitHub (`https://github.com/vugi99/nanos-lint/releases`).
+2. Edit the newly created release (e.g. `v$VERSION`).
+3. Check the **"Publish this Action to the GitHub Marketplace"** checkbox.
+4. Save/update the release so the Marketplace catalog listing reflects the new release and displays up-to-date instructions to users (#4).
+
 ## Report Back
 
 Summarize concisely:
 
 - The released version and the tag pushed.
-- The files changed (`package.json`, `package-lock.json`, `CHANGELOG.md`, `SECURITY.md`, `action.yml`).
+- The files changed (`package.json`, `package-lock.json`, `CHANGELOG.md`, `SECURITY.md`, `action.yml`, etc.).
 - The old → new supported-versions range.
 - That the `release.yml` run is triggered, and the link to it if available (`gh run list --workflow=release.yml`).
+- A reminder for the admin to publish the release to GitHub Marketplace via the GitHub Releases Web UI (#4).
 
 ## Guardrails
 
