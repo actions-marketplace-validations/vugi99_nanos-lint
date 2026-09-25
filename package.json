@@ -1,6 +1,6 @@
 {
   "name": "nanos-lint",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Linter and type-checker for nanos world Lua scripts powered by LuaLS",
   "keywords": [
     "nanos-world",
@@ -57,7 +57,7 @@
     "@types/node": "^26.6.2",
     "@typescript-eslint/eslint-plugin": "^8.70.1",
     "@typescript-eslint/parser": "^8.70.1",
-    "@vitest/coverage-v8": "^5.0.1",
+    "@vitest/coverage-v8": "^5.0.2",
     "commander": "^15.0.0",
     "dependency-cruiser": "^18.4.0",
     "env-paths": "^4.0.0",
@@ -70,7 +70,7 @@
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.1",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.2"
   },
   "engines": {
     "node": ">=24.0.0"
