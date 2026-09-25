@@ -21,6 +21,8 @@ import {
   parseTarTvSize,
   validateArchiveMembers,
 } from "../../src/luals.js";
+import { LuaLSError } from "../../src/errors.js";
+import { logger } from "../../src/logger.js";
 import { resolveWorkspaceConfig } from "../../src/config.js";
 import { fileUriToPath } from "../../src/types.js";
 import {
@@ -784,19 +786,40 @@ describe("luals utilities", () => {
       }
     });
 
-    it("downloadAndExtractLuaLS rejects untrusted redirect URLs (Issue #19)", async () => {
+    it("downloadAndExtractLuaLS rejects untrusted redirect URLs without retrying (Issue #19)", async () => {
       const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-redirect-test-"));
       const originalFetch = globalThis.fetch;
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         url: "https://evil-mirror.com/asset.tar.gz",
         body: { cancel: vi.fn() },
       } as unknown as Response);
       try {
-        await expect(
-          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
-        ).rejects.toThrow(/Redirect to untrusted URL blocked/);
+        let thrownError: unknown;
+        try {
+          await downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false });
+        } catch (err) {
+          thrownError = err;
+        }
+
+        expect(thrownError).toBeInstanceOf(LuaLSError);
+        const lualsError = thrownError as LuaLSError;
+        expect(lualsError.message).toContain(
+          "Redirect to untrusted URL blocked: https://evil-mirror.com/asset.tar.gz",
+        );
+        expect(lualsError.code).toBe("ERR_LUALS_DOWNLOAD");
+        expect(lualsError.remedy).toBe(
+          "Download redirects must stay on allowlisted HTTPS GitHub hosts.",
+        );
+        expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Redirect to untrusted URL blocked: https://evil-mirror.com/asset.tar.gz",
+          ),
+        );
       } finally {
+        warnSpy.mockRestore();
         globalThis.fetch = originalFetch;
         fs.rmSync(tempTarget, { recursive: true, force: true });
       }

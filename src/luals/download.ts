@@ -246,7 +246,14 @@ async function downloadAndPromoteLuaLS(
             signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
           });
           if (res.url && !isAllowedDownloadUrl(res.url)) {
-            await res.body?.cancel();
+            if (typeof res.body?.cancel === "function") {
+              try {
+                await res.body.cancel();
+              } catch (cancelErr) {
+                void cancelErr;
+              }
+            }
+            logger.warn(`[luals] Redirect to untrusted URL blocked: ${res.url}`);
             throw new LuaLSError(
               `Redirect to untrusted URL blocked: ${res.url}`,
               "ERR_LUALS_DOWNLOAD",
@@ -257,9 +264,18 @@ async function downloadAndPromoteLuaLS(
             response = res;
             break;
           }
-          await res.body?.cancel();
+          if (typeof res.body?.cancel === "function") {
+            try {
+              await res.body.cancel();
+            } catch (cancelErr) {
+              void cancelErr;
+            }
+          }
           lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
         } catch (err) {
+          if (err instanceof LuaLSError) {
+            throw err;
+          }
           lastErr = err;
         }
         if (attempt < 3) {
