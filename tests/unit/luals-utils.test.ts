@@ -593,11 +593,14 @@ describe("luals utilities", () => {
           });
 
           expect(result.passed).toBe(false);
+          // Compare basenames: LuaLS reports canonical paths, while `os.tmpdir()` is not
+          // canonical on macOS (`/var` -> `/private/var`) or Windows (8.3 short names),
+          // so a relative path built from `tempDir` would not match on those platforms.
           const reported = Object.keys(result.diagnostics).map((uri) =>
-            path.relative(tempDir, path.resolve(fileUriToPath(uri))).replace(/\\/g, "/"),
+            path.basename(fileUriToPath(uri)),
           );
-          expect(reported).toContain("Requested/kept.lua");
-          expect(reported).not.toContain("Other/skipped.lua");
+          expect(reported).toContain("kept.lua");
+          expect(reported).not.toContain("skipped.lua");
         } finally {
           if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
             fs.unlinkSync(resolved.configPath);

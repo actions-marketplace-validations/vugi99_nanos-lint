@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected the "target is the workspace root" guard in `computeUnrequestedExclusions()`, which compared a resolved path against the raw root argument and therefore never matched.
 - Added cross-volume (`ERR_MULTIPLE_ROOTS`) and filesystem root (`ERR_ROOT_ANCESTOR`) validation for target paths.
 - Emitted a warning (`logger.warn`) when a requested realm filter matches no target files before falling back to a standard check.
+- Hardened the cross-process lock heartbeat test margins (1000 ms hold, 500 ms staleness, 100 ms heartbeat) so a stalled Windows runner cannot falsely reclaim a live lock; a disabled heartbeat still fails the test (#49).
 - Replaced regex trailing slash removal with index-based scanning in `src/target-resolver.ts` to prevent polynomial ReDoS CodeQL warnings (`js/polynomial-redos`).
 
 ## [3.0.1] - 2026-09-25
