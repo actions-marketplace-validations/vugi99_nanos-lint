@@ -75,6 +75,18 @@ export function findCommonAncestorDirectory(paths: string[]): string {
   return path.resolve(commonPath);
 }
 
+/**
+ * Removes trailing `/` characters from a path-like string without regular expressions
+ * to prevent polynomial ReDoS (CodeQL: js/polynomial-redos).
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f /* "/" */) {
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
+}
+
 /** Determines whether a workspace-relative file path matches any of the target paths. */
 export function matchesTargetPaths(
   relativePath: string,
@@ -103,7 +115,7 @@ export function matchesTargetPaths(
       if (!relFromCwd.startsWith("../") && relFromCwd !== "..") {
         relTarget = relFromCwd;
       } else {
-        relTarget = rawTarget.replace(/\\/g, "/").replace(/\/+$/, "").replace(/^\.\//, "");
+        relTarget = stripTrailingSlashes(rawTarget.replace(/\\/g, "/")).replace(/^\.\//, "");
       }
     }
 

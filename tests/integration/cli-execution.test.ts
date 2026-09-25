@@ -434,7 +434,10 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
   });
 
   it("checks a package with dependencies configured via nanos.deps and -d flag", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-pkg-deps-test-"));
+    const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-pkg-deps-test-"));
+    const tempDir = fs.realpathSync.native
+      ? fs.realpathSync.native(rawTempDir)
+      : fs.realpathSync(rawTempDir);
     try {
       const depPkg = path.join(tempDir, "dep-pkg");
       fs.mkdirSync(path.join(depPkg, "Shared"), { recursive: true });

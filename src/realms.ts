@@ -285,6 +285,15 @@ function removeTempConfig(configPath: string): void {
   }
 }
 
+/** Resolves the canonical filesystem path, falling back to original path on failure. */
+function getCanonicalPath(p: string): string {
+  try {
+    return fs.realpathSync.native ? fs.realpathSync.native(p) : fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
 /** Keeps only the diagnostics of files owned by the pass. */
 function filterReportByFiles(
   report: DiagnosticReport,
@@ -292,9 +301,15 @@ function filterReportByFiles(
   reportFiles: Set<string>,
 ): DiagnosticReport {
   const filtered: DiagnosticReport = {};
+  const canonicalRoot = getCanonicalPath(root);
   for (const [uri, diagnostics] of Object.entries(report)) {
     const filePath = fileUriToPath(uri);
-    const relative = normalizeRelative(path.relative(root, path.resolve(filePath)));
+    const resolvedFile = path.resolve(filePath);
+    let relative = normalizeRelative(path.relative(root, resolvedFile));
+    if (!reportFiles.has(relative)) {
+      const canonicalFile = getCanonicalPath(resolvedFile);
+      relative = normalizeRelative(path.relative(canonicalRoot, canonicalFile));
+    }
     if (reportFiles.has(relative)) {
       filtered[uri] = diagnostics;
     }

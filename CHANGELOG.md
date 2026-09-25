@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated `CheckOptions` in `src/types.ts` to accept optional `paths?: string[]`.
   - Added unit tests in `tests/unit/target-resolver.test.ts` and `tests/unit/cli.test.ts`, and integration tests in `tests/integration/cli-execution.test.ts`.
 
+### Fixed
+
+- Replaced regex trailing slash removal with index-based scanning in `src/target-resolver.ts` to prevent polynomial ReDoS CodeQL warnings (`js/polynomial-redos`).
+- Canonicalized temporary test directories using `fs.realpathSync.native` and added canonical path fallback in `filterReportByFiles()` to support macOS (`/var` symlink to `/private/var`) and Windows 8.3 short-path resolution.
+
 ## [3.0.1] - 2026-09-25
 
 ### Added

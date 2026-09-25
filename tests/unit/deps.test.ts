@@ -6,6 +6,11 @@ import { collectDeps, resolvePackageDependencies } from "../../src/deps.js";
 import { logger } from "../../src/logger.js";
 import type { LuaRCConfig } from "../../src/types.js";
 
+function createTempDir(prefix: string): string {
+  const raw = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return fs.realpathSync.native ? fs.realpathSync.native(raw) : fs.realpathSync(raw);
+}
+
 describe("deps module", () => {
   describe("collectDeps", () => {
     it("handles empty or whitespace strings", () => {
@@ -24,7 +29,7 @@ describe("deps module", () => {
 
   describe("resolvePackageDependencies", () => {
     it("returns empty sets when no dependencies are specified", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-deps-empty-"));
+      const tempDir = createTempDir("nanos-deps-empty-");
       try {
         const res = resolvePackageDependencies(tempDir, {});
         expect(res.server).toEqual([]);
@@ -37,7 +42,7 @@ describe("deps module", () => {
     });
 
     it("logs a warning and skips missing dependency paths without failing", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-deps-missing-"));
+      const tempDir = createTempDir("nanos-deps-missing-");
       const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const config: LuaRCConfig = {
@@ -56,7 +61,7 @@ describe("deps module", () => {
     });
 
     it("logs a warning when nanos.deps is not an array or has non-string entries", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-deps-invalid-"));
+      const tempDir = createTempDir("nanos-deps-invalid-");
       const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const invalidTypeConfig = {
@@ -84,7 +89,7 @@ describe("deps module", () => {
     });
 
     it("correctly partitions standard package dependencies across realms", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-deps-realms-"));
+      const tempDir = createTempDir("nanos-deps-realms-");
       try {
         const depPkg = path.join(tempDir, "Packages", "my-dep");
         fs.mkdirSync(path.join(depPkg, "Server"), { recursive: true });
@@ -131,7 +136,7 @@ describe("deps module", () => {
     });
 
     it("supports single .lua definition files as dependencies and warns on non-lua files", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-deps-single-"));
+      const tempDir = createTempDir("nanos-deps-single-");
       const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
       try {
         const defLua = path.join(tempDir, "types.lua");
@@ -156,7 +161,7 @@ describe("deps module", () => {
     });
 
     it("includes entire directory in all realms when dependency disables realms", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-deps-disabled-"));
+      const tempDir = createTempDir("nanos-deps-disabled-");
       try {
         const depPkg = path.join(tempDir, "util-pkg");
         fs.mkdirSync(depPkg, { recursive: true });
@@ -179,7 +184,7 @@ describe("deps module", () => {
     });
 
     it("respects custom nanos.realms in dependency package", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-deps-custom-"));
+      const tempDir = createTempDir("nanos-deps-custom-");
       try {
         const depPkg = path.join(tempDir, "custom-pkg");
         fs.mkdirSync(path.join(depPkg, "src", "srv"), { recursive: true });
@@ -212,7 +217,7 @@ describe("deps module", () => {
     });
 
     it("handles transitive dependencies and breaks circular dependencies", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-deps-transitive-"));
+      const tempDir = createTempDir("nanos-deps-transitive-");
       try {
         const pkgA = path.join(tempDir, "pkgA");
         const pkgB = path.join(tempDir, "pkgB");
