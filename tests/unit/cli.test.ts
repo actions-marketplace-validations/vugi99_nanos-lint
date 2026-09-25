@@ -63,7 +63,9 @@ describe("cli module flag and command parsing", () => {
     const codeCleanCache = await runCLI(["clean-cache"]);
     expect(codeCleanCache).toBe(0);
     expect(cleanSpy).toHaveBeenCalledTimes(1);
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining("[cache] Cleared cache at: /mock/cache/path"));
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("[cache] Cleared cache at: /mock/cache/path"),
+    );
 
     cleanSpy.mockReturnValue(null);
     const codeClean = await runCLI(["clean"]);
@@ -80,9 +82,7 @@ describe("cli module flag and command parsing", () => {
 
     const code = await runCLI(["--unknown-flag"]);
     expect(code).toBe(1);
-    expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining("unknown option '--unknown-flag'")
-    );
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("unknown option '--unknown-flag'"));
 
     errSpy.mockRestore();
   });
@@ -93,13 +93,13 @@ describe("cli module flag and command parsing", () => {
     const codeConfig = await runCLI(["--config"]);
     expect(codeConfig).toBe(1);
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining("option '--config <path>' argument missing")
+      expect.stringContaining("option '--config <path>' argument missing"),
     );
 
     const codeChecklevel = await runCLI(["--checklevel"]);
     expect(codeChecklevel).toBe(1);
     expect(errSpy).toHaveBeenCalledWith(
-      expect.stringContaining("option '--checklevel <level>' argument missing")
+      expect.stringContaining("option '--checklevel <level>' argument missing"),
     );
 
     errSpy.mockRestore();
@@ -223,7 +223,9 @@ describe("cli module flag and command parsing", () => {
 
   describe("additional cli command coverage", () => {
     it("handles download-luals subcommand with default and explicit versions", async () => {
-      const lualsSpy = vi.spyOn(lualsModule, "resolveLuaLSBinary").mockResolvedValue("/mock/bin/luals");
+      const lualsSpy = vi
+        .spyOn(lualsModule, "resolveLuaLSBinary")
+        .mockResolvedValue("/mock/bin/luals");
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
       const codeDefault = await runCLI(["download-luals"]);
@@ -243,8 +245,12 @@ describe("cli module flag and command parsing", () => {
     });
 
     it("handles warmup command and download alias with default and custom options", async () => {
-      const lualsSpy = vi.spyOn(lualsModule, "resolveLuaLSBinary").mockResolvedValue("/mock/bin/luals");
-      const annotSpy = vi.spyOn(annotationsModule, "resolveAnnotations").mockResolvedValue("/mock/annotations.lua");
+      const lualsSpy = vi
+        .spyOn(lualsModule, "resolveLuaLSBinary")
+        .mockResolvedValue("/mock/bin/luals");
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
       const metaSpy = vi.spyOn(annotationsModule, "readAnnotationsMetadata").mockReturnValue({
         commitId: "abcdef123456",
         lastChecked: "2026-09-23",
@@ -256,12 +262,18 @@ describe("cli module flag and command parsing", () => {
       expect(codeDefault).toBe(0);
       expect(lualsSpy).toHaveBeenCalledWith("latest", { quiet: undefined });
       expect(annotSpy).toHaveBeenCalledWith({ customPath: undefined, quiet: undefined });
-      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[warmup] LuaLS binary ready: /mock/bin/luals"));
       expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[warmup] nanos world annotations ready: /mock/annotations.lua (commit abcdef1)")
+        expect.stringContaining("[warmup] LuaLS binary ready: /mock/bin/luals"),
       );
       expect(logSpy).toHaveBeenCalledWith(
-        expect.stringContaining("[warmup] Cache pre-warmed successfully. Ready for offline execution.")
+        expect.stringContaining(
+          "[warmup] nanos world annotations ready: /mock/annotations.lua (commit abcdef1)",
+        ),
+      );
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "[warmup] Cache pre-warmed successfully. Ready for offline execution.",
+        ),
       );
 
       // Test alias "download" and custom options
@@ -291,14 +303,18 @@ describe("cli module flag and command parsing", () => {
 
       const codeError = await runCLI(["clean-cache"]);
       expect(codeError).toBe(1);
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to clear cache: EACCES: permission denied"));
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to clear cache: EACCES: permission denied"),
+      );
 
       cleanSpy.mockImplementation(() => {
         throw "String error";
       });
       const codeStringError = await runCLI(["clean-cache"]);
       expect(codeStringError).toBe(1);
-      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to clear cache: String error"));
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to clear cache: String error"),
+      );
 
       cleanSpy.mockRestore();
       errSpy.mockRestore();
@@ -322,7 +338,9 @@ describe("cli module flag and command parsing", () => {
     });
 
     it("handles check command with options and exit codes", async () => {
-      const annotSpy = vi.spyOn(annotationsModule, "resolveAnnotations").mockResolvedValue("/mock/annotations.lua");
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
       const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck");
       const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -343,7 +361,12 @@ describe("cli module flag and command parsing", () => {
         totalFiles: 1,
         diagnostics: {
           "file:///test.lua": [
-            { code: "err", message: "m", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+            {
+              code: "err",
+              message: "m",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              severity: 1,
+            },
           ],
         },
       });
@@ -357,7 +380,12 @@ describe("cli module flag and command parsing", () => {
         totalFiles: 1,
         diagnostics: {
           "file:///test.lua": [
-            { code: "err", message: "m", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+            {
+              code: "err",
+              message: "m",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              severity: 1,
+            },
           ],
         },
       });
@@ -371,7 +399,12 @@ describe("cli module flag and command parsing", () => {
         totalFiles: 1,
         diagnostics: {
           "file:///test.lua": [
-            { code: "err", message: "m", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+            {
+              code: "err",
+              message: "m",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              severity: 1,
+            },
           ],
         },
       });
@@ -385,7 +418,12 @@ describe("cli module flag and command parsing", () => {
         totalFiles: 1,
         diagnostics: {
           "file:///test.lua": [
-            { code: "err", message: "m", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } }, severity: 1 },
+            {
+              code: "err",
+              message: "m",
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              severity: 1,
+            },
           ],
         },
       });
@@ -534,5 +572,3 @@ describe("cli module flag and command parsing", () => {
     });
   });
 });
-
-

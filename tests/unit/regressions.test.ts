@@ -54,7 +54,7 @@ describe("Regression tests for audit review issues", () => {
         runLuaLSCheck(missingTarget, templatePath, {
           path: missingTarget,
           checklevel: "Warning",
-        })
+        }),
       ).rejects.toThrow(/does not exist/i);
     });
 
@@ -82,7 +82,7 @@ describe("Regression tests for audit review issues", () => {
             path: tempDir,
             checklevel: "Warning",
             lualsBin: fakeBin,
-          })
+          }),
         ).rejects.toThrow(/failed to (execute|produce diagnostic output)/i);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -132,7 +132,7 @@ describe("Regression tests for audit review issues", () => {
         const code = await runCLI(["check", ".", "--checklevel", "Bogus"]);
         expect(code).toBe(1);
         expect(errSpy).toHaveBeenCalledWith(
-          expect.stringMatching(/--checklevel.*invalid|allowed choices/i)
+          expect.stringMatching(/--checklevel.*invalid|allowed choices/i),
         );
       } finally {
         errSpy.mockRestore();
@@ -145,7 +145,7 @@ describe("Regression tests for audit review issues", () => {
         const code = await runCLI(["check", ".", "--format", "bogus"]);
         expect(code).toBe(1);
         expect(errSpy).toHaveBeenCalledWith(
-          expect.stringMatching(/--format.*invalid|allowed choices/i)
+          expect.stringMatching(/--format.*invalid|allowed choices/i),
         );
       } finally {
         errSpy.mockRestore();
@@ -155,7 +155,7 @@ describe("Regression tests for audit review issues", () => {
 
   describe("Issue 6: UTF-8 BOM tolerance in config files", () => {
     it("parses JSONC text containing a leading UTF-8 BOM", () => {
-      const bomJsonc = "\uFEFF{\n  \"diagnostics\": {\n    \"globals\": [\"MyGlobal\"]\n  }\n}";
+      const bomJsonc = '\uFEFF{\n  "diagnostics": {\n    "globals": ["MyGlobal"]\n  }\n}';
       const parsed = parseJsonc<{ diagnostics: { globals: string[] } }>(bomJsonc);
       expect(parsed.diagnostics.globals).toEqual(["MyGlobal"]);
     });
@@ -164,7 +164,11 @@ describe("Regression tests for audit review issues", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-bom-test-"));
       try {
         const configFile = path.join(tempDir, ".luarc.json");
-        fs.writeFileSync(configFile, "\uFEFF{\n  \"diagnostics\": { \"globals\": [\"BOMGlobal\"] }\n}", "utf-8");
+        fs.writeFileSync(
+          configFile,
+          '\uFEFF{\n  "diagnostics": { "globals": ["BOMGlobal"] }\n}',
+          "utf-8",
+        );
 
         const loaded = loadConfigFile(configFile);
         expect(loaded.diagnostics?.globals).toEqual(["BOMGlobal"]);
@@ -179,7 +183,7 @@ describe("Regression tests for audit review issues", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-init-refuse-"));
       try {
         const existingConfig = path.join(tempDir, ".luarc.json");
-        fs.writeFileSync(existingConfig, "{\"diagnostics\":{\"globals\":[\"KeepMe\"]}}", "utf-8");
+        fs.writeFileSync(existingConfig, '{"diagnostics":{"globals":["KeepMe"]}}', "utf-8");
 
         expect(() => {
           initWorkspace(tempDir, { force: false });
@@ -199,7 +203,7 @@ describe("Regression tests for audit review issues", () => {
       fs.writeFileSync(dummyAnnotations, "-- dummy annotations", "utf-8");
       try {
         const existingConfig = path.join(tempDir, ".luarc.json");
-        fs.writeFileSync(existingConfig, "{\"old\": true}", "utf-8");
+        fs.writeFileSync(existingConfig, '{"old": true}', "utf-8");
 
         const created = initWorkspace(tempDir, { force: true, annotationsPath: dummyAnnotations });
         expect(created).toBe(existingConfig);
@@ -245,7 +249,7 @@ describe("Regression tests for audit review issues", () => {
         const code = await runCLI(["check", ".", "--config", "non_existent_config.json"]);
         expect(code).toBe(1);
         expect(errSpy).toHaveBeenCalledWith(
-          expect.stringMatching(/^error: Configuration file not found/i)
+          expect.stringMatching(/^error: Configuration file not found/i),
         );
 
         if (origDebug) process.env.DEBUG = origDebug;
@@ -257,9 +261,11 @@ describe("Regression tests for audit review issues", () => {
     it("validates missing config file before resolving annotations", async () => {
       const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       const annotationsMod = await import("../../src/annotations.js");
-      const resolveSpy = vi.spyOn(annotationsMod, "resolveAnnotations").mockImplementation(async () => {
-        throw new Error("resolveAnnotations was unexpectedly invoked before config validation");
-      });
+      const resolveSpy = vi
+        .spyOn(annotationsMod, "resolveAnnotations")
+        .mockImplementation(async () => {
+          throw new Error("resolveAnnotations was unexpectedly invoked before config validation");
+        });
       try {
         const origDebug = process.env.DEBUG;
         delete process.env.DEBUG;
@@ -267,7 +273,7 @@ describe("Regression tests for audit review issues", () => {
         const code = await runCLI(["check", ".", "--config", "non_existent_config.json"]);
         expect(code).toBe(1);
         expect(errSpy).toHaveBeenCalledWith(
-          expect.stringMatching(/^error: Configuration file not found/i)
+          expect.stringMatching(/^error: Configuration file not found/i),
         );
         expect(resolveSpy).not.toHaveBeenCalled();
 
@@ -288,11 +294,7 @@ describe("Regression tests for audit review issues", () => {
         fs.writeFileSync(path.join(tempDir, "sub", "nested.lua"), "-- nested");
 
         const configPath = path.join(tempDir, ".luarc.json");
-        fs.writeFileSync(
-          configPath,
-          JSON.stringify({ files: { exclude: ["*.lua"] } }),
-          "utf-8"
-        );
+        fs.writeFileSync(configPath, JSON.stringify({ files: { exclude: ["*.lua"] } }), "utf-8");
 
         const count = countCheckedFiles(tempDir, configPath);
         expect(count).toBe(0);
@@ -309,11 +311,7 @@ describe("Regression tests for audit review issues", () => {
         fs.writeFileSync(path.join(tempDir, "sub", "nested.lua"), "-- nested");
 
         const configPath = path.join(tempDir, ".luarc.json");
-        fs.writeFileSync(
-          configPath,
-          JSON.stringify({ files: { exclude: ["**/*.lua"] } }),
-          "utf-8"
-        );
+        fs.writeFileSync(configPath, JSON.stringify({ files: { exclude: ["**/*.lua"] } }), "utf-8");
 
         const count = countCheckedFiles(tempDir, configPath);
         expect(count).toBe(0);
@@ -352,7 +350,7 @@ describe("Regression tests for audit review issues", () => {
         process.env.LUALS_BIN = missingBin;
 
         await expect(resolveLuaLSBinary()).rejects.toThrow(
-          /LUALS_BIN.*does not exist or cannot be read/
+          /LUALS_BIN.*does not exist or cannot be read/,
         );
       } finally {
         if (origBin !== undefined) {
@@ -373,7 +371,7 @@ describe("Regression tests for audit review issues", () => {
             path: tempDir,
             checklevel: "Warning",
             lualsBin: tempDir,
-          })
+          }),
         ).rejects.toThrow(/--luals-bin.*not a regular file/);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -399,7 +397,7 @@ describe("Regression tests for audit review issues", () => {
               ],
             },
           }),
-          "utf-8"
+          "utf-8",
         );
         for (const file of [
           "keep.lua",
@@ -459,7 +457,7 @@ describe("Regression tests for audit review issues", () => {
               ],
             },
           }),
-          "utf-8"
+          "utf-8",
         );
 
         const started = Date.now();
@@ -485,7 +483,7 @@ describe("Regression tests for audit review issues", () => {
           configPath,
           // Five ambiguous wildcards in a single segment are enough to skip it.
           JSON.stringify({ files: { exclude: ["**/*a*a*a*a*z.lua"] } }),
-          "utf-8"
+          "utf-8",
         );
 
         expect(countCheckedFiles(tempDir, configPath)).toBe(1);
@@ -507,7 +505,7 @@ describe("Regression tests for audit review issues", () => {
           JSON.stringify({
             files: { exclude: ["", ".", "x".repeat(70_000), "bad\u0000pattern", 42, null] },
           }),
-          "utf-8"
+          "utf-8",
         );
 
         expect(countCheckedFiles(tempDir, configPath)).toBe(2);
@@ -516,7 +514,7 @@ describe("Regression tests for audit review issues", () => {
         fs.writeFileSync(
           configPath,
           JSON.stringify({ files: { exclude: "*.lua" }, workspace: { ignoreDir: 7 } }),
-          "utf-8"
+          "utf-8",
         );
         expect(countCheckedFiles(tempDir, configPath)).toBe(2);
       } finally {
@@ -540,7 +538,7 @@ describe("Regression tests for audit review issues", () => {
           fs.symlinkSync(
             path.join(projectDir, "real.lua"),
             path.join(projectDir, "linked.lua"),
-            "file"
+            "file",
           );
         } catch (err) {
           // Symlink creation can require elevated privileges on Windows.
@@ -616,7 +614,10 @@ describe("Regression tests for audit review issues", () => {
       const dummyAnnotations = path.join(tempDir, "source-annotations.lua");
       fs.writeFileSync(dummyAnnotations, "-- dummy annotations", "utf-8");
       try {
-        const configFile = initWorkspace(tempDir, { force: true, annotationsPath: dummyAnnotations });
+        const configFile = initWorkspace(tempDir, {
+          force: true,
+          annotationsPath: dummyAnnotations,
+        });
         const config = JSON.parse(fs.readFileSync(configFile, "utf-8"));
 
         // Must exclude .nanos-lint from files to prevent diagnostics on annotations.lua
@@ -649,32 +650,35 @@ describe("Regression tests for audit review issues", () => {
     });
   });
 
-  describe.skipIf(!liveTestsEnabled)("Finding N1: Atomic and race-safe download and extraction", () => {
-    it("safely handles concurrent download/extraction to the same target directory", async () => {
-      const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n1-race-"));
-      try {
-        const { downloadAndExtractLuaLS } = await import("../../src/luals.js");
-        const targetDir = path.join(tempBase, "luals-target");
+  describe.skipIf(!liveTestsEnabled)(
+    "Finding N1: Atomic and race-safe download and extraction",
+    () => {
+      it("safely handles concurrent download/extraction to the same target directory", async () => {
+        const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n1-race-"));
+        try {
+          const { downloadAndExtractLuaLS } = await import("../../src/luals.js");
+          const targetDir = path.join(tempBase, "luals-target");
 
-        // Run 2 concurrent extractions to the exact same targetDir
-        const [bin1, bin2] = await Promise.all([
-          downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
-          downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
-        ]);
+          // Run 2 concurrent extractions to the exact same targetDir
+          const [bin1, bin2] = await Promise.all([
+            downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
+            downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
+          ]);
 
-        expect(bin1).toBe(bin2);
-        expect(fs.existsSync(bin1)).toBe(true);
-        expect(fs.existsSync(path.join(targetDir, ".complete"))).toBe(true);
+          expect(bin1).toBe(bin2);
+          expect(fs.existsSync(bin1)).toBe(true);
+          expect(fs.existsSync(path.join(targetDir, ".complete"))).toBe(true);
 
-        // Verify no leftover .tmp-* directories in the parent dir
-        const parentEntries = fs.readdirSync(tempBase);
-        const tmpDirs = parentEntries.filter((e) => e.includes(".tmp-"));
-        expect(tmpDirs.length).toBe(0);
-      } finally {
-        fs.rmSync(tempBase, { recursive: true, force: true });
-      }
-    }, 120000);
-  });
+          // Verify no leftover .tmp-* directories in the parent dir
+          const parentEntries = fs.readdirSync(tempBase);
+          const tmpDirs = parentEntries.filter((e) => e.includes(".tmp-"));
+          expect(tmpDirs.length).toBe(0);
+        } finally {
+          fs.rmSync(tempBase, { recursive: true, force: true });
+        }
+      }, 120000);
+    },
+  );
 
   describe("Finding N2: Corrupted cached LuaLS binary detection and recovery", () => {
     it("does not accept a truncated or corrupted cached binary as valid", async () => {
@@ -682,7 +686,8 @@ describe("Regression tests for audit review issues", () => {
       try {
         const binSubdir = path.join(tempDir, "bin");
         fs.mkdirSync(binSubdir, { recursive: true });
-        const binaryName = process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
+        const binaryName =
+          process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
         const fakeCorruptBin = path.join(binSubdir, binaryName);
         fs.writeFileSync(fakeCorruptBin, "corrupted-truncated-binary-data");
 
@@ -693,25 +698,30 @@ describe("Regression tests for audit review issues", () => {
       }
     });
 
-    it.skipIf(!liveTestsEnabled)("detects and repairs corrupted targetDir when downloadAndExtractLuaLS is invoked", async () => {
-      const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n2-repair-"));
-      try {
-        const { downloadAndExtractLuaLS, isBinaryValid } = await import("../../src/luals.js");
-        const corruptDir = path.join(tempBase, "corrupt-cache");
-        const binSubdir = path.join(corruptDir, "bin");
-        fs.mkdirSync(binSubdir, { recursive: true });
-        const binaryName = process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
-        fs.writeFileSync(path.join(binSubdir, binaryName), "corrupted truncated file");
+    it.skipIf(!liveTestsEnabled)(
+      "detects and repairs corrupted targetDir when downloadAndExtractLuaLS is invoked",
+      async () => {
+        const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n2-repair-"));
+        try {
+          const { downloadAndExtractLuaLS, isBinaryValid } = await import("../../src/luals.js");
+          const corruptDir = path.join(tempBase, "corrupt-cache");
+          const binSubdir = path.join(corruptDir, "bin");
+          fs.mkdirSync(binSubdir, { recursive: true });
+          const binaryName =
+            process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server";
+          fs.writeFileSync(path.join(binSubdir, binaryName), "corrupted truncated file");
 
-        const repairedBin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, corruptDir, {
-          quiet: true,
-        });
-        expect(isBinaryValid(repairedBin)).toBe(true);
-        expect(fs.existsSync(path.join(corruptDir, ".complete"))).toBe(true);
-      } finally {
-        fs.rmSync(tempBase, { recursive: true, force: true });
-      }
-    }, 120000);
+          const repairedBin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, corruptDir, {
+            quiet: true,
+          });
+          expect(isBinaryValid(repairedBin)).toBe(true);
+          expect(fs.existsSync(path.join(corruptDir, ".complete"))).toBe(true);
+        } finally {
+          fs.rmSync(tempBase, { recursive: true, force: true });
+        }
+      },
+      120000,
+    );
 
     it("includes cache directory in LuaLS execution error message", async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-n2-errmsg-"));
@@ -736,7 +746,7 @@ describe("Regression tests for audit review issues", () => {
             path: tempDir,
             checklevel: "Warning",
             lualsBin: fakeBin,
-          })
+          }),
         ).rejects.toThrow(/Cache location:/i);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -745,29 +755,32 @@ describe("Regression tests for audit review issues", () => {
   });
 
   describe("Review issues 3 & 5: LuaLS cache probe, .complete marker validation, and failed promotion cleanup", () => {
-    it.skipIf(!liveTestsEnabled)("reuses an existing valid cache entry without any network access", async () => {
-      const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cache-reuse-"));
-      const originalFetch = globalThis.fetch;
-      const fetchMock = vi.fn(() => {
-        throw new Error("network access is not allowed when a valid cache entry exists");
-      });
-      globalThis.fetch = fetchMock as unknown as typeof fetch;
-
-      try {
-        const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
-        const resolved = await resolveLuaLSBinary(FALLBACK_LUALS_VERSION, {
-          quiet: true,
-          cacheDir: baseCacheDir,
+    it.skipIf(!liveTestsEnabled)(
+      "reuses an existing valid cache entry without any network access",
+      async () => {
+        const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cache-reuse-"));
+        const originalFetch = globalThis.fetch;
+        const fetchMock = vi.fn(() => {
+          throw new Error("network access is not allowed when a valid cache entry exists");
         });
+        globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-        expect(resolved).toBe(seeded);
-        expect(fs.existsSync(resolved)).toBe(true);
-        expect(fetchMock).not.toHaveBeenCalled();
-      } finally {
-        globalThis.fetch = originalFetch;
-        fs.rmSync(baseCacheDir, { recursive: true, force: true });
-      }
-    });
+        try {
+          const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+          const resolved = await resolveLuaLSBinary(FALLBACK_LUALS_VERSION, {
+            quiet: true,
+            cacheDir: baseCacheDir,
+          });
+
+          expect(resolved).toBe(seeded);
+          expect(fs.existsSync(resolved)).toBe(true);
+          expect(fetchMock).not.toHaveBeenCalled();
+        } finally {
+          globalThis.fetch = originalFetch;
+          fs.rmSync(baseCacheDir, { recursive: true, force: true });
+        }
+      },
+    );
 
     it("does not accept cached directory if .complete marker is missing or has mismatched version", async () => {
       const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-marker-test-"));
@@ -794,12 +807,14 @@ describe("Regression tests for audit review issues", () => {
         let fetchAttempted = false;
         globalThis.fetch = vi.fn().mockImplementation(() => {
           fetchAttempted = true;
-          return Promise.reject(new Error("Network call triggered as expected because cache is invalid"));
+          return Promise.reject(
+            new Error("Network call triggered as expected because cache is invalid"),
+          );
         });
 
         try {
           await expect(
-            downloadAndExtractLuaLS("3.19.1", corruptDir, { quiet: true, reuseExisting: false })
+            downloadAndExtractLuaLS("3.19.1", corruptDir, { quiet: true, reuseExisting: false }),
           ).rejects.toThrow();
           expect(fetchAttempted).toBe(true);
         } finally {
@@ -810,42 +825,46 @@ describe("Regression tests for audit review issues", () => {
       }
     });
 
-    it.skipIf(!liveTestsEnabled)("cleans up broken destDir when atomic promotion fails", async () => {
-      const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-promo-fail-"));
-      try {
-        const { downloadAndExtractLuaLS } = await import("../../src/luals.js");
-        const targetDir = path.join(tempBase, "target");
-
-        // Spy on renameSync: when promoting to targetDir, simulate a partial/corrupted directory creation and throw EPERM
-        const origRename = fs.renameSync;
-        let threw = false;
-        const renameSpy = vi.spyOn(fs, "renameSync").mockImplementation((oldPath, newPath) => {
-          if (String(newPath) === targetDir) {
-            threw = true;
-            fs.mkdirSync(targetDir, { recursive: true });
-            fs.writeFileSync(path.join(targetDir, "corrupted.file"), "broken");
-            const err = new Error("EPERM: operation not permitted, rename") as NodeJS.ErrnoException;
-            err.code = "EPERM";
-            throw err;
-          }
-          return origRename(oldPath, newPath);
-        });
-
+    it.skipIf(!liveTestsEnabled)(
+      "cleans up broken destDir when atomic promotion fails",
+      async () => {
+        const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-promo-fail-"));
         try {
-          await expect(
-            downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true })
-          ).rejects.toThrow(/EPERM/);
-          expect(threw).toBe(true);
+          const { downloadAndExtractLuaLS } = await import("../../src/luals.js");
+          const targetDir = path.join(tempBase, "target");
 
-          // Verify broken targetDir was cleaned up and not left behind
-          expect(fs.existsSync(path.join(targetDir, "corrupted.file"))).toBe(false);
+          // Spy on renameSync: when promoting to targetDir, simulate a partial/corrupted directory creation and throw EPERM
+          const origRename = fs.renameSync;
+          let threw = false;
+          const renameSpy = vi.spyOn(fs, "renameSync").mockImplementation((oldPath, newPath) => {
+            if (String(newPath) === targetDir) {
+              threw = true;
+              fs.mkdirSync(targetDir, { recursive: true });
+              fs.writeFileSync(path.join(targetDir, "corrupted.file"), "broken");
+              const err = new Error(
+                "EPERM: operation not permitted, rename",
+              ) as NodeJS.ErrnoException;
+              err.code = "EPERM";
+              throw err;
+            }
+            return origRename(oldPath, newPath);
+          });
+
+          try {
+            await expect(
+              downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, { quiet: true }),
+            ).rejects.toThrow(/EPERM/);
+            expect(threw).toBe(true);
+
+            // Verify broken targetDir was cleaned up and not left behind
+            expect(fs.existsSync(path.join(targetDir, "corrupted.file"))).toBe(false);
+          } finally {
+            renameSpy.mockRestore();
+          }
         } finally {
-          renameSpy.mockRestore();
+          fs.rmSync(tempBase, { recursive: true, force: true });
         }
-      } finally {
-        fs.rmSync(tempBase, { recursive: true, force: true });
-      }
-    });
+      },
+    );
   });
 });
-

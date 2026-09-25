@@ -38,17 +38,16 @@ export function installLuaLSDownloadCounter(cacheRoot: string): void {
 
   const countingFetch = async (
     input: Parameters<typeof fetch>[0],
-    init?: Parameters<typeof fetch>[1]
+    init?: Parameters<typeof fetch>[1],
   ): Promise<Response> => {
-    const url =
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
     if (isLuaLSArchiveUrl(url)) {
       try {
         fs.appendFileSync(logPath, `${process.pid} ${url}\n`, "utf-8");
       } catch (err) {
         // Instrumentation must never break a test run.
         process.stderr.write(
-          `[tests] Failed to record LuaLS download: ${err instanceof Error ? err.message : String(err)}\n`
+          `[tests] Failed to record LuaLS download: ${err instanceof Error ? err.message : String(err)}\n`,
         );
       }
     }

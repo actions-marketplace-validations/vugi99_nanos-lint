@@ -38,7 +38,9 @@ describe("LuaLS weekly cache check and version management", () => {
     try {
       fs.rmSync(tempBaseDir, { recursive: true, force: true });
     } catch (err) {
-      console.warn(`Failed to clean up tempBaseDir: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(
+        `Failed to clean up tempBaseDir: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   });
 
@@ -91,7 +93,7 @@ describe("LuaLS weekly cache check and version management", () => {
       expect(() => {
         writeLuaLSMetadata(
           { lastCheckedWeek: "2026-W39", latestVersion: "3.20.0" },
-          path.join(blocker, "child")
+          path.join(blocker, "child"),
         );
       }).not.toThrow();
     });
@@ -132,13 +134,16 @@ describe("LuaLS weekly cache check and version management", () => {
       expect(listCachedLuaLSVersions(tempBaseDir)).toEqual([]);
     });
 
-    it.skipIf(!liveTestsEnabled)("lists valid version when functional binary and complete marker exist", async () => {
-      const seeded = await seedCachedLuaLS(tempBaseDir, FALLBACK_LUALS_VERSION);
-      expect(fs.existsSync(seeded)).toBe(true);
+    it.skipIf(!liveTestsEnabled)(
+      "lists valid version when functional binary and complete marker exist",
+      async () => {
+        const seeded = await seedCachedLuaLS(tempBaseDir, FALLBACK_LUALS_VERSION);
+        expect(fs.existsSync(seeded)).toBe(true);
 
-      const versions = listCachedLuaLSVersions(tempBaseDir);
-      expect(versions).toContain(FALLBACK_LUALS_VERSION);
-    });
+        const versions = listCachedLuaLSVersions(tempBaseDir);
+        expect(versions).toContain(FALLBACK_LUALS_VERSION);
+      },
+    );
 
     it("cleanupOldCachedLuaLSVersions removes older versions but preserves keepVersion, files, and dot dirs", () => {
       const v1Dir = path.join(tempBaseDir, "3.19.0");
@@ -304,7 +309,7 @@ describe("LuaLS weekly cache check and version management", () => {
             latestVersion: FALLBACK_LUALS_VERSION,
             lastCheckedDate: "2026-09-23",
           },
-          baseCacheDir
+          baseCacheDir,
         );
 
         let fetchCalls = 0;
@@ -333,7 +338,7 @@ describe("LuaLS weekly cache check and version management", () => {
             latestVersion: FALLBACK_LUALS_VERSION,
             lastCheckedDate: "2026-01-01",
           },
-          baseCacheDir
+          baseCacheDir,
         );
 
         const requestedUrls: string[] = [];
@@ -373,7 +378,7 @@ describe("LuaLS weekly cache check and version management", () => {
             latestVersion: FALLBACK_LUALS_VERSION,
             lastCheckedDate: "2026-01-01",
           },
-          baseCacheDir
+          baseCacheDir,
         );
 
         const restoreFetch = mockFetch(() => Promise.reject(new Error("Offline")));
@@ -406,7 +411,7 @@ describe("LuaLS weekly cache check and version management", () => {
               // Force the network path: otherwise the shared test cache (probed as
               // the legacy cache location) legitimately satisfies the request.
               reuseExisting: false,
-            })
+            }),
           ).rejects.toThrow(/Offline without cache/);
         } finally {
           restoreFetch();
@@ -419,9 +424,9 @@ describe("LuaLS weekly cache check and version management", () => {
             (r) =>
               isLuaLSArchiveRequest(r) &&
               r.path.startsWith(
-                `/LuaLS/lua-language-server/releases/download/${FALLBACK_LUALS_VERSION}/`
-              )
-          )
+                `/LuaLS/lua-language-server/releases/download/${FALLBACK_LUALS_VERSION}/`,
+              ),
+          ),
         ).toBe(true);
       });
     });
@@ -436,14 +441,14 @@ describe("LuaLS weekly cache check and version management", () => {
             latestVersion: FALLBACK_LUALS_VERSION,
             lastCheckedDate: "2026-01-01",
           },
-          baseCacheDir
+          baseCacheDir,
         );
 
         const restoreFetch = mockFetch(() =>
           Promise.resolve({
             ok: true,
             json: async () => ({ tag_name: `v${FALLBACK_LUALS_VERSION}` }),
-          })
+          }),
         );
 
         try {
@@ -467,7 +472,7 @@ describe("LuaLS weekly cache check and version management", () => {
             latestVersion: "99.99.99-nonexistent",
             lastCheckedDate: "2026-09-23",
           },
-          baseCacheDir
+          baseCacheDir,
         );
 
         let fetchCalls = 0;
@@ -495,7 +500,7 @@ describe("LuaLS weekly cache check and version management", () => {
             latestVersion: "99.99.99-nonexistent",
             lastCheckedDate: "2026-01-01",
           },
-          baseCacheDir
+          baseCacheDir,
         );
 
         const requestedUrls: string[] = [];
@@ -518,5 +523,4 @@ describe("LuaLS weekly cache check and version management", () => {
       });
     });
   });
-
 });

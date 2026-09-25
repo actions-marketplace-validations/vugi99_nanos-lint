@@ -13,6 +13,8 @@ import {
   getRawAnnotationsUrl,
   RAW_ANNOTATIONS_URL,
   MIN_ANNOTATIONS_SIZE_BYTES,
+  MAX_ANNOTATIONS_SIZE_BYTES,
+  MAX_COMMIT_JSON_SIZE_BYTES,
   getCachedAnnotationsFilePath,
   getAnnotationsMetadataFilePath,
   type AnnotationsMetadata,
@@ -91,14 +93,17 @@ describe("annotations management and date-based caching", () => {
         return Promise.resolve({
           ok: true,
           status: 200,
-          text: () => Promise.resolve("-- nanos world annotations mock\nreturn {}\n" + " ".repeat(1500)),
+          text: () =>
+            Promise.resolve("-- nanos world annotations mock\nreturn {}\n" + " ".repeat(1500)),
         } as unknown as Response);
       }
       return Promise.reject(new Error("Unexpected URL"));
     });
 
     try {
-      const resultPath = await downloadAndCacheAnnotations("commit-111", tempBaseDir, { quiet: true });
+      const resultPath = await downloadAndCacheAnnotations("commit-111", tempBaseDir, {
+        quiet: true,
+      });
       expect(fs.existsSync(resultPath)).toBe(true);
       expect(fs.readFileSync(resultPath, "utf-8")).toContain("nanos world annotations mock");
 
@@ -125,7 +130,7 @@ describe("annotations management and date-based caching", () => {
 
     try {
       await expect(
-        downloadAndCacheAnnotations("new-commit", tempBaseDir, { quiet: true })
+        downloadAndCacheAnnotations("new-commit", tempBaseDir, { quiet: true }),
       ).rejects.toThrow(/Network connection dropped/);
 
       // Verify original files were restored
@@ -145,7 +150,7 @@ describe("annotations management and date-based caching", () => {
       expect(resolved).toBe(path.resolve(customFile));
 
       await expect(
-        resolveAnnotations({ customPath: path.join(tempBaseDir, "non-existent.lua") })
+        resolveAnnotations({ customPath: path.join(tempBaseDir, "non-existent.lua") }),
       ).rejects.toThrow(/Custom annotations file not found/);
     });
 
@@ -158,7 +163,9 @@ describe("annotations management and date-based caching", () => {
       expect(resolved).toBe(path.resolve(envCustomFile));
 
       process.env.NANOS_ANNOTATIONS_PATH = path.join(tempBaseDir, "missing-env.lua");
-      await expect(resolveAnnotations()).rejects.toThrow(/Annotations file specified in environment not found/);
+      await expect(resolveAnnotations()).rejects.toThrow(
+        /Annotations file specified in environment not found/,
+      );
     });
 
     it("returns cached annotations immediately if checked today without making network calls", async () => {
@@ -198,7 +205,9 @@ describe("annotations management and date-based caching", () => {
       expect(resolved).toBe(path.resolve(envCustomFile));
 
       process.env.NANOS_ANNOTATIONS = path.join(tempBaseDir, "missing-alias.lua");
-      await expect(resolveAnnotations()).rejects.toThrow(/Annotations file specified in environment not found/);
+      await expect(resolveAnnotations()).rejects.toThrow(
+        /Annotations file specified in environment not found/,
+      );
     });
 
     it("reports filesystem cause rather than network error on EACCES/ENOSPC", async () => {
@@ -219,13 +228,13 @@ describe("annotations management and date-based caching", () => {
       });
 
       try {
-        await expect(
-          resolveAnnotations({ cacheDir: mockDir })
-        ).rejects.toThrow(/filesystem error|permission denied|EACCES/i);
+        await expect(resolveAnnotations({ cacheDir: mockDir })).rejects.toThrow(
+          /filesystem error|permission denied|EACCES/i,
+        );
 
-        await expect(
-          resolveAnnotations({ cacheDir: mockDir })
-        ).rejects.not.toThrow(/check your network connection/i);
+        await expect(resolveAnnotations({ cacheDir: mockDir })).rejects.not.toThrow(
+          /check your network connection/i,
+        );
       } finally {
         mkdirSpy.mockRestore();
         globalThis.fetch = originalFetch;
@@ -305,7 +314,9 @@ describe("annotations management and date-based caching", () => {
       });
 
       try {
-        const file = await downloadAndCacheAnnotations("abcdef1234567890", tempBaseDir, { quiet: false });
+        const file = await downloadAndCacheAnnotations("abcdef1234567890", tempBaseDir, {
+          quiet: false,
+        });
         expect(fs.existsSync(file)).toBe(true);
       } finally {
         globalThis.fetch = originalFetch;
@@ -337,14 +348,16 @@ describe("annotations management and date-based caching", () => {
       const originalFetch = globalThis.fetch;
 
       let capturedHeaders: Record<string, string> | undefined;
-      globalThis.fetch = vi.fn().mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
-        capturedHeaders = init?.headers as Record<string, string>;
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ sha: "0123456789abcdef0123456789abcdef01234567" }),
-        } as unknown as Response);
-      });
+      globalThis.fetch = vi
+        .fn()
+        .mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
+          capturedHeaders = init?.headers as Record<string, string>;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ sha: "0123456789abcdef0123456789abcdef01234567" }),
+          } as unknown as Response);
+        });
 
       try {
         const commitId = await fetchLatestCommitId();
@@ -370,7 +383,9 @@ describe("annotations management and date-based caching", () => {
         statusText: "Not Found",
       } as unknown as Response);
 
-      await expect(fetchRawAnnotationsContent()).rejects.toThrow(/Failed to download annotations\.lua: 404 Not Found/);
+      await expect(fetchRawAnnotationsContent()).rejects.toThrow(
+        /Failed to download annotations\.lua: 404 Not Found/,
+      );
 
       // Truncated payload (< 1000 characters)
       globalThis.fetch = vi.fn().mockResolvedValueOnce({
@@ -379,7 +394,9 @@ describe("annotations management and date-based caching", () => {
         text: () => Promise.resolve("-- short content"),
       } as unknown as Response);
 
-      await expect(fetchRawAnnotationsContent()).rejects.toThrow(/Downloaded annotations\.lua appears truncated or invalid/);
+      await expect(fetchRawAnnotationsContent()).rejects.toThrow(
+        /Downloaded annotations\.lua appears truncated or invalid/,
+      );
 
       globalThis.fetch = originalFetch;
     });
@@ -424,7 +441,7 @@ describe("annotations management and date-based caching", () => {
 
       try {
         await expect(resolveAnnotations({ cacheDir: coldCacheDir })).rejects.toThrow(
-          /Failed to resolve nanos world API annotations\. Please check your network connection/
+          /Failed to resolve nanos world API annotations\. Please check your network connection/,
         );
       } finally {
         globalThis.fetch = originalFetch;
@@ -443,7 +460,7 @@ describe("annotations management and date-based caching", () => {
       expect(resolved).toBe(path.resolve(customFile));
 
       await expect(resolveAnnotations({ customPath: "/nonexistent/custom.lua" })).rejects.toThrow(
-        /Custom annotations file not found/
+        /Custom annotations file not found/,
       );
     });
 
@@ -451,20 +468,38 @@ describe("annotations management and date-based caching", () => {
       const dirPath = path.join(tempBaseDir, "custom-dir");
       fs.mkdirSync(dirPath);
       await expect(resolveAnnotations({ customPath: dirPath })).rejects.toThrow(
-        /Custom annotations path is not a file/
+        /Custom annotations path is not a file/,
       );
 
       const emptyFile = path.join(tempBaseDir, "empty-custom.lua");
       fs.writeFileSync(emptyFile, "");
       await expect(resolveAnnotations({ customPath: emptyFile })).rejects.toThrow(
-        /Custom annotations file is empty/
+        /Custom annotations file is empty/,
       );
 
       const binFile = path.join(tempBaseDir, "binary-custom.lua");
       fs.writeFileSync(binFile, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01]));
       await expect(resolveAnnotations({ customPath: binFile })).rejects.toThrow(
-        /appears to be a binary file/
+        /appears to be a binary file/,
       );
+    });
+
+    it("closes file descriptor when readSync throws during customPath validation", async () => {
+      const customFile = path.join(tempBaseDir, "throwing-read-custom.lua");
+      fs.writeFileSync(customFile, "-- valid text header");
+
+      const closeSpy = vi.spyOn(fs, "closeSync");
+      const readSpy = vi.spyOn(fs, "readSync").mockImplementationOnce(() => {
+        throw new Error("simulated EIO");
+      });
+      try {
+        const resolved = await resolveAnnotations({ customPath: customFile });
+        expect(resolved).toBe(path.resolve(customFile));
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        readSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
     });
 
     it("resolves annotations from NANOS_ANNOTATIONS_PATH or NANOS_ANNOTATIONS environment variable", async () => {
@@ -481,7 +516,7 @@ describe("annotations management and date-based caching", () => {
 
       process.env.NANOS_ANNOTATIONS = "/nonexistent/env-annotations.lua";
       await expect(resolveAnnotations()).rejects.toThrow(
-        /Annotations file specified in environment not found/
+        /Annotations file specified in environment not found/,
       );
     });
 
@@ -490,22 +525,20 @@ describe("annotations management and date-based caching", () => {
       fs.mkdirSync(dirPath);
       process.env.NANOS_ANNOTATIONS_PATH = dirPath;
       await expect(resolveAnnotations()).rejects.toThrow(
-        /Annotations path specified in environment is not a file/
+        /Annotations path specified in environment is not a file/,
       );
 
       const emptyFile = path.join(tempBaseDir, "env-empty.lua");
       fs.writeFileSync(emptyFile, "");
       process.env.NANOS_ANNOTATIONS_PATH = emptyFile;
       await expect(resolveAnnotations()).rejects.toThrow(
-        /Annotations file specified in environment is empty/
+        /Annotations file specified in environment is empty/,
       );
 
       const binFile = path.join(tempBaseDir, "env-bin.lua");
       fs.writeFileSync(binFile, Buffer.from([0x00, 0x01, 0x02]));
       process.env.NANOS_ANNOTATIONS_PATH = binFile;
-      await expect(resolveAnnotations()).rejects.toThrow(
-        /appears to be a binary file/
-      );
+      await expect(resolveAnnotations()).rejects.toThrow(/appears to be a binary file/);
     });
 
     it("downloads and updates annotations when upstream commit changes", async () => {
@@ -551,7 +584,7 @@ describe("annotations management and date-based caching", () => {
     it("pins raw annotations download URL to resolved commit SHA (Issue #24)", async () => {
       expect(MIN_ANNOTATIONS_SIZE_BYTES).toBe(1000);
       expect(getRawAnnotationsUrl("abcdef0123456789")).toBe(
-        "https://raw.githubusercontent.com/nanos-world/vscode-extension/abcdef0123456789/annotations.lua"
+        "https://raw.githubusercontent.com/nanos-world/vscode-extension/abcdef0123456789/annotations.lua",
       );
       expect(getRawAnnotationsUrl("unknown")).toBe(RAW_ANNOTATIONS_URL);
       expect(getRawAnnotationsUrl(undefined)).toBe(RAW_ANNOTATIONS_URL);
@@ -591,6 +624,160 @@ describe("annotations management and date-based caching", () => {
         rootSpy.mockRestore();
       }
     });
+
+    it("rejects annotations download early when content-length exceeds limit (Issue #30)", async () => {
+      expect(MAX_ANNOTATIONS_SIZE_BYTES).toBe(10 * 1024 * 1024);
+      expect(MAX_COMMIT_JSON_SIZE_BYTES).toBe(1024 * 1024);
+
+      const originalFetch = globalThis.fetch;
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers({ "content-length": String(15 * 1024 * 1024) }),
+        body: { cancel: cancelMock },
+      } as unknown as Response);
+
+      try {
+        const promise = fetchRawAnnotationsContent();
+        await expect(promise).rejects.toThrow(/exceeds maximum limit/);
+        await expect(promise).rejects.toMatchObject({
+          code: "ERR_ANNOTATIONS_TOO_LARGE",
+          remedy: expect.stringContaining("--annotations <path>"),
+        });
+        expect(cancelMock).toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("rejects annotations download when streamed body exceeds limit (Issue #30)", async () => {
+      const originalFetch = globalThis.fetch;
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      const largeChunk = Buffer.alloc(2 * 1024 * 1024);
+      async function* generateChunks() {
+        for (let i = 0; i < 6; i++) {
+          yield largeChunk;
+        }
+      }
+      const stream = generateChunks();
+      (stream as unknown as { cancel: () => Promise<void> }).cancel = cancelMock;
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        body: stream,
+      } as unknown as Response);
+
+      try {
+        const promise = fetchRawAnnotationsContent();
+        await expect(promise).rejects.toThrow(/exceeded maximum allowed size/);
+        await expect(promise).rejects.toMatchObject({
+          code: "ERR_ANNOTATIONS_TOO_LARGE",
+          remedy: expect.stringContaining("--annotations <path>"),
+        });
+        expect(cancelMock).toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("rejects annotations download when buffered text exceeds limit without content-length (Issue #30)", async () => {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers: new Headers(),
+        text: () => Promise.resolve("x".repeat(11 * 1024 * 1024)),
+      } as unknown as Response);
+
+      try {
+        const promise = fetchRawAnnotationsContent();
+        await expect(promise).rejects.toThrow(/exceeded maximum allowed size/);
+        await expect(promise).rejects.toMatchObject({
+          code: "ERR_ANNOTATIONS_TOO_LARGE",
+          remedy: expect.stringContaining("--annotations <path>"),
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("returns null in fetchLatestCommitId when response content-length or stream exceeds limit (Issue #30)", async () => {
+      const originalFetch = globalThis.fetch;
+
+      // Case 1: content-length header exceeds limit
+      const cancelMock = vi.fn().mockResolvedValue(undefined);
+      const jsonMock1 = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Body is unusable: Body has already been read"));
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ "content-length": String(2 * 1024 * 1024) }),
+        body: { cancel: cancelMock },
+        json: jsonMock1,
+      } as unknown as Response);
+
+      let result = await fetchLatestCommitId();
+      expect(result).toBeNull();
+      expect(cancelMock).toHaveBeenCalled();
+      expect(jsonMock1).not.toHaveBeenCalled();
+
+      // Case 2: streamed body exceeds limit
+      async function* generateCommitChunks() {
+        for (let i = 0; i < 3; i++) {
+          yield Buffer.alloc(512 * 1024);
+        }
+      }
+      const stream = generateCommitChunks();
+      const cancelMock2 = vi.fn().mockResolvedValue(undefined);
+      (stream as unknown as { cancel: () => Promise<void> }).cancel = cancelMock2;
+      const jsonMock2 = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Body is unusable: Body has already been read"));
+
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        body: stream,
+        json: jsonMock2,
+      } as unknown as Response);
+
+      result = await fetchLatestCommitId();
+      expect(result).toBeNull();
+      expect(cancelMock2).toHaveBeenCalled();
+      expect(jsonMock2).not.toHaveBeenCalled();
+
+      // Case 3: text() exceeds limit
+      const jsonMock3 = vi
+        .fn()
+        .mockRejectedValue(new TypeError("Body is unusable: Body has already been read"));
+      globalThis.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        text: () => Promise.resolve("a".repeat(2 * 1024 * 1024)),
+        json: jsonMock3,
+      } as unknown as Response);
+
+      result = await fetchLatestCommitId();
+      expect(result).toBeNull();
+      expect(jsonMock3).not.toHaveBeenCalled();
+
+      // Case 4: Real Response instance exceeding limit
+      const largeStream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array(600 * 1024));
+          controller.enqueue(new Uint8Array(600 * 1024));
+          controller.close();
+        },
+      });
+      const realResponse = new Response(largeStream, {
+        headers: { "Content-Type": "application/json" },
+      });
+      globalThis.fetch = vi.fn().mockResolvedValueOnce(realResponse);
+
+      result = await fetchLatestCommitId();
+      expect(result).toBeNull();
+
+      globalThis.fetch = originalFetch;
+    });
   });
 });
-

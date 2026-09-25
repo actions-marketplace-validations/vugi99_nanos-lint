@@ -1,55 +1,55 @@
-name: 'nanos-world Lua Linter'
-description: 'Fast, accurate linter and type-checker for nanos world Lua scripts powered by LuaLS'
-author: 'nanos-world'
+name: "nanos-world Lua Linter"
+description: "Fast, accurate linter and type-checker for nanos world Lua scripts powered by LuaLS"
+author: "nanos-world"
 branding:
-  icon: 'check-circle'
-  color: 'yellow'
+  icon: "check-circle"
+  color: "yellow"
 
 inputs:
   path:
-    description: 'Path to workspace directory or Lua file to check'
+    description: "Path to workspace directory or Lua file to check"
     required: false
-    default: '.'
+    default: "."
   checklevel:
-    description: 'Minimum diagnostic severity level to report (Error, Warning, Information, Hint)'
+    description: "Minimum diagnostic severity level to report (Error, Warning, Information, Hint)"
     required: false
-    default: 'Warning'
+    default: "Warning"
   config:
-    description: 'Path to a custom .luarc.json configuration file'
+    description: "Path to a custom .luarc.json configuration file"
     required: false
-    default: ''
+    default: ""
   annotations:
-    description: 'Path to a custom annotations.lua file'
+    description: "Path to a custom annotations.lua file"
     required: false
-    default: ''
+    default: ""
   luals-version:
     description: 'Version of LuaLS to use (or "latest")'
     required: false
-    default: 'latest'
+    default: "latest"
   fail-on-error:
-    description: 'Whether to fail the action step if diagnostic errors/warnings are found'
+    description: "Whether to fail the action step if diagnostic errors/warnings are found"
     required: false
-    default: 'true'
+    default: "true"
   quiet:
-    description: 'Suppress progress output'
+    description: "Suppress progress output"
     required: false
-    default: 'false'
+    default: "false"
   ignore:
-    description: 'Files or directories to ignore (supports glob patterns, multiple entries can be newline or comma separated)'
+    description: "Files or directories to ignore (supports glob patterns, multiple entries can be newline or comma separated)"
     required: false
-    default: ''
+    default: ""
   cache:
-    description: 'Whether to cache the LuaLS binary and annotations across workflow runs'
+    description: "Whether to cache the LuaLS binary and annotations across workflow runs"
     required: false
-    default: 'true'
+    default: "true"
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Setup Node.js
       uses: actions/setup-node@v7
       with:
-        node-version: '24'
+        node-version: "24"
 
     # The ISO week refreshes the cache entry (a static key would never be saved
     # again); restore-keys fall back to previous weeks. Cheap: one `date` call.
@@ -118,5 +118,5 @@ runs:
         else
           # Exact version: a range could run a different release than the pinned
           # tag. Bump together with "version" in package.json.
-          npx --yes nanos-lint@2.8.1 "${ARGS[@]}"
+          npx --yes nanos-lint@2.8.2 "${ARGS[@]}"
         fi

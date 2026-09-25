@@ -29,7 +29,7 @@ export default async function setup(project?: { config?: { watch?: boolean } }) 
     // One shared download per run is allowed; a second one is a bug.
     const downloads = countLuaLSDownloads(root);
     console.log(
-      `[tests] LuaLS archive downloads during this run: ${downloads} (at most 1 is allowed).`
+      `[tests] LuaLS archive downloads during this run: ${downloads} (at most 1 is allowed).`,
     );
 
     let downloadError: Error | null = null;
@@ -39,7 +39,7 @@ export default async function setup(project?: { config?: { watch?: boolean } }) 
           `exactly one shared download is allowed (see tests/global-setup.ts and tests/helpers/live.ts).\n` +
           readLuaLSDownloadLog(root)
             .map((line) => `  - ${line}`)
-            .join("\n")
+            .join("\n"),
       );
     }
 
@@ -56,7 +56,7 @@ export default async function setup(project?: { config?: { watch?: boolean } }) 
   if (!isLiveTestsEnabled()) {
     console.warn(
       "\n[tests] NANOS_LIVE_TESTS is disabled: skipping live LuaLS/annotations tests, " +
-        "no network access will be performed, and coverage thresholds are not enforced.\n"
+        "no network access will be performed, and coverage thresholds are not enforced.\n",
     );
     return teardown;
   }
@@ -72,7 +72,7 @@ export default async function setup(project?: { config?: { watch?: boolean } }) 
       `[tests] Shared live-test fixtures ready (at most one LuaLS download for this run).\n` +
         `[tests]   cache root:  ${root}\n` +
         `[tests]   LuaLS:       ${binary}\n` +
-        `[tests]   annotations: ${annotations}`
+        `[tests]   annotations: ${annotations}`,
     );
   } catch (err) {
     if (ephemeral && !isWatchMode) {
@@ -82,7 +82,7 @@ export default async function setup(project?: { config?: { watch?: boolean } }) 
       `Failed to prepare the shared live-test fixtures (LuaLS binary and annotations). ` +
         `Run the suite offline with NANOS_LIVE_TESTS=0 to skip the live tests. ` +
         `Cause: ${err instanceof Error ? err.message : String(err)}`,
-      { cause: err }
+      { cause: err },
     );
   }
 

@@ -79,10 +79,7 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
 
     try {
       // Replicate the exact release .cmd launcher script
-      fs.writeFileSync(
-        tempCmd,
-        `@echo off\r\nnode "${distCli}" %*\r\nexit /b %ERRORLEVEL%\r\n`
-      );
+      fs.writeFileSync(tempCmd, `@echo off\r\nnode "${distCli}" %*\r\nexit /b %ERRORLEVEL%\r\n`);
 
       // The launcher is referenced by its bare file name and resolved through the
       // `cwd` option, so no environment-derived absolute path is ever placed on a
@@ -106,7 +103,7 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
         await execFileAsync(
           "cmd.exe",
           ["/c", cmdLauncher, "check", "tests/fail/type_mismatch.lua"],
-          { cwd: rootDir }
+          { cwd: rootDir },
         );
         expect.fail("Expected .cmd launcher to propagate exit code 1");
       } catch (err: unknown) {
@@ -198,7 +195,11 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
       fs.writeFileSync(path.join(tempDir, "script", "broken.lua"), "function invalid(");
 
       // 1. Without --ignore, defaultIgnore ignores `script/`, so 0 problems found
-      const { stdout: stdoutDefault } = await execFileAsync(process.execPath, [distCli, "check", tempDir]);
+      const { stdout: stdoutDefault } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        tempDir,
+      ]);
       expect(stdoutDefault).toContain("Diagnosis completed, no problems found");
 
       // 2. With --ignore, default structural exclusions remain active, so `script/broken.lua` is still ignored
@@ -246,17 +247,15 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
       const { stdout: stdoutClean } = await execFileAsync(
         process.execPath,
         [distCli, "clean-cache"],
-        { env: isolatedEnv }
+        { env: isolatedEnv },
       );
       expect(stdoutClean).toContain("[cache] Cleared cache at:");
       expect(fs.existsSync(expectedCacheDir)).toBe(false);
 
       // 2. Run alias clean on already empty cache
-      const { stdout: stdoutEmpty } = await execFileAsync(
-        process.execPath,
-        [distCli, "clean"],
-        { env: isolatedEnv }
-      );
+      const { stdout: stdoutEmpty } = await execFileAsync(process.execPath, [distCli, "clean"], {
+        env: isolatedEnv,
+      });
       expect(stdoutEmpty).toContain("[cache] Cache is already empty");
     } finally {
       fs.rmSync(tempEnvDir, { recursive: true, force: true });
@@ -312,5 +311,3 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     }
   });
 });
-
-

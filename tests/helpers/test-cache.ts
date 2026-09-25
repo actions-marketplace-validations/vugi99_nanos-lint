@@ -57,7 +57,7 @@ export function removeTestCacheRoot(root: string): void {
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   } catch (err) {
     console.warn(
-      `[test-cache] Failed to remove isolated cache root ${root}: ${err instanceof Error ? err.message : String(err)}`
+      `[test-cache] Failed to remove isolated cache root ${root}: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 }

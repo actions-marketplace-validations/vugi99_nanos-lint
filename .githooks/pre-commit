@@ -2,10 +2,14 @@
 
 # Project Quality Gates Pre-Commit Hook
 #
-# 1. Lint the codebase (must have 0 errors and 0 warnings)
-# 2. Type-check TypeScript (must produce 0 type errors)
-# 3. Build distribution bundle
-# 4. Run all Vitest unit and live LuaLS integration tests (must be 100% passing)
+# 1. Check code formatting with Prettier (format:check)
+# 2. Lint the codebase (lint, 0 errors and 0 warnings)
+# 3. Check architecture and dependency boundaries (lint:deps)
+# 4. Check comment density limit (lint:comments)
+# 5. Check docstring coverage (lint:docstrings)
+# 6. Type-check TypeScript (typecheck, 0 type errors)
+# 7. Build distribution bundle (build)
+# 8. Run all Vitest unit and live LuaLS integration tests (test:coverage, 100% passing)
 
 set -e
 
@@ -17,19 +21,8 @@ if ! command -v "$NPM_CMD" >/dev/null 2>&1; then
   fi
 fi
 
-echo "[pre-commit] Running project quality gates..."
-
-echo "[pre-commit] 1/4: Linting codebase ($NPM_CMD run lint)..."
-$NPM_CMD run lint
-
-echo "[pre-commit] 2/4: Typechecking TypeScript ($NPM_CMD run typecheck)..."
-$NPM_CMD run typecheck
-
-echo "[pre-commit] 3/4: Building distribution bundle ($NPM_CMD run build)..."
-$NPM_CMD run build
-
-echo "[pre-commit] 4/4: Running Vitest test suite with coverage ($NPM_CMD run test:coverage)..."
-$NPM_CMD run test:coverage
+echo "[pre-commit] Running project quality gates ($NPM_CMD run gates)..."
+$NPM_CMD run gates
 
 echo "[pre-commit] All project quality gates passed successfully!"
 

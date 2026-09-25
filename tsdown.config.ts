@@ -37,4 +37,3 @@ export default defineConfig({
     onlyBundle: ["commander", "jsonc-parser", "env-paths", "is-safe-filename", "glob"],
   },
 });
-

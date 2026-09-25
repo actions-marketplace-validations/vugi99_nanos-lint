@@ -5,7 +5,7 @@ export class NanosLintError extends Error {
     message: string,
     public readonly code: string,
     public readonly remedy?: string,
-    options?: { cause?: unknown }
+    options?: { cause?: unknown },
   ) {
     super(message, options);
   }
@@ -26,4 +26,3 @@ export class AnnotationsError extends NanosLintError {
 export class CacheError extends NanosLintError {
   public override readonly name: string = "CacheError";
 }
-

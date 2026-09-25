@@ -6,12 +6,12 @@ concurrency:
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master, main]
     tags:
-      - 'v*.*.*'
-      - '[0-9]+.[0-9]+.[0-9]+'
+      - "v*.*.*"
+      - "[0-9]+.[0-9]+.[0-9]+"
   pull_request:
-    branches: [ master, main, dev ]
+    branches: [master, main, dev]
 
 # Least privilege: this workflow only needs to read the repository. Declaring it
 # explicitly keeps the token read-only even when the repository or organization
@@ -27,8 +27,8 @@ jobs:
       fail-fast: false
       matrix:
         # No 1-vCPU "ubuntu-slim": its 15-minute limit would block releases.
-        os: [ ubuntu-latest, windows-latest, macos-latest, macos-26-intel, ubuntu-26.04-arm ]
-        node: [ 24, 26 ]
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-26-intel, ubuntu-26.04-arm]
+        node: [24, 26]
     # Requires the live tests (one shared LuaLS download per run).
     env:
       NANOS_LIVE_TESTS: "1"
@@ -41,40 +41,13 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-          cache: 'npm'
-
-      # The ISO week refreshes the entry; restore-keys fall back to older weeks.
-      - name: Compute cache week
-        id: cacheweek
-        shell: bash
-        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache LuaLS binary and annotations
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cache/nanos-lint
-            ~/AppData/Local/nanos-lint
-            ~/Library/Caches/nanos-lint
-          key: nanos-cache-${{ runner.os }}-${{ runner.arch }}-${{ steps.cacheweek.outputs.week }}-${{ hashFiles('src/luals/**', 'src/luals.ts', 'src/annotations.ts') }}
-          restore-keys: |
-            nanos-cache-${{ runner.os }}-${{ runner.arch }}-
-            nanos-cache-${{ runner.os }}-
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint TypeScript code
-        run: npm run lint
-
-      - name: Typecheck TypeScript code
-        run: npm run typecheck
-
-      - name: Build distribution package
-        run: npm run build
-
-      - name: Run Vitest tests with coverage (Unit & LuaLS Integration)
-        run: npm run test:coverage
+      - name: Run project quality gates
+        run: npm run gates
 
       - name: Test CLI directly on passing fixtures (via bin/nanos-lint.js and dist/cli.js)
         run: |

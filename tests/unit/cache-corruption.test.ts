@@ -79,6 +79,23 @@ describe("Cache Corruption Detection and Self-Healing", () => {
       fs.writeFileSync(validFile, "-- nanos world annotations\n" + " ".repeat(1500));
       expect(isAnnotationsValid(validFile)).toBe(true);
     });
+
+    it("closes the file descriptor when readSync throws (Issue #32)", () => {
+      const validFile = path.join(tempDir, "meta.lua");
+      fs.writeFileSync(validFile, "---@meta\n" + " ".repeat(1500));
+
+      const closeSpy = vi.spyOn(fs, "closeSync");
+      const readSpy = vi.spyOn(fs, "readSync").mockImplementationOnce(() => {
+        throw new Error("simulated EIO");
+      });
+      try {
+        expect(isAnnotationsValid(validFile)).toBe(false);
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        readSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
+    });
   });
 
   describe("Metadata self-healing on corrupted JSON", () => {
@@ -122,7 +139,7 @@ describe("Cache Corruption Detection and Self-Healing", () => {
       const metaPath = path.join(tempDir, "metadata.json");
       fs.writeFileSync(
         metaPath,
-        JSON.stringify({ lastCheckedWeek: getIsoWeek(), latestVersion: "../EVIL" })
+        JSON.stringify({ lastCheckedWeek: getIsoWeek(), latestVersion: "../EVIL" }),
       );
 
       const result = readLuaLSMetadata(tempDir);
@@ -171,7 +188,7 @@ describe("Cache Corruption Detection and Self-Healing", () => {
 
       try {
         await expect(resolveAnnotations({ cacheDir: tempDir })).rejects.toThrow(
-          /Failed to resolve nanos world API annotations\. Please check your network connection/
+          /Failed to resolve nanos world API annotations\. Please check your network connection/,
         );
         expect(fs.existsSync(cachedFile)).toBe(false);
       } finally {
@@ -243,8 +260,10 @@ describe("Cache Corruption Detection and Self-Healing", () => {
 
       try {
         await expect(
-          resolveLuaLSBinary(version, { cacheDir: tempDir, reuseExisting: false })
-        ).rejects.toThrow(/is corrupted \(failed execution\/size check\) and cannot be re-downloaded while offline/);
+          resolveLuaLSBinary(version, { cacheDir: tempDir, reuseExisting: false }),
+        ).rejects.toThrow(
+          /is corrupted \(failed execution\/size check\) and cannot be re-downloaded while offline/,
+        );
       } finally {
         globalThis.fetch = originalFetch;
         if (origLocal !== undefined) {
@@ -302,14 +321,14 @@ describe("Cache Corruption Detection and Self-Healing", () => {
       fs.writeFileSync(
         path.join(lualsDir, "metadata.json"),
         JSON.stringify({ lastCheckedWeek: getIsoWeek(), latestVersion: "../EVIL" }),
-        "utf8"
+        "utf8",
       );
 
       // Plant a plausible binary where the un-sanitized join pointed: <tempDir>/EVIL/bin/lua-language-server
       const evilBin = path.join(
         tempDir,
         "EVIL",
-        process.platform === "win32" ? "bin/lua-language-server.exe" : "bin/lua-language-server"
+        process.platform === "win32" ? "bin/lua-language-server.exe" : "bin/lua-language-server",
       );
       fs.mkdirSync(path.dirname(evilBin), { recursive: true });
       fs.writeFileSync(evilBin, "#!/bin/sh\necho 1.2.3\n" + "#".repeat(120000), { mode: 0o755 });
@@ -335,7 +354,7 @@ describe("Cache Corruption Detection and Self-Healing", () => {
 
       try {
         await expect(
-          resolveLuaLSBinary("latest", { cacheDir: lualsDir, quiet: true, reuseExisting: true })
+          resolveLuaLSBinary("latest", { cacheDir: lualsDir, quiet: true, reuseExisting: true }),
         ).rejects.toThrow();
         // The traversing version was dropped and replaced by the safe fallback.
         expect(readLuaLSMetadata(lualsDir)?.latestVersion).toBe(FALLBACK_LUALS_VERSION);

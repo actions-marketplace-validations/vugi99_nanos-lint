@@ -96,7 +96,7 @@ describe("Cache Status Inspection and Reporting", () => {
             lastCheckedDate: "2026-09-23",
             latestVersion: "3.19.1",
           }),
-          "utf-8"
+          "utf-8",
         );
 
         // LuaLS valid version directory (3.19.1)
@@ -104,7 +104,10 @@ describe("Cache Status Inspection and Reporting", () => {
         const binDir = path.join(vDir, "bin");
         fs.mkdirSync(binDir, { recursive: true });
         fs.writeFileSync(path.join(vDir, ".complete"), "3.19.1", "utf-8");
-        const binFile = path.join(binDir, process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server");
+        const binFile = path.join(
+          binDir,
+          process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server",
+        );
         fs.writeFileSync(binFile, Buffer.alloc(120_000));
 
         // LuaLS corrupted version directory (3.18.0)
@@ -112,7 +115,10 @@ describe("Cache Status Inspection and Reporting", () => {
         const corruptBinDir = path.join(corruptDir, "bin");
         fs.mkdirSync(corruptBinDir, { recursive: true });
         fs.writeFileSync(path.join(corruptDir, ".complete"), "3.18.0", "utf-8");
-        const corruptBinFile = path.join(corruptBinDir, process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server");
+        const corruptBinFile = path.join(
+          corruptBinDir,
+          process.platform === "win32" ? "lua-language-server.exe" : "lua-language-server",
+        );
         fs.writeFileSync(corruptBinFile, Buffer.alloc(50_000));
 
         // Annotations
@@ -125,15 +131,17 @@ describe("Cache Status Inspection and Reporting", () => {
             lastChecked: "2026-09-23",
             date: { year: 2026, month: 9, day: 23 },
           }),
-          "utf-8"
+          "utf-8",
         );
         fs.writeFileSync(
           path.join(annDir, "annotations.lua"),
           "-- nanos world API definitions\n" + "x".repeat(2000),
-          "utf-8"
+          "utf-8",
         );
 
-        const isBinSpy = vi.spyOn(validationModule, "isBinaryValid").mockImplementation((p) => p.includes("3.19.1"));
+        const isBinSpy = vi
+          .spyOn(validationModule, "isBinaryValid")
+          .mockImplementation((p) => p.includes("3.19.1"));
 
         try {
           const report = getCacheStatus(tempDir);
@@ -225,7 +233,9 @@ describe("Cache Status Inspection and Reporting", () => {
       try {
         const codeClean = await runCLI(["cache", "clean"]);
         expect(codeClean).toBe(0);
-        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[cache] Cleared cache at: /mock/cache"));
+        expect(logSpy).toHaveBeenCalledWith(
+          expect.stringContaining("[cache] Cleared cache at: /mock/cache"),
+        );
       } finally {
         cleanSpy.mockRestore();
         logSpy.mockRestore();
@@ -233,4 +243,3 @@ describe("Cache Status Inspection and Reporting", () => {
     });
   });
 });
-
