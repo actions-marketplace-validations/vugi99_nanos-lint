@@ -23,6 +23,10 @@ const ZIP64_EOCD_MIN_SIZE = 56;
 const ZIP_CENTRAL_HEADER_SIZE = 46;
 const ZIP_LOCAL_HEADER_SIZE = 30;
 const ZIP_DATA_DESCRIPTOR_FLAG = 0x0008;
+const ZIP_DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
+// Data descriptors are crc + compressed size + uncompressed size, in 32-bit or
+// 64-bit form, with an optional leading signature: 12/16/20/24/28 bytes.
+const ZIP_DATA_DESCRIPTOR_SIZES = [12, 16, 20, 24, 28];
 const ZIP_UNIX_FILE_TYPE_MASK = 0o170000;
 
 /**
@@ -45,16 +49,27 @@ function zip64ToNumber(value: bigint, what: string): number {
   return Number(value);
 }
 
-/** Locates the ZIP End Of Central Directory record, preferring one whose comment ends the file. */
+/**
+ * Locates the ZIP End Of Central Directory record that extraction will use.
+ * Every extraction backend (libarchive's `tar.exe`, .NET's `Expand-Archive`,
+ * Info-ZIP, Python) takes the last EOCD signature in the file and ignores its
+ * declared comment length, so the inspection must take the same record:
+ * preferring an earlier, comment-consistent record would let an attacker put a
+ * second central directory in the first record's comment and have it extracted
+ * without ever being walked here. Returns -1 when no EOCD signature is present.
+ */
 export function findEndOfCentralDirectory(buf: Buffer): number {
   const minOffset = Math.max(0, buf.length - ZIP_EOCD_MIN_SIZE - ZIP_MAX_COMMENT_SIZE);
-  let fallback = -1;
   for (let i = buf.length - ZIP_EOCD_MIN_SIZE; i >= minOffset; i--) {
     if (buf.readUInt32LE(i) !== ZIP_END_OF_CENTRAL_DIRECTORY_SIGNATURE) continue;
-    if (i + ZIP_EOCD_MIN_SIZE + buf.readUInt16LE(i + 20) === buf.length) return i;
-    if (fallback === -1) fallback = i;
+    if (i + ZIP_EOCD_MIN_SIZE + buf.readUInt16LE(i + 20) !== buf.length) {
+      throw invalidZipArchive(
+        "the last end of central directory record does not declare a comment reaching the end of the archive",
+      );
+    }
+    return i;
   }
-  return fallback;
+  return -1;
 }
 
 /** Central directory location and record count declared by an archive's end records. */
@@ -256,6 +271,8 @@ function resolveZip64Values(
 export interface ZipCentralDirectoryRecord {
   fileName: string;
   fileNameBytes: Buffer;
+  compressionMethod: number;
+  crc32: number;
   compressedSize: number;
   uncompressedSize: number;
   localHeaderOffset: number;
@@ -278,6 +295,8 @@ export function readZipCentralDirectoryRecord(
   if (buf.readUInt32LE(offset) !== ZIP_CENTRAL_FILE_HEADER_SIGNATURE) return undefined;
 
   const flags = buf.readUInt16LE(offset + 8);
+  const compressionMethod = buf.readUInt16LE(offset + 10);
+  const crc32 = buf.readUInt32LE(offset + 16);
   const compressedSize = buf.readUInt32LE(offset + 20);
   const uncompressedSize = buf.readUInt32LE(offset + 24);
   const fileNameLen = buf.readUInt16LE(offset + 28);
@@ -303,6 +322,8 @@ export function readZipCentralDirectoryRecord(
   return {
     fileName: buf.toString("utf-8", nameStart, nameEnd),
     fileNameBytes: buf.subarray(nameStart, nameEnd),
+    compressionMethod,
+    crc32,
     compressedSize: values.compressedSize,
     uncompressedSize: values.uncompressedSize,
     localHeaderOffset: values.localHeaderOffset,
@@ -316,9 +337,12 @@ export function readZipCentralDirectoryRecord(
 export interface ZipLocalFileHeaderRecord {
   fileName: string;
   fileNameBytes: Buffer;
+  compressionMethod: number;
   compressedSize: number;
   uncompressedSize: number;
   hasDataDescriptor: boolean;
+  /** Offset of the member's first data byte, past the variable-length header fields. */
+  dataOffset: number;
 }
 
 /** Reads the local file header starting at `offset`, or `undefined` when none starts there. */
@@ -363,13 +387,102 @@ export function readZipLocalFileHeader(
   return {
     fileName: buf.toString("utf-8", nameStart, nameEnd),
     fileNameBytes: buf.subarray(nameStart, nameEnd),
+    compressionMethod: buf.readUInt16LE(offset + 8),
     compressedSize,
     uncompressedSize,
     hasDataDescriptor,
+    dataOffset: extraEnd,
   };
 }
 
-/** Verifies that the walked central directory ends exactly at a valid end of central directory structure. */
+/** One central directory record paired with the local file header it points at. */
+export interface ZipMemberPair {
+  record: ZipCentralDirectoryRecord;
+  local: ZipLocalFileHeaderRecord;
+}
+
+/**
+ * Verifies that the central directory's members exactly cover the archive's
+ * local region: the first member starts at offset 0, each member starts where
+ * the previous member's data (plus its trailing data descriptor, when present)
+ * ends, and the last member's data ends exactly at the central directory. A
+ * gap, an overlap or an unreferenced local file header is a member a streaming
+ * reader (`tar.exe` falls back to one when the EOCD is not in its search
+ * window) extracts while the central directory walk never sees it (#31).
+ */
+export function assertLocalFileHeadersTileArchive(
+  buf: Buffer,
+  cdOffset: number,
+  pairs: ZipMemberPair[],
+): void {
+  const ordered = [...pairs].sort(
+    (a, b) => a.record.localHeaderOffset - b.record.localHeaderOffset,
+  );
+  const first = ordered[0];
+  if (!first || first.record.localHeaderOffset !== 0) {
+    throw invalidZipArchive(
+      "local file header stream does not start at the beginning of the archive",
+    );
+  }
+
+  for (let i = 0; i < ordered.length; i++) {
+    const pair = ordered[i]!;
+    const dataEnd = pair.local.dataOffset + pair.record.compressedSize;
+    const nextOffset = ordered[i + 1]?.record.localHeaderOffset ?? cdOffset;
+    if (nextOffset < dataEnd) {
+      throw invalidZipArchive(`archive members overlap at '${pair.record.fileName}'`);
+    }
+    const gap = nextOffset - dataEnd;
+    if (gap === 0) continue;
+    if (!pair.record.hasDataDescriptor && !pair.local.hasDataDescriptor) {
+      throw invalidZipArchive(`unreferenced bytes follow member '${pair.record.fileName}'`);
+    }
+    assertDataDescriptorGap(buf, dataEnd, gap, pair.record);
+  }
+}
+
+/** Validates the trailing data descriptor that accounts for a gap after a member. */
+function assertDataDescriptorGap(
+  buf: Buffer,
+  offset: number,
+  gap: number,
+  record: ZipCentralDirectoryRecord,
+): void {
+  if (!ZIP_DATA_DESCRIPTOR_SIZES.includes(gap)) {
+    throw invalidZipArchive(`unreferenced bytes follow member '${record.fileName}'`);
+  }
+  // The descriptor signature is optional; without it the 32/64-bit layout is
+  // ambiguous, so the gap length is the strongest statement available.
+  if (buf.readUInt32LE(offset) !== ZIP_DATA_DESCRIPTOR_SIGNATURE) return;
+  const body = gap - 4;
+  if (body >= 8 && buf.readUInt32LE(offset + 4) !== record.crc32) {
+    throw invalidZipArchive(
+      `data descriptor CRC does not match the central directory for '${record.fileName}'`,
+    );
+  }
+  const sizesMatch =
+    body === 12
+      ? buf.readUInt32LE(offset + 8) === record.compressedSize &&
+        buf.readUInt32LE(offset + 12) === record.uncompressedSize
+      : body !== 20 ||
+        (zip64ToNumber(buf.readBigUInt64LE(offset + 8), "data descriptor size") ===
+          record.compressedSize &&
+          zip64ToNumber(buf.readBigUInt64LE(offset + 16), "data descriptor size") ===
+            record.uncompressedSize);
+  if (!sizesMatch) {
+    throw invalidZipArchive(
+      `data descriptor sizes do not match the central directory for '${record.fileName}'`,
+    );
+  }
+}
+
+/**
+ * Verifies that the walked central directory ends exactly at a valid end of
+ * central directory structure. Records sometimes placed between the central
+ * directory and the EOCD (archive extra data record `0x08064b50`, digital
+ * signature `0x05054b50`) are rejected too: a release asset never carries them,
+ * so failing closed costs nothing here.
+ */
 export function assertCentralDirectoryTerminator(
   buf: Buffer,
   cdEnd: number,

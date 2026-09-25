@@ -6,6 +6,7 @@ import { logger } from "../logger.js";
 import { LuaLSError } from "../errors.js";
 import {
   assertCentralDirectoryTerminator,
+  assertLocalFileHeadersTileArchive,
   findEndOfCentralDirectory,
   invalidZipArchive,
   readZipCentralDirectoryRecord,
@@ -14,6 +15,8 @@ import {
   ZIP_EOCD_MIN_SIZE,
   type ZipCentralDirectoryLocation,
   type ZipCentralDirectoryRecord,
+  type ZipLocalFileHeaderRecord,
+  type ZipMemberPair,
 } from "./zip.js";
 
 const execFileAsync = promisify(execFile);
@@ -121,8 +124,15 @@ function archiveLinkMemberError(): LuaLSError {
   );
 }
 
-/** Cross-checks a member's local file header against its validated central directory record. */
-function checkLocalFileHeader(buf: Buffer, record: ZipCentralDirectoryRecord): void {
+/**
+ * Cross-checks a member's local file header against its central directory
+ * record, so extraction cannot read a name, method or size the inspection never
+ * validated.
+ */
+function checkLocalFileHeader(
+  buf: Buffer,
+  record: ZipCentralDirectoryRecord,
+): ZipLocalFileHeaderRecord {
   const local = readZipLocalFileHeader(buf, record.localHeaderOffset);
   if (!local) {
     throw invalidZipArchive(`local file header is missing for '${record.fileName}'`);
@@ -130,15 +140,21 @@ function checkLocalFileHeader(buf: Buffer, record: ZipCentralDirectoryRecord): v
   if (!local.fileNameBytes.equals(record.fileNameBytes)) {
     throw invalidZipArchive(`local file header name does not match '${record.fileName}'`);
   }
+  if (local.compressionMethod !== record.compressionMethod) {
+    throw invalidZipArchive(
+      `local file header compression method does not match '${record.fileName}'`,
+    );
+  }
   // With a data descriptor the sizes are only final after the member data, so
   // the local header legitimately carries zeros there.
-  if (local.hasDataDescriptor || record.hasDataDescriptor) return;
+  if (local.hasDataDescriptor || record.hasDataDescriptor) return local;
   if (
     local.uncompressedSize !== record.uncompressedSize ||
     local.compressedSize !== record.compressedSize
   ) {
     throw invalidZipArchive(`local file header sizes do not match '${record.fileName}'`);
   }
+  return local;
 }
 
 /**
@@ -166,6 +182,7 @@ function walkCentralDirectory(
   let offset = cdOffset;
   let memberCount = 0;
   let totalDeclaredSize = 0;
+  const pairs: ZipMemberPair[] = [];
   while (offset < cdEnd) {
     const record = readZipCentralDirectoryRecord(buf, offset);
     if (!record) {
@@ -175,7 +192,7 @@ function walkCentralDirectory(
       throw archiveLinkMemberError();
     }
     checkEscapedMember(record.fileName);
-    checkLocalFileHeader(buf, record);
+    pairs.push({ record, local: checkLocalFileHeader(buf, record) });
     memberCount++;
     totalDeclaredSize += record.uncompressedSize;
     checkArchiveLimits(memberCount, totalDeclaredSize);
@@ -193,6 +210,7 @@ function walkCentralDirectory(
     );
   }
   assertCentralDirectoryTerminator(buf, cdEnd, eocdOffset);
+  assertLocalFileHeadersTileArchive(buf, cdOffset, pairs);
   return { memberCount, totalDeclaredSize };
 }
 
