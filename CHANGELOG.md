@@ -22,15 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - In realm-aware checks (`planRealmCheck()`), targets are mapped within the common workspace root, enabling server scripts to reference shared declarations without undefined-global errors while skipping unrequested passes (such as client).
   - Updated `CheckOptions` in `src/types.ts` to accept optional `paths?: string[]`.
   - Added unit tests in `tests/unit/target-resolver.test.ts` and `tests/unit/cli.test.ts`, and integration tests in `tests/integration/cli-execution.test.ts`.
+- Added `paths` and `dep` inputs to the GitHub Action composite definition (`action.yml`).
 
-- Replaced regex trailing slash removal with index-based scanning in `src/target-resolver.ts` to prevent polynomial ReDoS CodeQL warnings (`js/polynomial-redos`).
-- Fixed symlinked and non-canonical target paths silently discarding diagnostics by canonicalizing roots and targets via `getCanonicalPath()` in `resolveCheckTargets()`, `matchesTargetPaths()`, and `filterReportByTargetPaths()`.
-- Prevented unrequested sibling files under common ancestor directories from leaking globals and masking `undefined-global` diagnostics by computing and applying `computeUnrequestedExclusions()` to `files.exclude` in both realm-aware and fallback passes.
-- Discovered enclosing project root containing `.luarc.json` via `findProjectRoot()` when checking subpaths or single files, properly preserving realm configurations and package dependencies.
+### Changed
+
+- Cached parsed `.luarc.json` configurations in `src/deps.ts` to eliminate duplicate disk reads and JSON parsing during dependency graph traversal.
+- Logged the discovered project root at debug level when a check is re-parented to an enclosing directory holding `.luarc.json`.
+
+### Fixed
+
+- Symlinked and non-canonical target paths no longer discard diagnostics: roots and targets are canonicalized via `getCanonicalPath()` in `resolveCheckTargets()`, `matchesTargetPaths()` and `filterReportByTargetPaths()`.
+- Unrequested sibling files under a common ancestor directory no longer leak globals that mask `undefined-global` diagnostics, by computing and applying `computeUnrequestedExclusions()` to `files.exclude` in both realm-aware and fallback passes.
+- Escaped glob metacharacters (`*`, `?`, `[`, `]`, `{`, `}`, `,`) in the computed `files.exclude` entries, so siblings with such names are really excluded instead of being read as character ranges or brace groups by the LuaLS `glob.gitignore` matcher.
+- Excluded unrequested siblings inside dot-directories: the previous blanket skip left their Lua files visible to LuaLS, where they could still define globals.
+- Discovered the enclosing project root containing `.luarc.json` via `findProjectRoot()` when checking subpaths or single files, properly preserving realm configurations and package dependencies.
+- Corrected the "target is the workspace root" guard in `computeUnrequestedExclusions()`, which compared a resolved path against the raw root argument and therefore never matched.
 - Added cross-volume (`ERR_MULTIPLE_ROOTS`) and filesystem root (`ERR_ROOT_ANCESTOR`) validation for target paths.
 - Emitted a warning (`logger.warn`) when a requested realm filter matches no target files before falling back to a standard check.
-- Cached parsed `.luarc.json` configurations in `src/deps.ts` to eliminate duplicate disk reads and JSON parsing during dependency graph traversal.
-- Added `paths` and `dep` inputs to GitHub Action composite definition (`action.yml`).
+- Replaced regex trailing slash removal with index-based scanning in `src/target-resolver.ts` to prevent polynomial ReDoS CodeQL warnings (`js/polynomial-redos`).
 
 ## [3.0.1] - 2026-09-25
 

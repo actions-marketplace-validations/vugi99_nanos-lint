@@ -14,6 +14,23 @@ import {
 } from "../../src/target-resolver.js";
 import { ConfigError, LuaLSError } from "../../src/errors.js";
 
+/**
+ * `true` when this platform lets the test suite create symlinks. Creating them needs
+ * elevation on Windows, and silently returning from inside a test would report success
+ * without asserting anything, so the capability is probed once and surfaced as a skip.
+ */
+const canCreateSymlinks = ((): boolean => {
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-symlink-probe-"));
+  try {
+    fs.symlinkSync(probeDir, path.join(probeDir, "link"), "dir");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(probeDir, { recursive: true, force: true });
+  }
+})();
+
 describe("target-resolver module", () => {
   describe("findCommonAncestorDirectory", () => {
     it("returns current working directory when paths array is empty", () => {
@@ -131,6 +148,65 @@ describe("target-resolver module", () => {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
     });
+
+    it("escapes glob metacharacters so unusual sibling names are matched literally", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unreq-glob-"));
+      try {
+        fs.mkdirSync(path.join(tempDir, "keep"));
+        fs.mkdirSync(path.join(tempDir, "extra[1]"));
+        fs.writeFileSync(path.join(tempDir, "weird{2}.lua"), "local w = 1", "utf-8");
+
+        const exclusions = computeUnrequestedExclusions(tempDir, [path.join(tempDir, "keep")]);
+
+        // LuaLS only understands backslash escapes, and unescaped `[`/`{` are parsed as
+        // character ranges or brace groups, which would leave these siblings loaded.
+        expect(exclusions).toContain("extra\\[1\\]/**");
+        expect(exclusions).toContain("weird\\{2\\}.lua");
+        expect(exclusions).not.toContain("keep/**");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("excludes unrequested siblings inside dot-directories", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unreq-dot-"));
+      try {
+        fs.mkdirSync(path.join(tempDir, ".hidden", "sub"), { recursive: true });
+        fs.mkdirSync(path.join(tempDir, ".hidden", "other"), { recursive: true });
+        fs.mkdirSync(path.join(tempDir, ".sibling"));
+        fs.writeFileSync(path.join(tempDir, ".hidden", "other", "leak.lua"), "Leak = 1", "utf-8");
+
+        const exclusions = computeUnrequestedExclusions(tempDir, [
+          path.join(tempDir, ".hidden", "sub"),
+        ]);
+        expect(exclusions).toHaveLength(2);
+        expect(exclusions).toContain(".hidden/other/**");
+        expect(exclusions).toContain(".sibling/**");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("recurses into ancestors of nested targets without excluding them", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unreq-nested-"));
+      try {
+        for (const dir of ["Server/Modules", "Server/Legacy", "Shared", "Other"]) {
+          fs.mkdirSync(path.join(tempDir, dir), { recursive: true });
+        }
+
+        const exclusions = computeUnrequestedExclusions(tempDir, [
+          path.join(tempDir, "Server", "Modules"),
+        ]);
+
+        expect(exclusions).toContain("Server/Legacy/**");
+        expect(exclusions).toContain("Shared/**");
+        expect(exclusions).toContain("Other/**");
+        expect(exclusions).not.toContain("Server/**");
+        expect(exclusions).not.toContain("Server/Modules/**");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("matchesTargetPaths", () => {
@@ -163,7 +239,7 @@ describe("target-resolver module", () => {
       expect(matchesTargetPaths("Server/other.lua", root, targets)).toBe(false);
     });
 
-    it("matches targets through symlinked paths", () => {
+    it.skipIf(!canCreateSymlinks)("matches targets through symlinked paths", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-sym-match-"));
       try {
         const realTargetDir = path.join(tempDir, "real_folder");
@@ -171,12 +247,7 @@ describe("target-resolver module", () => {
         fs.writeFileSync(path.join(realTargetDir, "code.lua"), "local x = 1", "utf-8");
 
         const linkTargetDir = path.join(tempDir, "link_folder");
-        try {
-          fs.symlinkSync(realTargetDir, linkTargetDir, "dir");
-        } catch {
-          // If symlink creation fails due to permissions (e.g. non-admin Windows), skip
-          return;
-        }
+        fs.symlinkSync(realTargetDir, linkTargetDir, "dir");
 
         const canonicalRoot = getCanonicalPath(realTargetDir);
         expect(matchesTargetPaths("code.lua", canonicalRoot, [linkTargetDir])).toBe(true);
@@ -219,7 +290,7 @@ describe("target-resolver module", () => {
       expect(keys[0]).toContain("Shared/bridge.lua");
     });
 
-    it("preserves diagnostics when target path is a symlink", () => {
+    it.skipIf(!canCreateSymlinks)("preserves diagnostics when target path is a symlink", () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-sym-filter-"));
       try {
         const realDir = path.join(tempDir, "real");
@@ -228,11 +299,7 @@ describe("target-resolver module", () => {
         fs.writeFileSync(luaFile, "local x = 1", "utf-8");
 
         const linkDir = path.join(tempDir, "link");
-        try {
-          fs.symlinkSync(realDir, linkDir, "dir");
-        } catch {
-          return;
-        }
+        fs.symlinkSync(realDir, linkDir, "dir");
 
         const canonicalRoot = getCanonicalPath(realDir);
         const report = {
@@ -298,6 +365,42 @@ describe("target-resolver module", () => {
         expect(targetPaths).toEqual([getCanonicalPath(fileA), getCanonicalPath(fileB)]);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("re-parents nested targets onto the enclosing root holding .luarc.json", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-target-reparent-"));
+      try {
+        const modules = path.join(tempDir, "Server", "Modules");
+        const legacy = path.join(tempDir, "Server", "Legacy");
+        fs.mkdirSync(modules, { recursive: true });
+        fs.mkdirSync(legacy, { recursive: true });
+        fs.writeFileSync(path.join(tempDir, ".luarc.json"), "{}", "utf-8");
+
+        const single = resolveCheckTargets([modules]);
+        expect(single.rootPath).toBe(getCanonicalPath(tempDir));
+        expect(single.targetPaths).toEqual([getCanonicalPath(modules)]);
+
+        // Two targets share `Server/` as their ancestor, which is itself re-parented.
+        const multiple = resolveCheckTargets([modules, legacy]);
+        expect(multiple.rootPath).toBe(getCanonicalPath(tempDir));
+        expect(multiple.targetPaths).toEqual([getCanonicalPath(modules), getCanonicalPath(legacy)]);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("throws ConfigError ERR_ROOT_ANCESTOR when targets span the filesystem root", () => {
+      // tmpdir and its volume root always share the filesystem root as ancestor, on
+      // every platform (a single drive on Windows, `/` elsewhere).
+      const volumeRoot = path.parse(os.tmpdir()).root;
+      expect(isFilesystemRoot(findCommonAncestorDirectory([volumeRoot, os.tmpdir()]))).toBe(true);
+      try {
+        resolveCheckTargets([volumeRoot, os.tmpdir()]);
+        expect.fail("Expected ERR_ROOT_ANCESTOR");
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConfigError);
+        expect((err as ConfigError).code).toBe("ERR_ROOT_ANCESTOR");
       }
     });
   });

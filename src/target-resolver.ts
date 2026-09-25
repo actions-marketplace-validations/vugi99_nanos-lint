@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { stripTrailingSlashes } from "./config.js";
+import { logger } from "./logger.js";
 import { fileUriToPath } from "./types.js";
 import type { DiagnosticReport } from "./types.js";
 import { LuaLSError, ConfigError } from "./errors.js";
@@ -140,19 +141,51 @@ export function findProjectRoot(startDir: string): string {
 }
 
 /**
+ * Characters the LuaLS glob matcher treats as syntax.
+ *
+ * LuaLS compiles `files.exclude` with `glob.gitignore` (see its
+ * `script/glob/glob.lua`), whose grammar only understands backslash escapes:
+ * bracket expressions such as `[[]` are parsed as character ranges and match
+ * nothing useful. Escaping is therefore done with `\`.
+ */
+const GLOB_METACHARACTERS: ReadonlySet<string> = new Set(["*", "?", "[", "]", "{", "}", ",", "\\"]);
+
+/**
+ * Escapes the glob metacharacters of a single path segment so it matches literally.
+ *
+ * Note: `normalizePattern()` in `src/luals/files.ts` rewrites backslashes to path
+ * separators when counting checked files, so these escapes only reach LuaLS. That is
+ * harmless: the counted file set is filtered by the requested target paths anyway.
+ */
+function escapeGlobSegment(segment: string): string {
+  let escaped = "";
+  for (const char of segment) {
+    escaped += GLOB_METACHARACTERS.has(char) ? `\\${char}` : char;
+  }
+  return escaped;
+}
+
+/** Escapes glob metacharacters in every segment of a slash-separated relative path. */
+function escapeGlobPath(relativePath: string): string {
+  return relativePath.split("/").map(escapeGlobSegment).join("/");
+}
+
+/**
  * Computes glob exclusion patterns for directories and files under workspace root
  * that are completely outside the requested target paths.
  */
 export function computeUnrequestedExclusions(root: string, targetPaths: string[]): string[] {
+  const resolvedRoot = path.resolve(root);
+
   if (
     targetPaths.length === 0 ||
-    targetPaths.some((t) => t === "." || t === "" || path.resolve(root, t) === root)
+    targetPaths.some((t) => t === "." || t === "" || path.resolve(resolvedRoot, t) === resolvedRoot)
   ) {
     return [];
   }
 
   const isWin = process.platform === "win32";
-  const canonicalRoot = getCanonicalPath(path.resolve(root));
+  const canonicalRoot = getCanonicalPath(resolvedRoot);
 
   const relTargets = targetPaths
     .map((t) => {
@@ -179,10 +212,6 @@ export function computeUnrequestedExclusions(root: string, targetPaths: string[]
     }
 
     for (const entry of entries) {
-      if (entry.name.startsWith(".")) {
-        continue;
-      }
-
       const entryRel = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
       const normEntry = isWin ? entryRel.toLowerCase() : entryRel;
 
@@ -216,10 +245,13 @@ export function computeUnrequestedExclusions(root: string, targetPaths: string[]
         continue;
       }
 
+      // Dot-directories are excluded like any other unrequested sibling: skipping
+      // them would leave their `.lua` files visible to LuaLS, where they could still
+      // define globals for the requested targets.
       if (entry.isDirectory()) {
-        exclusions.push(`${entryRel}/**`);
+        exclusions.push(`${escapeGlobPath(entryRel)}/**`);
       } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".lua")) {
-        exclusions.push(entryRel);
+        exclusions.push(escapeGlobPath(entryRel));
       }
     }
   }
@@ -327,6 +359,10 @@ export function resolveCheckTargets(rawPaths?: string[]): ResolvedCheckTargets {
     const startDir = isFile ? path.dirname(canonicalFirst) : canonicalFirst;
     const projRoot = findProjectRoot(startDir);
     if (projRoot !== startDir) {
+      // Only reachable when `findProjectRoot` walked up to an ancestor holding a
+      // `.luarc.json`; a filesystem root never contains one in practice, so this
+      // guard is defensive. The target being the filesystem root itself is left
+      // alone on purpose: the user asked for that directory explicitly.
       if (isFilesystemRoot(projRoot)) {
         throw new ConfigError(
           `Cannot check targets across the root filesystem (${projRoot}): checked paths must share a common project directory.`,
@@ -334,6 +370,7 @@ export function resolveCheckTargets(rawPaths?: string[]): ResolvedCheckTargets {
           "Ensure all checked paths reside within a common project directory.",
         );
       }
+      logger.debug(`[targets] Using discovered project root "${projRoot}" for "${first}".`);
       return { rootPath: projRoot, targetPaths: canonicalTargets };
     }
     return { rootPath: first, targetPaths: canonicalTargets };
@@ -349,5 +386,8 @@ export function resolveCheckTargets(rawPaths?: string[]): ResolvedCheckTargets {
   }
 
   const rootPath = findProjectRoot(ancestor);
+  if (rootPath !== ancestor) {
+    logger.debug(`[targets] Using discovered project root "${rootPath}" for "${ancestor}".`);
+  }
   return { rootPath, targetPaths: canonicalTargets };
 }

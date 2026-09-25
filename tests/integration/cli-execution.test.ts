@@ -22,6 +22,24 @@ function normalizeSlashes(output: string | undefined): string {
 const distCli = path.join(rootDir, "dist", "cli.js");
 const binCli = path.join(rootDir, "bin", "nanos-lint.js");
 
+/**
+ * `true` when this platform lets the suite create symlinks. Creating them needs
+ * elevation on Windows; returning early from inside a test would report success
+ * without asserting anything, so the capability is probed once and used with
+ * `it.skipIf` to surface the skip in the run report.
+ */
+const canCreateSymlinks = ((): boolean => {
+  const probeDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-symlink-probe-"));
+  try {
+    fs.symlinkSync(probeDir, path.join(probeDir, "link"), "dir");
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(probeDir, { recursive: true, force: true });
+  }
+})();
+
 describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression tests", () => {
   beforeAll(async () => {
     // Cache hits: guarantees the fixtures exist before the first subprocess.
@@ -504,51 +522,50 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     }
   });
 
-  it("reports diagnostics correctly when target path is accessed through a symlink", async () => {
-    const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-sym-integ-"));
-    const tempDir = fs.realpathSync.native
-      ? fs.realpathSync.native(rawTempDir)
-      : fs.realpathSync(rawTempDir);
-    try {
-      const flatDir = path.join(tempDir, "flat");
-      fs.mkdirSync(flatDir);
-      fs.writeFileSync(
-        path.join(flatDir, "broken.lua"),
-        "CallNonExistentFunctionInFlat()\n",
-        "utf-8",
-      );
-
-      const linkFlat = path.join(tempDir, "link-flat");
+  it.skipIf(!canCreateSymlinks)(
+    "reports diagnostics correctly when target path is accessed through a symlink",
+    async () => {
+      const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-sym-integ-"));
+      const tempDir = fs.realpathSync.native
+        ? fs.realpathSync.native(rawTempDir)
+        : fs.realpathSync(rawTempDir);
       try {
+        const flatDir = path.join(tempDir, "flat");
+        fs.mkdirSync(flatDir);
+        fs.writeFileSync(
+          path.join(flatDir, "broken.lua"),
+          "CallNonExistentFunctionInFlat()\n",
+          "utf-8",
+        );
+
+        const linkFlat = path.join(tempDir, "link-flat");
         fs.symlinkSync(flatDir, linkFlat, "dir");
-      } catch {
-        return;
-      }
 
-      // Check absolute symlinked path
-      try {
-        await execFileAsync(process.execPath, [distCli, "check", linkFlat]);
-        expect.fail("Expected check on symlinked path to fail");
-      } catch (err: unknown) {
-        const execErr = err as { code?: number; stdout?: string };
-        expect(execErr.code).toBe(1);
-        expect(execErr.stdout).toContain("1 problem");
-        expect(execErr.stdout).toContain("undefined-global");
-      }
+        // Check absolute symlinked path
+        try {
+          await execFileAsync(process.execPath, [distCli, "check", linkFlat]);
+          expect.fail("Expected check on symlinked path to fail");
+        } catch (err: unknown) {
+          const execErr = err as { code?: number; stdout?: string };
+          expect(execErr.code).toBe(1);
+          expect(execErr.stdout).toContain("1 problem");
+          expect(execErr.stdout).toContain("undefined-global");
+        }
 
-      // Check relative symlinked path from cwd = tempDir
-      try {
-        await execFileAsync(process.execPath, [distCli, "check", "link-flat"], { cwd: tempDir });
-        expect.fail("Expected relative symlinked check to fail");
-      } catch (err: unknown) {
-        const execErr = err as { code?: number; stdout?: string };
-        expect(execErr.code).toBe(1);
-        expect(execErr.stdout).toContain("1 problem");
+        // Check relative symlinked path from cwd = tempDir
+        try {
+          await execFileAsync(process.execPath, [distCli, "check", "link-flat"], { cwd: tempDir });
+          expect.fail("Expected relative symlinked check to fail");
+        } catch (err: unknown) {
+          const execErr = err as { code?: number; stdout?: string };
+          expect(execErr.code).toBe(1);
+          expect(execErr.stdout).toContain("1 problem");
+        }
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
       }
-    } finally {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   it("excludes unrequested sibling folders to prevent context leakage across targets", async () => {
     const rawTempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-unreq-integ-"));

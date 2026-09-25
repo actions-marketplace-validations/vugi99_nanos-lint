@@ -119,6 +119,8 @@ jobs:
 | `realm`         | Execution realm to check (`all`, `client`, `server`, `shared`)                        | `all`     |
 | `cache`         | Whether to cache the LuaLS binary and annotations across workflow runs                | `true`    |
 
+`paths` takes precedence over `path` when both are set; `path` is kept for backwards compatibility with the single-target form.
+
 When caching is enabled, the cache key rolls over each ISO week, so a freshly downloaded LuaLS binary is actually persisted under the new week's key; in the meantime the previous week's entry is restored from the cache.
 
 When running inside GitHub Actions, `nanos-lint` automatically outputs **workflow annotations** (`::error` / `::warning`) that appear inline on PR diffs.
