@@ -284,9 +284,6 @@ async function downloadAndPromoteLuaLS(
       }
 
       if (!response || !response.body) {
-        if (lastErr instanceof LuaLSError) {
-          throw lastErr;
-        }
         throw new LuaLSError(
           `Failed to download LuaLS from ${url}${lastErr ? `: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}` : ""}`,
           "ERR_LUALS_DOWNLOAD",

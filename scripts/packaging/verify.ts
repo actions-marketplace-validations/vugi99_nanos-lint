@@ -182,11 +182,7 @@ export async function downloadAssetHardened(url: string, destPath: string): Prom
       });
       if (res.url && !isAllowedDownloadUrl(res.url)) {
         if (typeof res.body?.cancel === "function") {
-          try {
-            await res.body.cancel();
-          } catch (cancelErr) {
-            void cancelErr;
-          }
+          await res.body.cancel().catch(() => {});
         }
         throw new Error(`Download redirect landed on unapproved host: ${res.url}`);
       }
@@ -195,11 +191,7 @@ export async function downloadAssetHardened(url: string, destPath: string): Prom
         break;
       }
       if (typeof res.body?.cancel === "function") {
-        try {
-          await res.body.cancel();
-        } catch (cancelErr) {
-          void cancelErr;
-        }
+        await res.body.cancel().catch(() => {});
       }
       lastErr = new Error(`HTTP ${res.status} ${res.statusText}`);
     } catch (err) {
