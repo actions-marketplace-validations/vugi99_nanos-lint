@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-09-25
+
 ### Added
 
 - Periodic lock heartbeat in `withFileLock()` (`src/lock.ts`) for long-running cache extractions and downloads (#44):
@@ -24,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- Dropped security support for versions < 3.0.1 in SECURITY.md.
 - In `downloadAndExtractLuaLS()` (`src/luals/download.ts`), fail fast when an HTTP redirect targets an untrusted, off-allowlist domain instead of retrying up to three times, log a warning at warn level, and preserve the typed `LuaLSError` with its security remediation instructions.
 
 ## [3.0.0] - 2026-09-25
