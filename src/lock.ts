@@ -5,11 +5,13 @@ import { logger } from "./logger.js";
 /** Default time to wait for a contended lock before failing. */
 export const DEFAULT_LOCK_TIMEOUT_MS = 60_000;
 /** A lock file older than this, or owned by a dead process, is treated as abandoned. */
-export const DEFAULT_LOCK_STALE_MS = 120_000;
+export const DEFAULT_LOCK_STALE_MS = 30_000;
 /** Base polling interval for contended locks; it grows exponentially with jitter. */
 export const DEFAULT_LOCK_POLL_INTERVAL_MS = 25;
 /** Upper bound for the polling interval, so a long wait stays responsive. */
 const MAX_LOCK_POLL_INTERVAL_MS = 500;
+/** Upper bound for the automatic heartbeat interval, keeping it responsive. */
+const MAX_LOCK_HEARTBEAT_INTERVAL_MS = 15_000;
 /** Default rename attempts used to absorb transient Windows file-lock errors. */
 const DEFAULT_RENAME_RETRIES = 5;
 /**
@@ -26,7 +28,7 @@ const TRANSIENT_RENAME_CODES = new Set(["EBUSY", "EPERM", "EACCES", "ENOTEMPTY"]
 export interface FileLockOptions {
   /** Milliseconds to keep retrying before failing. Defaults to 60s. */
   timeoutMs?: number;
-  /** Milliseconds after which an unreleased lock is reclaimed. Defaults to 120s. */
+  /** Milliseconds after which an unreleased lock is reclaimed. Defaults to 30s. */
   staleMs?: number;
   /** Minimum age before an abandoned-looking lock may be reclaimed. Defaults to 1s. */
   reclaimGraceMs?: number;
@@ -34,6 +36,11 @@ export interface FileLockOptions {
   pollIntervalMs?: number;
   /** Human-readable owner description used in log messages. */
   label?: string;
+  /**
+   * Heartbeat interval in milliseconds to touch the lock file; defaults to staleMs / 4 (capped at 15s),
+   * or disabled (0) when staleMs <= 0.
+   */
+  heartbeatIntervalMs?: number;
 }
 
 export interface AtomicWriteOptions {
@@ -89,24 +96,35 @@ function readLockMetadata(lockPath: string): LockMetadata | null {
   }
 }
 
+/** Returns the most recent activity timestamp (createdAt or mtime) for a lock file. */
+function readLockActiveTime(lockPath: string, metadata?: LockMetadata | null): number | null {
+  const meta = metadata !== undefined ? metadata : readLockMetadata(lockPath);
+  let mtimeMs: number | null = null;
+  try {
+    mtimeMs = fs.statSync(lockPath).mtimeMs;
+  } catch (err) {
+    logger.debug(
+      `[lock] Could not stat lock file ${lockPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const createdAt = typeof meta?.createdAt === "number" ? meta.createdAt : null;
+  if (createdAt !== null && mtimeMs !== null) {
+    return Math.max(createdAt, mtimeMs);
+  }
+  return createdAt ?? mtimeMs;
+}
+
 /** Returns true when a lock was left behind by a dead owner or has expired. */
 export function isLockStale(lockPath: string, staleMs: number = DEFAULT_LOCK_STALE_MS): boolean {
   const metadata = readLockMetadata(lockPath);
   if (typeof metadata?.pid === "number" && !isProcessAlive(metadata.pid)) {
     return true;
   }
-  const createdAt = typeof metadata?.createdAt === "number" ? metadata.createdAt : null;
-  if (createdAt !== null) {
-    return Date.now() - createdAt > staleMs;
+  const activeTime = readLockActiveTime(lockPath, metadata);
+  if (activeTime !== null) {
+    return Date.now() - activeTime > staleMs;
   }
-  try {
-    return Date.now() - fs.statSync(lockPath).mtimeMs > staleMs;
-  } catch (err) {
-    logger.debug(
-      `[lock] Could not stat lock file ${lockPath}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return false;
-  }
+  return false;
 }
 
 /**
@@ -145,18 +163,11 @@ function tryCreateLockFile(lockPath: string, token: string): boolean {
 
 /** Returns the age of a lock file in milliseconds, from its metadata or its mtime. */
 function lockAgeMs(lockPath: string): number {
-  const metadata = readLockMetadata(lockPath);
-  if (typeof metadata?.createdAt === "number") {
-    return Math.max(0, Date.now() - metadata.createdAt);
+  const activeTime = readLockActiveTime(lockPath);
+  if (activeTime !== null) {
+    return Math.max(0, Date.now() - activeTime);
   }
-  try {
-    return Math.max(0, Date.now() - fs.statSync(lockPath).mtimeMs);
-  } catch (err) {
-    logger.debug(
-      `[lock] Could not read the age of ${lockPath}: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return Number.POSITIVE_INFINITY;
-  }
+  return Number.POSITIVE_INFINITY;
 }
 
 /** Confirms that a lock file still carries the token written by this process. */
@@ -263,6 +274,36 @@ export function releaseFileLock(lockPath: string, token: string): void {
 }
 
 /**
+ * Refreshes the active timestamp of a lock file if the caller still owns it.
+ * Uses `fs.utimesSync` non-destructively so it never overwrites another owner's lock metadata.
+ */
+export function touchLockFile(lockPath: string, token: string): boolean {
+  const metadata = readLockMetadata(lockPath);
+  if (metadata?.token !== token) {
+    logger.debug(`[lock] Cannot touch lock at ${lockPath}: token mismatch or missing lock.`);
+    return false;
+  }
+  try {
+    const now = new Date();
+    fs.utimesSync(lockPath, now, now);
+    return true;
+  } catch (err) {
+    logger.debug(
+      `[lock] Could not touch lock at ${lockPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+/** Calculates the default heartbeat interval for a given staleness threshold. */
+function defaultHeartbeatInterval(staleMs: number): number {
+  if (staleMs <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(1, Math.floor(staleMs / 4)), MAX_LOCK_HEARTBEAT_INTERVAL_MS);
+}
+
+/**
  * Runs `task` while holding an exclusive cross-process lock at `lockPath`, releasing it
  * in a `finally` block. Concurrent callers queue with jittered exponential backoff, so
  * parallel CI jobs and monorepo linters sharing one cache serialize instead of racing.
@@ -272,10 +313,48 @@ export async function withFileLock<T>(
   task: () => T | Promise<T>,
   options: FileLockOptions = {},
 ): Promise<T> {
-  const token = await acquireFileLock(lockPath, options);
+  const staleMs = options.staleMs ?? DEFAULT_LOCK_STALE_MS;
+  const label = options.label ?? path.basename(lockPath);
+  const resolvedOptions: FileLockOptions = {
+    ...options,
+    staleMs,
+    label,
+  };
+  const token = await acquireFileLock(lockPath, resolvedOptions);
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? defaultHeartbeatInterval(staleMs);
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  let hasWarnedFailure = false;
+
+  if (heartbeatIntervalMs > 0) {
+    heartbeatTimer = setInterval(() => {
+      const metadata = readLockMetadata(lockPath);
+      if (metadata?.token !== token) {
+        if (heartbeatTimer !== undefined) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = undefined;
+        }
+        logger.warn(`[lock] Lost ownership of ${label} lock at ${lockPath}; stopping heartbeat.`);
+        return;
+      }
+      if (!touchLockFile(lockPath, token)) {
+        if (!hasWarnedFailure) {
+          hasWarnedFailure = true;
+          logger.warn(
+            `[lock] Failed to touch ${label} lock at ${lockPath}; heartbeat could not update timestamp.`,
+          );
+        }
+      }
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref();
+  }
+
   try {
     return await task();
   } finally {
+    if (heartbeatTimer !== undefined) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = undefined;
+    }
     releaseFileLock(lockPath, token);
   }
 }

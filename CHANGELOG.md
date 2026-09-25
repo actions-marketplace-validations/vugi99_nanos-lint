@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Periodic lock heartbeat in `withFileLock()` (`src/lock.ts`) for long-running cache extractions and downloads (#44):
+  - Added `heartbeatIntervalMs?: number` to `FileLockOptions`, defaulting to `staleMs / 4` capped at 15s (or disabled when `staleMs <= 0`).
+  - Implemented non-destructive `touchLockFile()` using `fs.utimesSync()`, ensuring an active heartbeat updates the file's modification timestamp without rewriting metadata or risking clobbering another worker's acquired lock.
+  - Paired with `Math.max(createdAt, mtime)` freshness calculation in `isLockStale()` and `lockAgeMs()`.
+  - Added immediate heartbeat timer cancellation with a warning when lock ownership is lost, and a warn-once report if timestamp updates fail.
+  - Note: synchronous operations executed inside the locked section (such as hashing archives or synchronous recursive directory copies) block the event loop, so heartbeat ticks only fire during asynchronous phases.
+  - Reduced `DEFAULT_LOCK_STALE_MS` from 120s to 30s: with the 60s default timeout (`DEFAULT_LOCK_TIMEOUT_MS`), abandoned locks from hard-killed processes (`SIGKILL` / power loss) can now be reclaimed automatically before timeout, while live processes stay protected by the heartbeat.
+  - Added comprehensive unit tests in `tests/unit/concurrency.test.ts` verifying non-destructive touching, mtime advancement, clean timer disposal, error handling, lost-ownership cancellation, disabled heartbeat modes, and cross-process mutual exclusion across slow tasks.
+
+### Changed
+
+- Upgraded devDependencies `vitest` and `@vitest/coverage-v8` to `5.0.2`.
+
+### Security
+
+- In `downloadAndExtractLuaLS()` (`src/luals/download.ts`), fail fast when an HTTP redirect targets an untrusted, off-allowlist domain instead of retrying up to three times, log a warning at warn level, and preserve the typed `LuaLSError` with its security remediation instructions.
+
 ## [3.0.0] - 2026-09-25
 
 ### Added

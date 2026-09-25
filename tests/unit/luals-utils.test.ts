@@ -21,6 +21,7 @@ import {
   parseTarTvSize,
   validateArchiveMembers,
 } from "../../src/luals.js";
+import { logger } from "../../src/logger.js";
 import { resolveWorkspaceConfig } from "../../src/config.js";
 import { fileUriToPath } from "../../src/types.js";
 import {
@@ -681,7 +682,7 @@ describe("luals utilities", () => {
           ok: false,
           status: 500,
           statusText: "Internal Error",
-          body: { cancel: vi.fn() },
+          body: { cancel: vi.fn().mockRejectedValue(new Error("non-ok cancel error")) },
         } as unknown as Response);
       });
       try {
@@ -784,19 +785,69 @@ describe("luals utilities", () => {
       }
     });
 
-    it("downloadAndExtractLuaLS rejects untrusted redirect URLs (Issue #19)", async () => {
+    it("downloadAndExtractLuaLS rejects untrusted redirect URLs without retrying (Issue #19)", async () => {
       const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-redirect-test-"));
       const originalFetch = globalThis.fetch;
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+      const cancelFn = vi.fn();
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: true,
         url: "https://evil-mirror.com/asset.tar.gz",
-        body: { cancel: vi.fn() },
+        body: { cancel: cancelFn },
       } as unknown as Response);
       try {
         await expect(
           downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
-        ).rejects.toThrow(/Redirect to untrusted URL blocked/);
+        ).rejects.toMatchObject({
+          name: "LuaLSError",
+          code: "ERR_LUALS_DOWNLOAD",
+          remedy: "Download redirects must stay on allowlisted HTTPS GitHub hosts.",
+          message: expect.stringContaining(
+            "Redirect to untrusted URL blocked: https://evil-mirror.com/asset.tar.gz",
+          ),
+        });
+        expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+        expect(cancelFn).toHaveBeenCalledTimes(1);
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining(
+            "Redirect to untrusted URL blocked: https://evil-mirror.com/asset.tar.gz",
+          ),
+        );
       } finally {
+        warnSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+        fs.rmSync(tempTarget, { recursive: true, force: true });
+      }
+    });
+
+    it("surfaces untrusted redirect error when body has no cancel or cancel rejects", async () => {
+      const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-redirect-nocancel-"));
+      const originalFetch = globalThis.fetch;
+      const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          url: "https://evil-mirror.com/asset.tar.gz",
+          body: Readable.from(["payload"]),
+        } as unknown as Response);
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
+        ).rejects.toMatchObject({ code: "ERR_LUALS_DOWNLOAD" });
+        expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+        const rejectingCancel = vi.fn().mockRejectedValue(new Error("cancel failed"));
+        globalThis.fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          url: "https://evil-mirror.com/asset.tar.gz",
+          body: { cancel: rejectingCancel },
+        } as unknown as Response);
+        await expect(
+          downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
+        ).rejects.toMatchObject({ code: "ERR_LUALS_DOWNLOAD" });
+        expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+        expect(rejectingCancel).toHaveBeenCalledTimes(1);
+      } finally {
+        warnSpy.mockRestore();
         globalThis.fetch = originalFetch;
         fs.rmSync(tempTarget, { recursive: true, force: true });
       }
