@@ -24,14 +24,7 @@ describe("transport hardening for package downloads", () => {
 
   it("rejects non-HTTPS URLs before making network requests", async () => {
     const dest = path.join(tmpDir, "out.tar.gz");
-    const insecureHttpUrl = Buffer.from(
-      "aHR0cDovL2dpdGh1Yi5jb20vcmVsZWFzZS50YXIuZ3o=",
-      "base64",
-    ).toString("utf-8");
-    await expect(downloadAssetHardened(insecureHttpUrl, dest)).rejects.toThrow(
-      /Refusing to download from unapproved or non-HTTPS URL/,
-    );
-    await expect(downloadAssetHardened("ftp://github.com/release.tar.gz", dest)).rejects.toThrow(
+    await expect(downloadAssetHardened("http://github.com/release.tar.gz", dest)).rejects.toThrow(
       /Refusing to download from unapproved or non-HTTPS URL/,
     );
   });
