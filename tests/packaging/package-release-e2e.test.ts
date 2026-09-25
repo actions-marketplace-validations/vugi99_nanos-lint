@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { Readable } from "node:stream";
-import { gzipSync } from "node:zlib";
+import { crc32, gzipSync } from "node:zlib";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { packageRelease } from "../../scripts/package-release.js";
 import { canExtractZip } from "../../scripts/packaging/verify.js";
@@ -94,10 +94,12 @@ describe("packageRelease end-to-end smoke test", () => {
     for (const entry of entries) {
       const fn = Buffer.from(entry.name, "utf-8");
       const data = entry.content;
+      const crc = crc32(data);
 
       const lh = Buffer.alloc(30 + fn.length + data.length);
       lh.writeUInt32LE(0x04034b50, 0);
       lh.writeUInt16LE(20, 4);
+      lh.writeUInt32LE(crc, 14);
       lh.writeUInt32LE(data.length, 18);
       lh.writeUInt32LE(data.length, 22);
       lh.writeUInt16LE(fn.length, 26);
@@ -109,6 +111,7 @@ describe("packageRelease end-to-end smoke test", () => {
       ch.writeUInt32LE(0x02014b50, 0);
       ch.writeUInt16LE(20, 4);
       ch.writeUInt16LE(20, 6);
+      ch.writeUInt32LE(crc, 16);
       ch.writeUInt32LE(data.length, 20);
       ch.writeUInt32LE(data.length, 24);
       ch.writeUInt16LE(fn.length, 28);

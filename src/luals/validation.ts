@@ -4,6 +4,20 @@ import { execFileSync, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { logger } from "../logger.js";
 import { LuaLSError } from "../errors.js";
+import {
+  assertCentralDirectoryTerminator,
+  assertLocalFileHeadersTileArchive,
+  findEndOfCentralDirectory,
+  invalidZipArchive,
+  readZipCentralDirectoryRecord,
+  readZipLocalFileHeader,
+  resolveCentralDirectoryLocation,
+  ZIP_EOCD_MIN_SIZE,
+  type ZipCentralDirectoryLocation,
+  type ZipCentralDirectoryRecord,
+  type ZipLocalFileHeaderRecord,
+  type ZipMemberPair,
+} from "./zip.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,12 +62,17 @@ export function parseTarTvSize(line: string): number {
   return 0;
 }
 
-/** Asserts that an archive entry name does not escape the destination directory. */
+/**
+ * Asserts that an archive entry name does not escape the destination directory.
+ * Drive-letter paths are rejected whether absolute (`C:\evil`) or drive-relative
+ * (`C:evil`), because Windows resolves the latter against the current directory
+ * of that drive.
+ */
 function checkEscapedMember(member: string): void {
   if (
     member.startsWith("/") ||
     member.startsWith("\\") ||
-    /^[a-zA-Z]:[\\/]/.test(member) ||
+    /^[a-zA-Z]:/.test(member) ||
     member.split(/[/\\]/).includes("..")
   ) {
     throw new LuaLSError(
@@ -93,102 +112,130 @@ export function getTarBinary(): string {
   return "tar";
 }
 
-/** Pre-inspects a ZIP archive's central directory to enforce extraction safety constraints (#31). */
+/** Unix file type of a symbolic link entry, as stored in a zip external attributes field. */
+const ZIP_UNIX_SYMLINK_TYPE = 0o120000;
+
+/** Builds the refusal error for archive-planted symbolic or hard link members. */
+function archiveLinkMemberError(): LuaLSError {
+  return new LuaLSError(
+    "Archive member is a symbolic or hard link. Refusing to extract archive-planted links.",
+    "ERR_LUALS_EXTRACT",
+    "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
+  );
+}
+
+/**
+ * Cross-checks a member's local file header against its central directory
+ * record, so extraction cannot read a name, method or size the inspection never
+ * validated.
+ */
+function checkLocalFileHeader(
+  buf: Buffer,
+  record: ZipCentralDirectoryRecord,
+): ZipLocalFileHeaderRecord {
+  const local = readZipLocalFileHeader(buf, record.localHeaderOffset);
+  if (!local) {
+    throw invalidZipArchive(`local file header is missing for '${record.fileName}'`);
+  }
+  if (!local.fileNameBytes.equals(record.fileNameBytes)) {
+    throw invalidZipArchive(`local file header name does not match '${record.fileName}'`);
+  }
+  if (local.compressionMethod !== record.compressionMethod) {
+    throw invalidZipArchive(
+      `local file header compression method does not match '${record.fileName}'`,
+    );
+  }
+  // With a data descriptor the sizes are only final after the member data, so
+  // the local header legitimately carries zeros there.
+  if (local.hasDataDescriptor || record.hasDataDescriptor) return local;
+  if (
+    local.uncompressedSize !== record.uncompressedSize ||
+    local.compressedSize !== record.compressedSize
+  ) {
+    throw invalidZipArchive(`local file header sizes do not match '${record.fileName}'`);
+  }
+  return local;
+}
+
+/**
+ * Walks every central directory record from the declared offset until the
+ * declared central directory end, enforcing the extraction constraints on each
+ * member and reconciling the walked records with the declared count. A walk
+ * that cannot be completed is a rejection, never an empty archive.
+ */
+function walkCentralDirectory(
+  buf: Buffer,
+  eocdOffset: number,
+  location: ZipCentralDirectoryLocation,
+): { memberCount: number; totalDeclaredSize: number } {
+  const { entryCount, cdOffset, cdSize } = location;
+  if (entryCount === 0) {
+    throw invalidZipArchive("central directory declares zero members");
+  }
+  checkArchiveLimits(entryCount, 0);
+
+  const cdEnd = cdOffset + cdSize;
+  if (cdEnd > buf.length) {
+    throw invalidZipArchive("central directory extends past the end of the archive");
+  }
+
+  let offset = cdOffset;
+  let memberCount = 0;
+  let totalDeclaredSize = 0;
+  const pairs: ZipMemberPair[] = [];
+  while (offset < cdEnd) {
+    const record = readZipCentralDirectoryRecord(buf, offset);
+    if (!record) {
+      throw invalidZipArchive("truncated or corrupt central directory record");
+    }
+    if (record.unixFileType === ZIP_UNIX_SYMLINK_TYPE) {
+      throw archiveLinkMemberError();
+    }
+    checkEscapedMember(record.fileName);
+    pairs.push({ record, local: checkLocalFileHeader(buf, record) });
+    memberCount++;
+    totalDeclaredSize += record.uncompressedSize;
+    checkArchiveLimits(memberCount, totalDeclaredSize);
+    offset = record.nextOffset;
+  }
+
+  if (offset !== cdEnd) {
+    throw invalidZipArchive(
+      "central directory records overrun the declared central directory size",
+    );
+  }
+  if (memberCount !== entryCount) {
+    throw invalidZipArchive(
+      `central directory contains ${memberCount} member(s) but declares ${entryCount}`,
+    );
+  }
+  assertCentralDirectoryTerminator(buf, cdEnd, eocdOffset);
+  assertLocalFileHeadersTileArchive(buf, cdOffset, pairs);
+  return { memberCount, totalDeclaredSize };
+}
+
+/**
+ * Pre-inspects a ZIP archive's central directory to enforce extraction safety
+ * constraints (#31). Fails closed: the directory is walked record by record and
+ * rejected unless the walk terminates on a valid end record, matches the
+ * declared member count and central directory size, and holds at least one member.
+ */
 export function inspectZipMembers(archivePath: string): {
   memberCount: number;
   totalDeclaredSize: number;
 } {
   const buf = fs.readFileSync(archivePath);
-  if (buf.length < 22) {
-    throw new LuaLSError(
-      "Failed to inspect release archive before extraction: archive is too small to be a valid zip",
-      "ERR_LUALS_EXTRACT",
-      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
-    );
+  if (buf.length < ZIP_EOCD_MIN_SIZE) {
+    throw invalidZipArchive("archive is too small to be a valid zip");
   }
 
-  let eocdOffset = -1;
-  const minOffset = Math.max(0, buf.length - 22 - 65535);
-  for (let i = buf.length - 22; i >= minOffset; i--) {
-    if (buf.readUInt32LE(i) === 0x06054b50) {
-      const commentLen = buf.readUInt16LE(i + 20);
-      if (i + 22 + commentLen === buf.length) {
-        eocdOffset = i;
-        break;
-      }
-    }
-  }
-
+  const eocdOffset = findEndOfCentralDirectory(buf);
   if (eocdOffset === -1) {
-    for (let i = buf.length - 22; i >= minOffset; i--) {
-      if (buf.readUInt32LE(i) === 0x06054b50) {
-        eocdOffset = i;
-        break;
-      }
-    }
+    throw invalidZipArchive("corrupt or invalid zip archive (missing EOCD)");
   }
 
-  if (eocdOffset === -1) {
-    throw new LuaLSError(
-      "Failed to inspect release archive before extraction: corrupt or invalid zip archive (missing EOCD)",
-      "ERR_LUALS_EXTRACT",
-      "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
-    );
-  }
-
-  const entryCount = buf.readUInt16LE(eocdOffset + 10);
-  const cdOffset = buf.readUInt32LE(eocdOffset + 16);
-
-  let offset = cdOffset;
-  let memberCount = 0;
-  let totalDeclaredSize = 0;
-
-  for (let i = 0; i < entryCount && offset + 46 <= buf.length; i++) {
-    if (buf.readUInt32LE(offset) !== 0x02014b50) {
-      throw new LuaLSError(
-        "Failed to inspect release archive before extraction: invalid central directory header",
-        "ERR_LUALS_EXTRACT",
-        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
-      );
-    }
-
-    const uncompressedSize = buf.readUInt32LE(offset + 24);
-    const fileNameLen = buf.readUInt16LE(offset + 28);
-    const extraLen = buf.readUInt16LE(offset + 30);
-    const commentLen = buf.readUInt16LE(offset + 32);
-    const externalAttributes = buf.readUInt32LE(offset + 38);
-
-    // Check unixMode from the central directory record. Post-extraction lstat verification
-    // on the target binary path provides defense-in-depth against mismatched local headers.
-    const unixMode = (externalAttributes >>> 16) & 0o170000;
-    if (unixMode === 0o120000) {
-      throw new LuaLSError(
-        "Archive member is a symbolic or hard link. Refusing to extract archive-planted links.",
-        "ERR_LUALS_EXTRACT",
-        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
-      );
-    }
-
-    const fileNameStart = offset + 46;
-    const fileNameEnd = fileNameStart + fileNameLen;
-    if (fileNameEnd > buf.length) {
-      throw new LuaLSError(
-        "Failed to inspect release archive before extraction: corrupt file name length in zip",
-        "ERR_LUALS_EXTRACT",
-        "Run 'nanos-lint clean-cache' and verify the LuaLS release integrity.",
-      );
-    }
-
-    const fileName = buf.toString("utf-8", fileNameStart, fileNameEnd);
-    memberCount++;
-    totalDeclaredSize += uncompressedSize;
-    checkEscapedMember(fileName);
-
-    offset += 46 + fileNameLen + extraLen + commentLen;
-  }
-
-  checkArchiveLimits(memberCount, totalDeclaredSize);
-  return { memberCount, totalDeclaredSize };
+  const location = resolveCentralDirectoryLocation(buf, eocdOffset);
+  return walkCentralDirectory(buf, eocdOffset, location);
 }
 
 /** Detects whether an archive file starts with ZIP magic bytes. */

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { gzipSync } from "node:zlib";
+import { crc32, gzipSync } from "node:zlib";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { safeExtractArchive, canExtractZip } from "../../scripts/packaging/verify.js";
 
@@ -55,9 +55,11 @@ describe("safeExtractArchive execution", () => {
 
   function createValidZip(fileName: string, content: Buffer): Buffer {
     const fnBuf = Buffer.from(fileName, "utf-8");
+    const crc = crc32(content);
     const lh = Buffer.alloc(30 + fnBuf.length + content.length);
     lh.writeUInt32LE(0x04034b50, 0);
     lh.writeUInt16LE(20, 4);
+    lh.writeUInt32LE(crc, 14);
     lh.writeUInt32LE(content.length, 18);
     lh.writeUInt32LE(content.length, 22);
     lh.writeUInt16LE(fnBuf.length, 26);
@@ -68,6 +70,7 @@ describe("safeExtractArchive execution", () => {
     ch.writeUInt32LE(0x02014b50, 0);
     ch.writeUInt16LE(20, 4);
     ch.writeUInt16LE(20, 6);
+    ch.writeUInt32LE(crc, 16);
     ch.writeUInt32LE(content.length, 20);
     ch.writeUInt32LE(content.length, 24);
     ch.writeUInt16LE(fnBuf.length, 28);

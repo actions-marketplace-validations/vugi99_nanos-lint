@@ -345,7 +345,10 @@ async function downloadAndPromoteLuaLS(
               ];
         await execFileAsync(getTarBinary(), tarArgs, { cwd: path.dirname(archivePath) });
       } catch (tarErr) {
-        // Fallback for PowerShell Expand-Archive on Windows if tar fails
+        // Fallback for PowerShell Expand-Archive on Windows if tar fails.
+        // `validateArchiveMembers()` reconciled the central directory with the
+        // archive's local file headers before this point, so both extractors see
+        // the same members: retrying only changes which tool reports a failure.
         if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
           await execFileAsync("powershell.exe", [
             "-NoProfile",
