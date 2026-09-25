@@ -9,6 +9,7 @@ import {
   DEFAULT_LOCK_STALE_MS,
   isLockStale,
   releaseFileLock,
+  touchLockFile,
   withFileLock,
   writeAtomicFile,
   writeAtomicFileSync,
@@ -497,4 +498,171 @@ describe.skipIf(!liveTestsEnabled)("concurrent LuaLS installation (#7)", () => {
       copySpy.mockRestore();
     }
   }, 120000);
+});
+
+describe("lock heartbeat (#44)", () => {
+  it("touchLockFile updates createdAt while verifying token ownership", () => {
+    const lockPath = path.join(makeTempDir("nanos-lock-touch-"), "test.lock");
+    fs.writeFileSync(
+      lockPath,
+      JSON.stringify({ pid: process.pid, createdAt: 1000, token: "owner-token" }),
+    );
+
+    expect(touchLockFile(lockPath, "wrong-token")).toBe(false);
+    expect(
+      (JSON.parse(fs.readFileSync(lockPath, "utf-8")) as { createdAt: number }).createdAt,
+    ).toBe(1000);
+
+    expect(
+      touchLockFile(path.join(makeTempDir("nanos-missing-"), "missing.lock"), "owner-token"),
+    ).toBe(false);
+
+    expect(touchLockFile(lockPath, "owner-token")).toBe(true);
+    const updated = JSON.parse(fs.readFileSync(lockPath, "utf-8")) as {
+      createdAt: number;
+      token: string;
+      pid: number;
+    };
+    expect(updated.createdAt).toBeGreaterThan(1000);
+    expect(updated.token).toBe("owner-token");
+    expect(updated.pid).toBe(process.pid);
+  });
+
+  it("advances createdAt via periodic heartbeat while a slow task runs", async () => {
+    const lockPath = path.join(makeTempDir("nanos-lock-heartbeat-"), "heartbeat.lock");
+    let initialCreatedAt = 0;
+    const timestamps: number[] = [];
+
+    await withFileLock(
+      lockPath,
+      async () => {
+        const initialMeta = JSON.parse(fs.readFileSync(lockPath, "utf-8")) as {
+          createdAt: number;
+          token: string;
+        };
+        initialCreatedAt = initialMeta.createdAt;
+
+        for (let i = 0; i < 3; i++) {
+          await delay(35);
+          const meta = JSON.parse(fs.readFileSync(lockPath, "utf-8")) as {
+            createdAt: number;
+            token: string;
+          };
+          timestamps.push(meta.createdAt);
+          expect(meta.token).toBe(initialMeta.token);
+        }
+      },
+      { heartbeatIntervalMs: 20 },
+    );
+
+    expect(timestamps).toHaveLength(3);
+    expect(timestamps[0]).toBeGreaterThan(initialCreatedAt);
+    expect(timestamps[1]).toBeGreaterThan(timestamps[0]!);
+    expect(timestamps[2]).toBeGreaterThan(timestamps[1]!);
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("stops the heartbeat timer cleanly on task completion and failure", async () => {
+    const dir = makeTempDir("nanos-lock-heartbeat-stop-");
+    const lockPath1 = path.join(dir, "complete.lock");
+    const lockPath2 = path.join(dir, "fail.lock");
+
+    const clearSpy = vi.spyOn(globalThis, "clearInterval");
+    try {
+      await withFileLock(
+        lockPath1,
+        async () => {
+          await delay(25);
+        },
+        { heartbeatIntervalMs: 15 },
+      );
+      expect(clearSpy).toHaveBeenCalled();
+      expect(fs.existsSync(lockPath1)).toBe(false);
+
+      const callsAfterSuccess = clearSpy.mock.calls.length;
+
+      await expect(
+        withFileLock(
+          lockPath2,
+          async () => {
+            await delay(25);
+            throw new Error("simulated failure");
+          },
+          { heartbeatIntervalMs: 15 },
+        ),
+      ).rejects.toThrow("simulated failure");
+
+      expect(clearSpy.mock.calls.length).toBeGreaterThan(callsAfterSuccess);
+      expect(fs.existsSync(lockPath2)).toBe(false);
+
+      fs.writeFileSync(
+        lockPath1,
+        JSON.stringify({ pid: process.pid, createdAt: 1000, token: "dummy" }),
+      );
+      await delay(40);
+      const dummyMeta = JSON.parse(fs.readFileSync(lockPath1, "utf-8")) as { createdAt: number };
+      expect(dummyMeta.createdAt).toBe(1000);
+    } finally {
+      clearSpy.mockRestore();
+    }
+  });
+
+  it("postpones stale timeout as long as the heartbeat is beating", async () => {
+    const lockPath = path.join(makeTempDir("nanos-lock-heartbeat-stale-"), "stale.lock");
+    let worker1Finished = false;
+    let worker2StartedWhileWorker1Running = false;
+
+    const worker1 = withFileLock(
+      lockPath,
+      async () => {
+        for (let i = 0; i < 5; i++) {
+          await delay(25);
+          expect(isLockStale(lockPath, 60)).toBe(false);
+        }
+        worker1Finished = true;
+      },
+      { staleMs: 60, heartbeatIntervalMs: 15 },
+    );
+
+    await delay(10);
+
+    const worker2 = withFileLock(
+      lockPath,
+      async () => {
+        if (!worker1Finished) {
+          worker2StartedWhileWorker1Running = true;
+        }
+      },
+      { staleMs: 60, timeoutMs: 3000, pollIntervalMs: 10, reclaimGraceMs: 0 },
+    );
+
+    await Promise.all([worker1, worker2]);
+
+    expect(worker1Finished).toBe(true);
+    expect(worker2StartedWhileWorker1Running).toBe(false);
+  });
+
+  it("proves that without heartbeat the lock becomes stale, but with heartbeat it stays fresh", async () => {
+    const dir = makeTempDir("nanos-lock-compare-");
+    const lockWithoutHeartbeat = path.join(dir, "no-heartbeat.lock");
+    const lockWithHeartbeat = path.join(dir, "heartbeat.lock");
+
+    await withFileLock(
+      lockWithoutHeartbeat,
+      async () => {
+        await delay(80);
+        expect(isLockStale(lockWithoutHeartbeat, 40)).toBe(true);
+      },
+      { staleMs: 40, heartbeatIntervalMs: 0 },
+    );
+
+    await withFileLock(
+      lockWithHeartbeat,
+      async () => {
+        await delay(80);
+        expect(isLockStale(lockWithHeartbeat, 40)).toBe(false);
+      },
+      { staleMs: 40, heartbeatIntervalMs: 10 },
+    );
+  });
 });

@@ -10,6 +10,8 @@ export const DEFAULT_LOCK_STALE_MS = 120_000;
 export const DEFAULT_LOCK_POLL_INTERVAL_MS = 25;
 /** Upper bound for the polling interval, so a long wait stays responsive. */
 const MAX_LOCK_POLL_INTERVAL_MS = 500;
+/** Upper bound for the automatic heartbeat interval, keeping it responsive. */
+const MAX_LOCK_HEARTBEAT_INTERVAL_MS = 15_000;
 /** Default rename attempts used to absorb transient Windows file-lock errors. */
 const DEFAULT_RENAME_RETRIES = 5;
 /**
@@ -34,6 +36,8 @@ export interface FileLockOptions {
   pollIntervalMs?: number;
   /** Human-readable owner description used in log messages. */
   label?: string;
+  /** Heartbeat interval in milliseconds to touch the lock file; defaults to staleMs / 4. */
+  heartbeatIntervalMs?: number;
 }
 
 export interface AtomicWriteOptions {
@@ -262,6 +266,39 @@ export function releaseFileLock(lockPath: string, token: string): void {
   }
 }
 
+/** Refreshes the `createdAt` timestamp of a lock file if the caller still owns it. */
+export function touchLockFile(lockPath: string, token: string): boolean {
+  const metadata = readLockMetadata(lockPath);
+  if (metadata?.token !== token) {
+    logger.debug(`[lock] Cannot touch lock at ${lockPath}: token mismatch or missing lock.`);
+    return false;
+  }
+  try {
+    writeAtomicFileSync(
+      lockPath,
+      JSON.stringify({
+        pid: metadata.pid ?? process.pid,
+        createdAt: Date.now(),
+        token,
+      } satisfies LockMetadata),
+    );
+    return true;
+  } catch (err) {
+    logger.debug(
+      `[lock] Could not touch lock at ${lockPath}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+/** Calculates the default heartbeat interval for a given staleness threshold. */
+function defaultHeartbeatInterval(staleMs: number): number {
+  if (staleMs <= 0) {
+    return 0;
+  }
+  return Math.min(Math.max(1, Math.floor(staleMs / 4)), MAX_LOCK_HEARTBEAT_INTERVAL_MS);
+}
+
 /**
  * Runs `task` while holding an exclusive cross-process lock at `lockPath`, releasing it
  * in a `finally` block. Concurrent callers queue with jittered exponential backoff, so
@@ -273,9 +310,21 @@ export async function withFileLock<T>(
   options: FileLockOptions = {},
 ): Promise<T> {
   const token = await acquireFileLock(lockPath, options);
+  const staleMs = options.staleMs ?? DEFAULT_LOCK_STALE_MS;
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? defaultHeartbeatInterval(staleMs);
+  let heartbeatTimer: NodeJS.Timeout | undefined;
+  if (heartbeatIntervalMs > 0) {
+    heartbeatTimer = setInterval(() => {
+      touchLockFile(lockPath, token);
+    }, heartbeatIntervalMs);
+    heartbeatTimer.unref();
+  }
   try {
     return await task();
   } finally {
+    if (heartbeatTimer !== undefined) {
+      clearInterval(heartbeatTimer);
+    }
     releaseFileLock(lockPath, token);
   }
 }

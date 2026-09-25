@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Periodic lock heartbeat in `withFileLock()` (`src/lock.ts`) for long-running cache extractions and downloads (#44):
+  - Added `heartbeatIntervalMs?: number` to `FileLockOptions`, defaulting to `Math.min(staleMs / 4, 15_000)` (or disabled when `staleMs <= 0`).
+  - Implemented `touchLockFile()` to atomically update the lock file's `createdAt` metadata while validating token ownership.
+  - An unreferenced interval timer refreshes the lock during task execution and cleans up reliably in `finally` upon completion or error.
+  - Added unit tests in `tests/unit/concurrency.test.ts` verifying ownership validation, advancement of `createdAt`, clean timer disposal on success and failure, and postponement of stale lock reclamation.
+
 ### Security
 
 - In `downloadAndExtractLuaLS()` (`src/luals/download.ts`), fail fast when an HTTP redirect targets an untrusted, off-allowlist domain instead of retrying up to three times, log a warning at warn level, and preserve the typed `LuaLSError` with its security remediation instructions.
