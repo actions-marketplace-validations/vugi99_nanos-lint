@@ -84,4 +84,23 @@ describe("transport hardening for package downloads", () => {
     expect(sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(fs.readFileSync(dest)).toEqual(content);
   });
+
+  it("calls cancel() on body when redirect lands on unapproved host", async () => {
+    const dest = path.join(tmpDir, "out.tar.gz");
+    const cancelMock = vi.fn().mockResolvedValue(undefined);
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      url: "https://evil-unapproved.com/archive.tar.gz",
+      headers: new Headers(),
+      body: {
+        cancel: cancelMock,
+      },
+    } as unknown as Response);
+
+    await expect(downloadAssetHardened("https://github.com/initial", dest)).rejects.toThrow(
+      /unapproved host/,
+    );
+    expect(cancelMock).toHaveBeenCalled();
+  });
 });

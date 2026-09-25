@@ -193,33 +193,36 @@ export async function packageRelease(
   }
 }
 
-async function main(): Promise<void> {
-  let tag = process.env.TAG_NAME || "";
-  for (let i = 2; i < process.argv.length; i++) {
-    if (process.argv[i] === "--tag" && process.argv[i + 1]) {
-      tag = process.argv[i + 1]!;
+export function parseCliTag(argv: string[], env: NodeJS.ProcessEnv = process.env): string {
+  let tag = env.TAG_NAME || "";
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--tag" && argv[i + 1]) {
+      tag = argv[i + 1]!;
       i++;
-    } else if (process.argv[i]?.startsWith("--tag=")) {
-      tag = process.argv[i]!.split("=")[1] || "";
+    } else if (argv[i]?.startsWith("--tag=")) {
+      tag = argv[i]!.split("=")[1] || "";
     }
   }
+  return tag;
+}
 
+export async function main(
+  argv: string[] = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const tag = parseCliTag(argv, env);
   if (!tag) {
-    console.error("Error: --tag <name> or TAG_NAME environment variable is required.");
-    process.exit(1);
+    throw new Error("--tag <name> or TAG_NAME environment variable is required.");
   }
-
-  try {
-    await packageRelease(tag);
-  } catch (err) {
-    console.error(
-      `\n[FATAL] Release packaging failed: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    process.exit(1);
-  }
+  await packageRelease(tag);
 }
 
 const isEntry = process.argv[1] && path.resolve(process.argv[1]).endsWith("package-release.ts");
 if (isEntry) {
-  void main();
+  main().catch((err) => {
+    console.error(
+      `\n[FATAL] Release packaging failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    process.exit(1);
+  });
 }
