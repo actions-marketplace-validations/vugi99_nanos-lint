@@ -16,7 +16,6 @@ import {
   limitDownloadStream,
   isAllowedDownloadUrl,
   computeFileSha256,
-  getLegacyCacheDir,
   MAX_DECOMPRESSED_SIZE_BYTES,
   MAX_ARCHIVE_MEMBER_COUNT,
   parseTarTvSize,
@@ -274,58 +273,6 @@ describe("luals utilities", () => {
           expect(findExistingLuaLSDir(FALLBACK_LUALS_VERSION, baseCacheDir)).toBe(expectedDir);
         } finally {
           fs.rmSync(baseCacheDir, { recursive: true, force: true });
-        }
-      },
-    );
-
-    it.skipIf(!liveTestsEnabled)(
-      "returns the legacy cache directory and migrates it into the primary cache",
-      async () => {
-        const version = "9.8.7";
-        const legacyBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-legacy-base-"));
-        const primaryBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-legacy-primary-"));
-        const origLocal = process.env.LOCALAPPDATA;
-        const origXdg = process.env.XDG_CACHE_HOME;
-
-        try {
-          const legacyVersionsDir = path.join(legacyBase, "nanos-lint", "luals");
-          await seedCachedLuaLS(legacyVersionsDir, version);
-          const legacyDir = path.join(legacyVersionsDir, version);
-
-          if (process.platform === "win32") {
-            process.env.LOCALAPPDATA = legacyBase;
-          } else {
-            process.env.XDG_CACHE_HOME = legacyBase;
-          }
-
-          expect(findExistingLuaLSDir(version, primaryBase)).toBe(legacyDir);
-
-          // Migrated into the requested primary cache instead of re-downloaded.
-          const resolved = await resolveLuaLSBinary(version, {
-            quiet: true,
-            cacheDir: primaryBase,
-          });
-          const info = getPlatformInfo(version);
-          const migratedBin = path.join(primaryBase, version, info.binaryRelativePath);
-
-          expect(resolved).toBe(migratedBin);
-          expect(fs.existsSync(migratedBin)).toBe(true);
-          expect(fs.readFileSync(path.join(primaryBase, version, ".complete"), "utf-8")).toBe(
-            version,
-          );
-        } finally {
-          if (origLocal !== undefined) {
-            process.env.LOCALAPPDATA = origLocal;
-          } else {
-            delete process.env.LOCALAPPDATA;
-          }
-          if (origXdg !== undefined) {
-            process.env.XDG_CACHE_HOME = origXdg;
-          } else {
-            delete process.env.XDG_CACHE_HOME;
-          }
-          fs.rmSync(legacyBase, { recursive: true, force: true });
-          fs.rmSync(primaryBase, { recursive: true, force: true });
         }
       },
     );
@@ -625,7 +572,6 @@ describe("luals utilities", () => {
         try {
           const seeded = await seedCachedLuaLS(baseCacheDir, "3.19.1");
           const binary = await resolveLuaLSBinary("3.19.1", {
-            quiet: true,
             cacheDir: baseCacheDir,
           });
           expect(binary).toBe(seeded);
@@ -657,20 +603,16 @@ describe("luals utilities", () => {
 
   describe("downloadAndExtractLuaLS", () => {
     it.skipIf(!isLiveTestsEnabled())(
-      "reuses an existing installation, logs progress when quiet is false, and returns immediately when complete",
+      "reuses an existing installation, returns immediately when complete",
       async () => {
-        const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-quiet-"));
+        const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-download-reuse-"));
         try {
-          const bin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, tempTarget, {
-            quiet: false,
-          });
+          const bin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, tempTarget, {});
           expect(fs.existsSync(bin)).toBe(true);
           expect(fs.existsSync(path.join(tempTarget, ".complete"))).toBe(true);
 
           // Second invocation on an already complete directory returns immediately
-          const bin2 = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, tempTarget, {
-            quiet: false,
-          });
+          const bin2 = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, tempTarget, {});
           expect(bin2).toBe(bin);
         } finally {
           fs.rmSync(tempTarget, { recursive: true, force: true });
@@ -1058,7 +1000,6 @@ describe("luals utilities", () => {
           const targetDir = path.join(linkBase, FALLBACK_LUALS_VERSION);
 
           const bin = await downloadAndExtractLuaLS(FALLBACK_LUALS_VERSION, targetDir, {
-            quiet: true,
             cacheDir: seedBase,
           });
 
@@ -1075,54 +1016,5 @@ describe("luals utilities", () => {
         }
       },
     );
-  });
-
-  describe("getLegacyCacheDir", () => {
-    it("falls back to the home directory cache when no platform base is set", () => {
-      const origLocal = process.env.LOCALAPPDATA;
-      const origXdg = process.env.XDG_CACHE_HOME;
-      try {
-        delete process.env.LOCALAPPDATA;
-        delete process.env.XDG_CACHE_HOME;
-
-        const expectedBase =
-          process.platform === "win32"
-            ? path.join(os.homedir(), "AppData", "Local")
-            : path.join(os.homedir(), ".cache");
-        expect(getLegacyCacheDir("3.19.1")).toBe(
-          path.join(expectedBase, "nanos-lint", "luals", "3.19.1"),
-        );
-      } finally {
-        if (origLocal !== undefined) process.env.LOCALAPPDATA = origLocal;
-        else delete process.env.LOCALAPPDATA;
-        if (origXdg !== undefined) process.env.XDG_CACHE_HOME = origXdg;
-        else delete process.env.XDG_CACHE_HOME;
-      }
-    });
-
-    it("resolves the legacy layout from the platform cache base", () => {
-      const origLocal = process.env.LOCALAPPDATA;
-      const origXdg = process.env.XDG_CACHE_HOME;
-      const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-legacy-env-"));
-      try {
-        if (process.platform === "win32") {
-          process.env.LOCALAPPDATA = tempBase;
-          expect(getLegacyCacheDir("3.19.1")).toBe(
-            path.join(tempBase, "nanos-lint", "luals", "3.19.1"),
-          );
-        } else {
-          process.env.XDG_CACHE_HOME = tempBase;
-          expect(getLegacyCacheDir("3.19.1")).toBe(
-            path.join(tempBase, "nanos-lint", "luals", "3.19.1"),
-          );
-        }
-      } finally {
-        if (origLocal !== undefined) process.env.LOCALAPPDATA = origLocal;
-        else delete process.env.LOCALAPPDATA;
-        if (origXdg !== undefined) process.env.XDG_CACHE_HOME = origXdg;
-        else delete process.env.XDG_CACHE_HOME;
-        fs.rmSync(tempBase, { recursive: true, force: true });
-      }
-    });
   });
 });

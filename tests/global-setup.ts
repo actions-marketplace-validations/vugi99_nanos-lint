@@ -63,11 +63,13 @@ export default async function setup(project?: { config?: { watch?: boolean } }) 
 
   const { resolveLuaLSBinary } = await import("../src/luals.js");
   const { resolveAnnotations } = await import("../src/annotations.js");
+  const { logger } = await import("../src/logger.js");
 
   try {
     // Downloaded here (once) if not already cached; workers then hit the cache.
-    const binary = await resolveLuaLSBinary(undefined, { quiet: true });
-    const annotations = await resolveAnnotations({ quiet: true });
+    logger.setLevel("error");
+    const binary = await resolveLuaLSBinary();
+    const annotations = await resolveAnnotations();
     console.log(
       `[tests] Shared live-test fixtures ready (at most one LuaLS download for this run).\n` +
         `[tests]   cache root:  ${root}\n` +

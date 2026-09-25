@@ -42,7 +42,10 @@ nanos-lint/
 ├── templates/               # Default base .luarc.json template (Lua 5.4, globals)
 ├── src/
 │   ├── types.ts             # Type definitions
-│   ├── config.ts            # Configuration discovery, merging, and init
+│   ├── config.ts            # Configuration discovery, merging, realm mappings, and init
+│   ├── realms.ts            # Realm pass planning and merged realm-aware check runner
+│   ├── annotations-realms.ts # Realm split of upstream annotations.lua and its derivation cache
+│   ├── lock.ts              # Cross-process file locks and atomic file replacement
 │   ├── luals.ts             # Binary download, caching, and execution manager
 │   ├── reporter.ts          # Terminal pretty, JSON, and GitHub Actions annotation formatters
 │   ├── cli.ts               # CLI command-line parser
@@ -50,6 +53,7 @@ nanos-lint/
 ├── tests/
 │   ├── pass/                # Valid nanos world Lua fixtures (must pass with 0 errors)
 │   ├── fail/                # Invalid Lua fixtures (must produce expected diagnostics)
+│   ├── fixtures/            # Realm-aware package fixtures (realms, realms_clean, realms_custom, realms_disabled)
 │   ├── unit/                # Vitest unit tests
 │   ├── integration/         # Vitest integration tests with live LuaLS execution
 │   ├── global-setup.ts      # Vitest global setup: isolated cache + one shared LuaLS download per run
@@ -135,6 +139,7 @@ Whenever preparing or publishing a new tagged release or cutting a new version:
 - **Pre-Release Requirement**: Record and commit the target version number, release date, and comprehensive list of changes in `CHANGELOG.md` before creating or pushing the release tag.
 - **Verify the Release Tag Matches `package.json`**: Confirm the release tag (e.g. `v2.6.1`) matches the `version` field in `package.json`; `.github/workflows/release.yml` enforces this and fails the release on a mismatch.
 - **Update the Action Fallback Version**: Bump the pinned `npx --yes nanos-lint@<version>` fallback version in `action.yml` to the version being released.
+- **Marketplace Publishing for Releases**: GitHub does not provide an API to publish or update actions to GitHub Marketplace automatically, and Marketplace requires full SemVer tags (rejecting floating tags like `v3`). After CI creates the GitHub Release, edit the release in GitHub Web UI and ensure **"Publish this Action to the GitHub Marketplace"** is checked so the Marketplace catalog stays up-to-date.
 
 ---
 
