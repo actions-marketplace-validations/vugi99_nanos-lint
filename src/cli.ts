@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
 import { resolveWorkspaceConfig, initWorkspace, getPackageRoot, loadUserConfig } from "./config.js";
 import { planRealmCheck, runRealmAwareCheck, type RealmSelection } from "./realms.js";
+import { collectDeps, resolvePackageDependencies } from "./deps.js";
 import { resolveAnnotations, readAnnotationsMetadata } from "./annotations.js";
 import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
@@ -54,6 +55,7 @@ interface CheckCommandOptions {
   logLevel?: string;
   github?: boolean;
   ignore?: string[];
+  dep?: string[];
   realm?: RealmSelection;
 }
 
@@ -114,6 +116,11 @@ export function createProgram(options?: CreateProgramOptions): Command {
       collectIgnorePatterns,
     )
     .option(
+      "-d, --dep <path>",
+      "Path to package dependency or Lua definition file (repeatable)",
+      collectDeps,
+    )
+    .option(
       "--luals-version <ver>",
       `Version of LuaLS to use (default: ${DEFAULT_LUALS_VERSION})`,
       DEFAULT_LUALS_VERSION,
@@ -155,6 +162,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
         lualsVersion: opts.lualsVersion,
         failOnError: opts.fail !== false,
         ignore: opts.ignore,
+        deps: opts.dep,
       };
 
       if (opts.config) {
@@ -172,14 +180,16 @@ export function createProgram(options?: CreateProgramOptions): Command {
         customPath: opts.annotations,
       });
 
+      const userConfig = loadUserConfig(rootPath, checkOptions.configpath);
       const realmPlan = planRealmCheck({
         targetPath: rootPath,
-        userConfig: loadUserConfig(rootPath, checkOptions.configpath),
+        userConfig,
         selection: opts.realm ?? "all",
         annotationsPath,
         customConfigPath: checkOptions.configpath,
         ignore: checkOptions.ignore,
         targetPaths: resolvedTargets,
+        cliDeps: checkOptions.deps,
       });
 
       let result;
@@ -190,9 +200,11 @@ export function createProgram(options?: CreateProgramOptions): Command {
           realmPlan.cleanup();
         }
       } else {
+        const resolvedDeps = resolvePackageDependencies(rootPath, userConfig, checkOptions.deps);
         const resolved = resolveWorkspaceConfig(rootPath, checkOptions.configpath, {
           ignore: checkOptions.ignore,
           annotationsPath,
+          dependencyLibraries: resolvedDeps.all,
         });
         try {
           result = await runLuaLSCheck(rootPath, resolved.configPath, checkOptions);

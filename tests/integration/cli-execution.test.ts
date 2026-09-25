@@ -432,4 +432,72 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
       fs.rmSync(annDir, { recursive: true, force: true });
     }
   });
+
+  it("checks a package with dependencies configured via nanos.deps and -d flag", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-pkg-deps-test-"));
+    try {
+      const depPkg = path.join(tempDir, "dep-pkg");
+      fs.mkdirSync(path.join(depPkg, "Shared"), { recursive: true });
+      fs.writeFileSync(
+        path.join(depPkg, "Shared", "dep.lua"),
+        "---@type fun(): void\nDepGlobalFunction = function() end\n",
+        "utf-8",
+      );
+
+      const targetPkg = path.join(tempDir, "target-pkg");
+      fs.mkdirSync(path.join(targetPkg, "Server"), { recursive: true });
+      fs.writeFileSync(
+        path.join(targetPkg, "Server", "server.lua"),
+        "DepGlobalFunction()\n",
+        "utf-8",
+      );
+
+      // Without dependency configured, it should fail with undefined-global
+      try {
+        await execFileAsync(process.execPath, [distCli, "check", targetPkg]);
+        expect.fail("Expected check without dependency to fail with undefined-global");
+      } catch (err: unknown) {
+        const execErr = err as { code?: number; stdout?: string };
+        expect(execErr.code).toBe(1);
+        expect(execErr.stdout).toContain("undefined-global");
+      }
+
+      // With -d flag pointing to dep-pkg, it passes cleanly
+      const { stdout: stdoutFlag } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        targetPkg,
+        "-d",
+        depPkg,
+      ]);
+      expect(stdoutFlag).toMatch(/Diagnosis completed, no problems found/);
+
+      // With nanos.deps configured inside .luarc.json, it passes cleanly
+      fs.writeFileSync(
+        path.join(targetPkg, ".luarc.json"),
+        JSON.stringify({ nanos: { deps: ["../dep-pkg"] } }, null, 2),
+        "utf-8",
+      );
+
+      const { stdout: stdoutConfig } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        targetPkg,
+      ]);
+      expect(stdoutConfig).toMatch(/Diagnosis completed, no problems found/);
+
+      // Missing dependency logs warning and does not crash
+      const { stdout: stdoutWarn, stderr: stderrWarn } = await execFileAsync(process.execPath, [
+        distCli,
+        "check",
+        targetPkg,
+        "-d",
+        path.join(tempDir, "missing-dep"),
+      ]);
+      expect(stdoutWarn).toMatch(/Diagnosis completed, no problems found/);
+      expect(stderrWarn).toContain("Dependency path not found");
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });

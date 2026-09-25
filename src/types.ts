@@ -35,6 +35,7 @@ export interface CheckOptions {
   failOnError?: boolean;
   lualsBin?: string;
   ignore?: string[];
+  deps?: string[];
 }
 
 export interface CheckResult {
@@ -54,6 +55,8 @@ export type RealmName = "client" | "server" | "shared" | "global";
 export interface NanosConfig {
   /** Maps glob patterns (relative to the checked root) to realm names. */
   realms?: Record<string, RealmName>;
+  /** Package dependency paths or definition files. */
+  deps?: string[];
   [key: string]: unknown;
 }
 

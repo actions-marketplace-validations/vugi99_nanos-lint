@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Support for package dependencies via `nanos.deps` in `.luarc.json` and `-d, --dep <path>` CLI option (#47):
+  - Added repeatable `-d, --dep <path>` CLI option to `check` command, supporting package directories and single `.lua` definition files.
+  - Added support for `nanos.deps` array in `.luarc.json` to declare dependencies relative to package configuration files.
+  - Implemented `src/deps.ts` resolving transitive package dependencies with cycle detection.
+  - Partitioned resolved dependency libraries across realm passes: server pass receives `Server/`, `Shared/`, and root `.lua` files; client pass receives `Client/`, `Shared/`, and root `.lua` files; shared pass receives `Shared/` and root `.lua` files. When realms are disabled, all dependency paths are supplied to the single standard pass.
+  - Non-existent dependency paths emit a non-fatal warning (`logger.warn`) and are skipped without failing the check or contributing to problem counts.
+  - Added unit tests in `tests/unit/deps.test.ts` and `tests/unit/cli.test.ts`, and live integration test in `tests/integration/cli-execution.test.ts`.
+
 ## [3.0.1] - 2026-09-25
 
 ### Added

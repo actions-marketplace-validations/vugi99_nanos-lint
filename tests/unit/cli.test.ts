@@ -762,6 +762,49 @@ describe("cli module flag and command parsing", () => {
       }
     });
 
+    it("passes repeatable -d and --dep options to planRealmCheck", async () => {
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const cleanup = vi.fn();
+      const plan = {
+        baseConfigPath: "/mock/base.json",
+        passes: [],
+        cleanup,
+      };
+      const planSpy = vi.spyOn(realmsModule, "planRealmCheck").mockReturnValue(plan);
+      const realmRunSpy = vi.spyOn(realmsModule, "runRealmAwareCheck").mockResolvedValue({
+        passed: true,
+        totalProblems: 0,
+        totalFiles: 1,
+        diagnostics: {},
+      });
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      try {
+        const code = await runCLI([
+          "check",
+          "tests/fixtures/realms",
+          "-d",
+          "../pkgA",
+          "--dep",
+          "../pkgB/types.lua",
+        ]);
+        expect(code).toBe(0);
+        expect(planSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            cliDeps: ["../pkgA", "../pkgB/types.lua"],
+          }),
+        );
+        expect(cleanup).toHaveBeenCalledTimes(1);
+      } finally {
+        annotSpy.mockRestore();
+        planSpy.mockRestore();
+        realmRunSpy.mockRestore();
+        logSpy.mockRestore();
+      }
+    });
+
     it("errors when any variadic path does not exist", async () => {
       const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
       try {

@@ -11,6 +11,7 @@ import { deriveRealmAnnotationFiles, type RealmPassName } from "./annotations-re
 import { logger } from "./logger.js";
 import { listCheckedFiles, runLuaLSCheck } from "./luals.js";
 import { matchesTargetPaths } from "./target-resolver.js";
+import { resolvePackageDependencies } from "./deps.js";
 import {
   fileUriToPath,
   type CheckOptions,
@@ -116,6 +117,7 @@ export interface PlanRealmCheckOptions {
   customConfigPath?: string;
   ignore?: string[];
   targetPaths?: string[];
+  cliDeps?: string[];
 }
 
 /** Returns the passes selected by `--realm`, always pairing a side with the shared pass. */
@@ -136,6 +138,7 @@ function buildPassConfig(
   annotationsPath: string,
   realmAnnotationPath: string,
   excludedPatterns: string[],
+  dependencyLibraries: string[] = [],
 ): Record<string, unknown> {
   const config = JSON.parse(JSON.stringify(baseConfig)) as {
     workspace?: { library?: string[] };
@@ -147,7 +150,7 @@ function buildPassConfig(
   );
   config.workspace = {
     ...(config.workspace ?? {}),
-    library: [realmAnnotationPath, ...libraries],
+    library: Array.from(new Set([realmAnnotationPath, ...libraries, ...dependencyLibraries])),
   };
   if (realm !== "shared" && excludedPatterns.length > 0) {
     config.files = {
@@ -227,17 +230,25 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
     const derived = needsSplitLibraries
       ? deriveRealmAnnotationFiles(annotationsPath)
       : { client: annotationsPath, server: annotationsPath };
+    const resolvedDeps = resolvePackageDependencies(resolvedTarget, userConfig, options.cliDeps);
     const passes: RealmPass[] = [];
     for (const realm of wanted) {
       const excluded = mappings
         .filter((mapping) => mapping.realm !== realm && mapping.realm !== "shared")
         .map((mapping) => mapping.pattern);
+      const depLibraries =
+        realm === "server"
+          ? resolvedDeps.server
+          : realm === "client"
+            ? resolvedDeps.client
+            : resolvedDeps.shared;
       const passConfig = buildPassConfig(
         baseConfig as unknown as Record<string, unknown>,
         realm,
         annotationsPath,
         realm === "client" ? derived.client : realm === "server" ? derived.server : annotationsPath,
         excluded,
+        depLibraries,
       );
       const configPath = writeTempConfig(passConfig);
       tempConfigs.push(configPath);
