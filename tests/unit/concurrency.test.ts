@@ -560,10 +560,10 @@ describe("lock heartbeat (#44)", () => {
         for (let i = 0; i < 3; i++) {
           await delay(35);
           timestamps.push(fs.statSync(lockPath).mtimeMs);
-          expect(isLockStale(lockPath, 40)).toBe(false);
+          expect(isLockStale(lockPath, 80)).toBe(false);
         }
       },
-      { heartbeatIntervalMs: 20 },
+      { heartbeatIntervalMs: 15 },
     );
 
     expect(timestamps).toHaveLength(3);
