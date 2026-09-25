@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { validateArchiveMembers } from "../../src/luals/validation.js";
+import { hasBinary, canExtractZip } from "../../scripts/packaging/verify.js";
 
 describe("archive member validation before extraction", () => {
   let tmpDir: string;
@@ -113,5 +114,11 @@ describe("archive member validation before extraction", () => {
     await expect(validateArchiveMembers(archivePath)).rejects.toThrow(
       /corrupt or invalid zip archive/,
     );
+  });
+
+  it("detects system binaries with hasBinary and checks canExtractZip", () => {
+    expect(hasBinary("node")).toBe(true);
+    expect(hasBinary("nonexistent-tool-xyz-123")).toBe(false);
+    expect(typeof canExtractZip()).toBe("boolean");
   });
 });

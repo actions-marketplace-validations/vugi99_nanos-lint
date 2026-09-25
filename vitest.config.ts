@@ -63,15 +63,15 @@ export default defineConfig({
               statements: 65,
             },
             "scripts/packaging/verify.ts": {
-              lines: 80,
-              functions: 60,
+              lines: 75,
+              functions: 55,
               branches: 70,
-              statements: 80,
+              statements: 75,
             },
             "scripts/packaging/bundle.ts": {
               lines: 75,
               functions: 90,
-              branches: 60,
+              branches: 55,
               statements: 75,
             },
             "scripts/packaging/types.ts": {

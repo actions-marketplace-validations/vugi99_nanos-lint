@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { gzipSync } from "node:zlib";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { safeExtractArchive } from "../../scripts/packaging/verify.js";
+import { safeExtractArchive, canExtractZip } from "../../scripts/packaging/verify.js";
 
 describe("safeExtractArchive execution", () => {
   let tmpDir: string;
@@ -101,7 +101,7 @@ describe("safeExtractArchive execution", () => {
     expect(fs.readFileSync(path.join(targetDir, "hello.txt"))).toEqual(payload);
   });
 
-  it("extracts a valid zip archive cleanly", async () => {
+  it.skipIf(!canExtractZip())("extracts a valid zip archive cleanly", async () => {
     const archivePath = path.join(tmpDir, "sample.zip");
     const targetDir = path.join(tmpDir, "extracted-zip");
     const payload = Buffer.from("zip member content");

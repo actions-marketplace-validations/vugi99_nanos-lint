@@ -7,6 +7,7 @@ import {
   assemblePackageDir,
   createReleaseArchive,
   verifyReleaseArchive,
+  canCreateZip,
 } from "../../scripts/packaging/bundle.js";
 import { PACKAGE_TARGETS } from "../../scripts/packaging/types.js";
 
@@ -113,16 +114,26 @@ describe("bundle and launcher operations", () => {
     ).toThrow(/required LuaLS asset 'meta' is missing/);
   });
 
-  it("createReleaseArchive packages and verifyReleaseArchive validates members", async () => {
-    const pkgDir = path.join(tmpDir, "test-pkg");
+  it.skipIf(!canCreateZip())(
+    "createReleaseArchive packages and verifyReleaseArchive validates zip members",
+    async () => {
+      const pkgDir = path.join(tmpDir, "test-pkg-zip");
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(path.join(pkgDir, "file1.txt"), "content1");
+      fs.writeFileSync(path.join(pkgDir, "file2.txt"), "content2");
+
+      const zipOut = path.join(tmpDir, "output.zip");
+      await createReleaseArchive(pkgDir, zipOut, "zip");
+      expect(fs.existsSync(zipOut)).toBe(true);
+      await expect(verifyReleaseArchive(zipOut)).resolves.not.toThrow();
+    },
+  );
+
+  it("createReleaseArchive packages and verifyReleaseArchive validates tar.gz members", async () => {
+    const pkgDir = path.join(tmpDir, "test-pkg-tar");
     fs.mkdirSync(pkgDir, { recursive: true });
     fs.writeFileSync(path.join(pkgDir, "file1.txt"), "content1");
     fs.writeFileSync(path.join(pkgDir, "file2.txt"), "content2");
-
-    const zipOut = path.join(tmpDir, "output.zip");
-    await createReleaseArchive(pkgDir, zipOut, "zip");
-    expect(fs.existsSync(zipOut)).toBe(true);
-    await expect(verifyReleaseArchive(zipOut)).resolves.not.toThrow();
 
     const tarOut = path.join(tmpDir, "output.tar.gz");
     await createReleaseArchive(pkgDir, tarOut, "tar.gz");

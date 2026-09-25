@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -20,6 +20,20 @@ import {
 import type { TargetArchitecture } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+
+export function hasBinary(name: string): boolean {
+  try {
+    const checker = process.platform === "win32" ? "where" : "which";
+    execFileSync(checker, [name], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function canExtractZip(): boolean {
+  return process.platform === "win32" || hasBinary("unzip");
+}
 
 export function inspectBinaryArch(buf: Buffer): string {
   if (buf.length > 20 && buf.readUInt32BE(0) === 0x7f454c46) {
@@ -249,16 +263,18 @@ export async function safeExtractArchive(archivePath: string, targetDir: string)
     }
   } else {
     if (isZip) {
+      if (!hasBinary("unzip")) {
+        throw new Error(
+          `Failed to extract zip archive '${archivePath}': 'unzip' utility is required on POSIX systems but was not found in PATH`,
+        );
+      }
       try {
         await execFileAsync("unzip", ["-q", "-o", path.resolve(archivePath), "-d", targetDir]);
       } catch (err) {
-        try {
-          await execFileAsync("tar", ["-xf", path.resolve(archivePath), "-C", targetDir]);
-        } catch {
-          throw new Error(
-            `Failed to extract zip archive '${archivePath}': neither 'unzip' nor 'tar' could extract it: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+        throw new Error(
+          `Failed to extract zip archive '${archivePath}' with unzip: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
       }
     } else {
       await execFileAsync("tar", [

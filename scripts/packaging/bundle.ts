@@ -4,8 +4,13 @@ import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { getTarBinary } from "../../src/luals/validation.js";
 import type { PackageTargetConfig, TargetOs } from "./types.js";
+import { hasBinary } from "./verify.js";
 
 const execFileAsync = promisify(execFile);
+
+export function canCreateZip(): boolean {
+  return process.platform === "win32" || hasBinary("zip");
+}
 
 export function createLauncher(pkgDir: string, os: TargetOs): string {
   if (os === "windows") {
@@ -108,16 +113,18 @@ export async function createReleaseArchive(
         ]);
       }
     } else {
+      if (!hasBinary("zip")) {
+        throw new Error(
+          `Failed to create zip archive '${outputFile}': 'zip' utility is required on POSIX systems but was not found in PATH`,
+        );
+      }
       try {
         await execFileAsync("zip", ["-rq", resolvedOut, "."], { cwd: pkgDir });
       } catch (err) {
-        try {
-          await execFileAsync("tar", ["-acf", resolvedOut, "."], { cwd: pkgDir });
-        } catch {
-          throw new Error(
-            `Failed to create zip archive '${outputFile}': neither 'zip' nor 'tar' could package it: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+        throw new Error(
+          `Failed to create zip archive '${outputFile}' with zip: ${err instanceof Error ? err.message : String(err)}`,
+          { cause: err },
+        );
       }
     }
   } else {

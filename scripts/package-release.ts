@@ -183,10 +183,6 @@ export async function packageRelease(
       if (fs.existsSync(workDir)) {
         fs.rmSync(workDir, { recursive: true, force: true });
       }
-      const leftoverRootAnnotations = path.join(repoRoot, "annotations.lua");
-      if (fs.existsSync(leftoverRootAnnotations)) {
-        fs.unlinkSync(leftoverRootAnnotations);
-      }
     } catch (err) {
       void err;
     }
