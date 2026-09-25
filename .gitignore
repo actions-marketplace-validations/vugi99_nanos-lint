@@ -9,4 +9,6 @@ Thumbs.db
 *.tmp
 temp/
 coverage/
-
+release-builds/
+.package-release-tmp/
+pkg-*/
