@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-25
+
 ### Added
 
 - Support for package dependencies via `nanos.deps` in `.luarc.json` and `-d, --dep <path>` CLI option (#47):
@@ -41,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Emitted a warning (`logger.warn`) when a requested realm filter matches no target files before falling back to a standard check.
 - Hardened the cross-process lock heartbeat test margins (1000 ms hold, 500 ms staleness, 100 ms heartbeat) so a stalled Windows runner cannot falsely reclaim a live lock; a disabled heartbeat still fails the test (#49).
 - Replaced regex trailing slash removal with index-based scanning in `src/target-resolver.ts` to prevent polynomial ReDoS CodeQL warnings (`js/polynomial-redos`).
+
+### Security
+
+- Dropped security support for versions < 3.1.0 in SECURITY.md.
 
 ## [3.0.1] - 2026-09-25
 
