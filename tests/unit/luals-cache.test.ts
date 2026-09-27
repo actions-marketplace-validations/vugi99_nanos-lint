@@ -263,6 +263,33 @@ describe("LuaLS weekly cache check and version management", () => {
         globalThis.fetch = origFetch;
       }
     });
+
+    it("refuses a release-lookup redirect to an untrusted host", async () => {
+      const origFetch = globalThis.fetch;
+      const contacted: string[] = [];
+      const fetchSpy = vi.fn().mockImplementation((input: string | URL | Request) => {
+        contacted.push(typeof input === "string" ? input : input.toString());
+        return Promise.resolve({
+          ok: false,
+          status: 302,
+          headers: new Headers({ location: "https://evil.example/releases/latest" }),
+        });
+      });
+      globalThis.fetch = fetchSpy;
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        expect(await fetchLatestLuaLSVersionFromGitHub()).toBeNull();
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(contacted).not.toContain("https://evil.example/releases/latest");
+        expect(warnSpy.mock.calls.map((call) => call.join(" ")).join("\n")).toContain(
+          "allowlisted GitHub infrastructure",
+        );
+      } finally {
+        warnSpy.mockRestore();
+        globalThis.fetch = origFetch;
+      }
+    });
   });
 
   describe.skipIf(!liveTestsEnabled)("resolveLuaLSBinary weekly caching behavior", () => {

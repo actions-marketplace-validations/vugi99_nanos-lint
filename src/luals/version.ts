@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
 import { LuaLSError } from "../errors.js";
+import { guardedFetch } from "../download-guard.js";
 
 export const FALLBACK_LUALS_VERSION = "3.19.1";
 export const DEFAULT_LUALS_VERSION = "latest";
@@ -55,13 +56,22 @@ export async function fetchLatestLuaLSVersionFromGitHub(): Promise<string | null
     if (process.env.GITHUB_TOKEN) {
       headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
     }
-    const res = await fetch(
+    const result = await guardedFetch(
       "https://api.github.com/repos/LuaLS/lua-language-server/releases/latest",
       {
         headers,
         signal: AbortSignal.timeout(5000),
       },
     );
+    if (!result.ok || !result.response) {
+      if (result.reason && result.reason !== "network-error") {
+        logger.warn(
+          `[luals] Refused LuaLS release lookup: requests must stay on allowlisted GitHub infrastructure over HTTPS (${result.url ?? "unknown URL"}).`,
+        );
+      }
+      return null;
+    }
+    const res = result.response;
     if (res.ok) {
       const data = (await res.json()) as { tag_name?: string };
       // The response body is untrusted input: only use it when it is a valid tag.

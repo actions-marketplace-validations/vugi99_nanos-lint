@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `src/download-guard.ts` with the shared outbound transfer policy: `isAllowedDownloadUrl()`, `guardedFetch()` and `cancelResponseBody()`. `guardedFetch()` resolves redirects hop by hop in `redirect: "manual"` mode, so each hop is validated against the HTTPS + GitHub allowlist before it is ever contacted, and it also refuses a 3xx without a `Location` header, a redirect chain longer than `MAX_REDIRECT_HOPS`, and a final response that left the allowlist.
+- Added `tests/unit/download-guard.test.ts` covering off-host redirects, plaintext `http://` downgrades, internal/link-local targets, hop exhaustion, unusable or missing `Location` headers, opaque redirects and transport failures.
+
+### Changed
+
+- The download allowlist (`ALLOWED_DOWNLOAD_DOMAINS`, `isAllowedDownloadUrl()`) now lives in `src/download-guard.ts` and is re-exported from `src/luals/download.ts`, so the policy has a single definition while the existing public API is unchanged.
+
+### Fixed
+
+- `fetchRawAnnotationsContent()` now validates every redirect hop and the final response URL against the allowlist instead of relying on the default `redirect: "follow"`, which contacted the redirect target before any check could run. A refused redirect fails fast with `ERR_ANNOTATIONS_DOWNLOAD`, a remedy naming the refused redirect, and a `logger.warn` visible at the default log level.
+- `fetchLatestCommitId()` and `fetchLatestLuaLSVersionFromGitHub()` no longer follow redirects unchecked; both refuse an off-allowlist redirect (warning and returning `null`) so the documented transport policy covers every outbound request, not only requests that end in a file write.
+- A blocked annotations redirect can no longer poison the cache: the refused body is cancelled and neither `annotations.lua` nor `metadata.json` is rewritten, so the previously cached annotations and commit pin survive.
+
+### Security
+
+- Applied the documented _Strict Protocol and Host Allowlisting_ policy (`SECURITY.md`) to the runtime annotations download. Previously a redirect to any host — including a plaintext `http://` address or an internal/link-local one — was followed silently and the response body was cached as the user's type-definition source.
+
 ## [3.1.0] - 2026-09-25
 
 ### Added
