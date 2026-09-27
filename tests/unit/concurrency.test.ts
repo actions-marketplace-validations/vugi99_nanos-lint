@@ -783,19 +783,30 @@ describe("lock heartbeat (#44)", () => {
     const lockPath = path.join(makeTempDir("nanos-lock-heartbeat-stale-"), "stale.lock");
     let worker1Finished = false;
     let worker2StartedWhileWorker1Running = false;
+    let liveEvaluations = 0;
 
+    // Worker 2 evaluates the lock's liveness through `fs.statSync`; count only its reads
+    // so the heartbeat's internal stats cannot inflate the tally.
+    const originalStatSync = fs.statSync;
+    const statSpy = vi.spyOn(fs, "statSync").mockImplementation(((target: fs.PathLike, ...rest) => {
+      if (!worker1Finished && String(target) === lockPath) {
+        liveEvaluations += 1;
+      }
+      return (originalStatSync as (...args: unknown[]) => fs.Stats)(target, ...rest);
+    }) as typeof fs.statSync);
+
+    // The heartbeat must outpace the staleness threshold by a wide margin, and worker 1
+    // must outlast that threshold: otherwise worker 2 simply waits for the release and
+    // never has to judge the lock stale at all, which would make this test vacuous.
+    const staleMs = 300;
     const worker1 = withFileLock(
       lockPath,
       async () => {
-        for (let i = 0; i < 5; i++) {
-          await delay(25);
-          expect(isLockStale(lockPath, 60)).toBe(false);
-        }
+        await delay(700);
         worker1Finished = true;
       },
-      { staleMs: 60, heartbeatIntervalMs: 15 },
+      { staleMs, heartbeatIntervalMs: 15 },
     );
-
     await delay(10);
 
     const worker2 = withFileLock(
@@ -805,11 +816,22 @@ describe("lock heartbeat (#44)", () => {
           worker2StartedWhileWorker1Running = true;
         }
       },
-      { staleMs: 60, timeoutMs: 3000, pollIntervalMs: 10, reclaimGraceMs: 0 },
+      { staleMs, timeoutMs: 5000, pollIntervalMs: 10, reclaimGraceMs: 0 },
     );
 
-    await Promise.all([worker1, worker2]);
+    // Both workers run concurrently: worker 2 polls the held lock while worker 1 beats,
+    // so it can only enter after worker 1 releases. The staleness verdict is deliberately
+    // not asserted from inside worker 1's task — that measures the runner's punctuality,
+    // not the heartbeat. Fault injection still fails here: with the heartbeat disabled
+    // the lock is stale at 300ms, which worker 2 observes while worker 1 is still inside
+    // its task, so it reclaims the lock and the final assertion fails.
+    try {
+      await Promise.all([worker1, worker2]);
+    } finally {
+      statSpy.mockRestore();
+    }
 
+    expect(liveEvaluations).toBeGreaterThan(0);
     expect(worker1Finished).toBe(true);
     expect(worker2StartedWhileWorker1Running).toBe(false);
   });
