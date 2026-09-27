@@ -49,7 +49,53 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** The unpatched clock, captured before any test can freeze `Date.now()`. */
+const realNow = Date.now;
+
+/**
+ * Freezes `Date.now()` at `instant` for the duration of `body`, so every freshness
+ * read happens at one instant instead of drifting with real elapsed time.
+ */
+async function withFrozenClock(instant: number, body: () => Promise<void> | void): Promise<void> {
+  (Date as unknown as { now: () => number }).now = () => instant;
+  try {
+    await body();
+  } finally {
+    (Date as unknown as { now: () => number }).now = realNow;
+  }
+}
+
+/** Backdates a lock's metadata and mtime to `instant`, so only a heartbeat can refresh it. */
+function backdateLock(lockPath: string, instant: number): void {
+  const token = (JSON.parse(fs.readFileSync(lockPath, "utf-8")) as { token: string }).token;
+  fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, createdAt: instant, token }));
+  fs.utimesSync(lockPath, new Date(instant), new Date(instant));
+}
+
+/** Captures the heartbeat callback `withFileLock()` registers, plus a restore handle. */
+function captureHeartbeat(): { tick: () => void; restore: () => void } {
+  const realSetInterval = globalThis.setInterval;
+  let captured: (() => void) | null = null;
+  const spy = vi.spyOn(globalThis, "setInterval").mockImplementation(((
+    fn: () => void,
+    ms?: number,
+  ) => {
+    captured = fn;
+    return realSetInterval(fn, ms);
+  }) as typeof setInterval);
+  return {
+    tick: () => {
+      if (captured === null) {
+        throw new Error("withFileLock did not register a heartbeat interval");
+      }
+      captured();
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
+
 afterEach(() => {
+  (Date as unknown as { now: () => number }).now = realNow;
   for (const dir of tempDirs.splice(0)) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -549,27 +595,59 @@ describe("lock heartbeat (#44)", () => {
 
   it("advances mtime via periodic heartbeat while a slow task runs", async () => {
     const lockPath = path.join(makeTempDir("nanos-lock-heartbeat-"), "heartbeat.lock");
-    let initialMtimeMs = 0;
-    const timestamps: number[] = [];
+    const heartbeat = captureHeartbeat();
+    const created = realNow();
 
-    await withFileLock(
-      lockPath,
-      async () => {
-        initialMtimeMs = fs.statSync(lockPath).mtimeMs;
+    try {
+      await withFileLock(
+        lockPath,
+        async () => {
+          await withFrozenClock(created, () => {
+            // Backdate both inputs of `Math.max(createdAt, mtime)`, so the lock can only
+            // look fresh because a heartbeat rewrote mtime.
+            backdateLock(lockPath, created - 10_000);
+            expect(isLockStale(lockPath, 80)).toBe(true);
 
-        for (let i = 0; i < 3; i++) {
-          await delay(35);
-          timestamps.push(fs.statSync(lockPath).mtimeMs);
-          expect(isLockStale(lockPath, 80)).toBe(false);
-        }
-      },
-      { heartbeatIntervalMs: 15 },
-    );
+            const initialMtimeMs = fs.statSync(lockPath).mtimeMs;
+            // Two ticks stand in for "the heartbeat fires while a slow task runs"; the
+            // clock is frozen, so this asserts the heartbeat refreshes a genuinely stale
+            // lock rather than that the runner happened to schedule a timer promptly.
+            heartbeat.tick();
+            heartbeat.tick();
 
-    expect(timestamps).toHaveLength(3);
-    expect(timestamps[0]).toBeGreaterThan(initialMtimeMs);
-    expect(timestamps[1]).toBeGreaterThan(timestamps[0]!);
-    expect(timestamps[2]).toBeGreaterThan(timestamps[1]!);
+            const timestamps = [initialMtimeMs, fs.statSync(lockPath).mtimeMs];
+            expect(timestamps[1]).toBeGreaterThan(timestamps[0]!);
+            expect(isLockStale(lockPath, 80)).toBe(false);
+          });
+        },
+        { heartbeatIntervalMs: 15 },
+      );
+    } finally {
+      heartbeat.restore();
+    }
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("keeps touching the lock on a real interval while a slow task runs", async () => {
+    const lockPath = path.join(makeTempDir("nanos-lock-heartbeat-real-"), "real.lock");
+    const utimesSpy = vi.spyOn(fs, "utimesSync");
+
+    try {
+      await withFileLock(
+        lockPath,
+        async () => {
+          await delay(150);
+        },
+        { heartbeatIntervalMs: 15 },
+      );
+
+      // The contract on real timers: the heartbeat fires repeatedly, not how punctually.
+      expect(utimesSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      utimesSpy.mockRestore();
+    }
+
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
