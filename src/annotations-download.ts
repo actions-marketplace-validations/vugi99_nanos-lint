@@ -4,6 +4,12 @@ import { logger } from "./logger.js";
 import { AnnotationsError } from "./errors.js";
 import { withFileLock, writeAtomicFile } from "./lock.js";
 import {
+  guardedFetch,
+  parseDeclaredContentLength,
+  type GuardedFetchResult,
+} from "./download-guard.js";
+import { createProgressBar, formatTransferSummary } from "./terminal-progress.js";
+import {
   ANNOTATIONS_FILENAME,
   METADATA_FILENAME,
   MIN_ANNOTATIONS_SIZE_BYTES,
@@ -28,6 +34,7 @@ async function readBoundedResponseBody(
   res: Response,
   maxBytes: number,
   onExceeded: (bytes: number, reason: "header" | "stream") => never | void,
+  onProgress?: (transferred: number) => void,
 ): Promise<string | null> {
   const lengthHeader = res.headers?.get?.("content-length");
   if (lengthHeader) {
@@ -58,6 +65,7 @@ async function readBoundedResponseBody(
         onExceeded(total, "stream");
         return null;
       }
+      onProgress?.(total);
       chunks.push(buf);
     }
     return Buffer.concat(chunks).toString("utf-8");
@@ -76,6 +84,45 @@ async function readBoundedResponseBody(
   return "";
 }
 
+/**
+ * Resolves a request through the download guard, which refuses an off-allowlist request URL,
+ * an off-allowlist redirect hop and an off-allowlist final response URL, releasing the body of
+ * every refused response instead of downloading it.
+ */
+async function resolveGuardedResponse(
+  url: string,
+  init: RequestInit,
+): Promise<{ res: Response } | { block: GuardedFetchResult }> {
+  const result = await guardedFetch(url, init);
+  if (result.ok && result.response) {
+    return { res: result.response };
+  }
+  return { block: result };
+}
+
+/** Builds the user-facing error for a request refused by the download transport policy. */
+function downloadBlockError(result: GuardedFetchResult): AnnotationsError {
+  if (result.reason === "network-error") {
+    return new AnnotationsError(
+      `Failed to download annotations.lua: ${result.error instanceof Error ? result.error.message : String(result.error)}`,
+      "ERR_ANNOTATIONS_DOWNLOAD",
+      "Verify your internet connection and that GitHub raw endpoints are accessible.",
+      { cause: result.error },
+    );
+  }
+  const detail =
+    result.reason === "too-many-redirects"
+      ? "Redirect chain too long"
+      : result.reason === "missing-location"
+        ? "Redirect without a usable target"
+        : "Redirect blocked";
+  return new AnnotationsError(
+    `${detail}: requests must stay on allowlisted GitHub infrastructure over HTTPS (${result.url ?? "unknown URL"})`,
+    "ERR_ANNOTATIONS_DOWNLOAD",
+    "Verify that no proxy or DNS override redirects GitHub traffic to another host or to plaintext http://.",
+  );
+}
+
 /** Fetches the latest commit SHA for the annotations branch from the GitHub API. */
 export async function fetchLatestCommitId(): Promise<string | null> {
   try {
@@ -83,10 +130,17 @@ export async function fetchLatestCommitId(): Promise<string | null> {
     if (process.env.GITHUB_TOKEN) {
       headers["Authorization"] = `token ${process.env.GITHUB_TOKEN}`;
     }
-    const res = await fetch(GITHUB_COMMITS_API, {
+    const outcome = await resolveGuardedResponse(GITHUB_COMMITS_API, {
       headers,
       signal: AbortSignal.timeout(5000),
     });
+    if ("block" in outcome) {
+      if (outcome.block.reason !== "network-error") {
+        logger.warn(`[annotations] ${downloadBlockError(outcome.block).message}`);
+      }
+      return null;
+    }
+    const { res } = outcome;
     if (res.ok) {
       const rawJson = await readBoundedResponseBody(res, MAX_COMMIT_JSON_SIZE_BYTES, (bytes) => {
         logger.warn(
@@ -130,10 +184,16 @@ export function getRawAnnotationsUrl(commitSha?: string): string {
 /** Downloads raw annotations.lua content from GitHub raw content endpoints. */
 export async function fetchRawAnnotationsContent(commitSha?: string): Promise<string> {
   const url = getRawAnnotationsUrl(commitSha);
-  const res = await fetch(url, {
+  const outcome = await resolveGuardedResponse(url, {
     headers: { "User-Agent": "nanos-lint" },
     signal: AbortSignal.timeout(15000),
   });
+  if ("block" in outcome) {
+    const blockError = downloadBlockError(outcome.block);
+    logger.warn(`[annotations] ${blockError.message}`);
+    throw blockError;
+  }
+  const { res } = outcome;
   if (!res.ok) {
     throw new AnnotationsError(
       `Failed to download annotations.lua: ${res.status} ${res.statusText}`,
@@ -142,25 +202,53 @@ export async function fetchRawAnnotationsContent(commitSha?: string): Promise<st
     );
   }
 
-  const text = await readBoundedResponseBody(res, MAX_ANNOTATIONS_SIZE_BYTES, (bytes, reason) => {
-    const msg =
-      reason === "header"
-        ? `Annotations file size (${bytes} bytes) exceeds maximum limit (${MAX_ANNOTATIONS_SIZE_BYTES} bytes)`
-        : `Annotations file download exceeded maximum allowed size of ${MAX_ANNOTATIONS_SIZE_BYTES} bytes`;
-    throw new AnnotationsError(
-      msg,
-      "ERR_ANNOTATIONS_TOO_LARGE",
-      "Specify a local annotations file via --annotations <path>.",
-    );
+  const declaredTotal = parseDeclaredContentLength(res);
+  const startedAt = Date.now();
+  let transferred = 0;
+  const commitLabel = commitSha ? ` (${commitSha.slice(0, 7)})` : "";
+  const progress = createProgressBar({
+    label: `[annotations] Downloading ${ANNOTATIONS_FILENAME}${commitLabel}`,
+    total: declaredTotal,
+    announce: false,
   });
 
-  if (!text || text.length < MIN_ANNOTATIONS_SIZE_BYTES) {
-    throw new AnnotationsError(
-      "Downloaded annotations.lua appears truncated or invalid",
-      "ERR_ANNOTATIONS_INVALID",
-      "Retry downloading or pass a local annotations file via --annotations <path>.",
+  let text: string | null;
+  try {
+    text = await readBoundedResponseBody(
+      res,
+      MAX_ANNOTATIONS_SIZE_BYTES,
+      (bytes, reason) => {
+        const msg =
+          reason === "header"
+            ? `Annotations file size (${bytes} bytes) exceeds maximum limit (${MAX_ANNOTATIONS_SIZE_BYTES} bytes)`
+            : `Annotations file download exceeded maximum allowed size of ${MAX_ANNOTATIONS_SIZE_BYTES} bytes`;
+        throw new AnnotationsError(
+          msg,
+          "ERR_ANNOTATIONS_TOO_LARGE",
+          "Specify a local annotations file via --annotations <path>.",
+        );
+      },
+      (bytes) => {
+        transferred = bytes;
+        progress.update(bytes, declaredTotal);
+      },
     );
+
+    if (!text || text.length < MIN_ANNOTATIONS_SIZE_BYTES) {
+      throw new AnnotationsError(
+        "Downloaded annotations.lua appears truncated or invalid",
+        "ERR_ANNOTATIONS_INVALID",
+        "Retry downloading or pass a local annotations file via --annotations <path>.",
+      );
+    }
+  } catch (err) {
+    progress.fail();
+    throw err;
   }
+
+  progress.finish(
+    `[annotations] Downloaded ${ANNOTATIONS_FILENAME} (${formatTransferSummary(transferred, Date.now() - startedAt)})`,
+  );
   return text;
 }
 

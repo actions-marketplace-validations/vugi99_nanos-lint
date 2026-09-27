@@ -11,6 +11,7 @@ import { cleanCache, systemPaths } from "./paths.js";
 import { getCacheStatus, formatCacheStatusPretty } from "./cache-status.js";
 import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
+import { setProgressMode } from "./terminal-progress.js";
 import { ConfigError, NanosLintError } from "./errors.js";
 import { computeUnrequestedExclusions, resolveCheckTargets } from "./target-resolver.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
@@ -53,6 +54,7 @@ interface CheckCommandOptions {
   lualsVersion: string;
   fail: boolean;
   logLevel?: string;
+  progress?: boolean;
   github?: boolean;
   ignore?: string[];
   dep?: string[];
@@ -76,16 +78,24 @@ export function createProgram(options?: CreateProgramOptions): Command {
         .choices(["error", "warn", "info", "debug", "silent"])
         .default(DEFAULT_LOG_LEVEL),
     )
+    .option(
+      "--no-progress",
+      "Disable the interactive download, extraction and realm derivation progress display",
+    )
     .hook("preAction", (thisCommand, actionCommand) => {
       const target = actionCommand || thisCommand;
       const opts = target.optsWithGlobals
-        ? target.optsWithGlobals<{ logLevel?: string }>()
-        : target.opts<{ logLevel?: string }>();
+        ? target.optsWithGlobals<{ logLevel?: string; progress?: boolean }>()
+        : target.opts<{ logLevel?: string; progress?: boolean }>();
       if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
         logger.setLevel(opts.logLevel as LogLevel);
       }
+      if (opts.progress === false) {
+        setProgressMode("off");
+      }
     })
     .exitOverride()
+    .configureHelp({ showGlobalOptions: true })
     .configureOutput({
       writeOut: (str) => console.log(str.trimEnd()),
       writeErr: (str) => logger.error(str.trimEnd()),
@@ -152,6 +162,12 @@ export function createProgram(options?: CreateProgramOptions): Command {
       const format = opts.github
         ? "github"
         : opts.format || (process.env.GITHUB_ACTIONS ? "github" : "pretty");
+
+      if (format === "json") {
+        setProgressMode("off");
+        // Machine-readable output owns stdout: diagnostics must not interleave with the JSON report.
+        logger.setDiagnosticStream("stderr");
+      }
 
       const checkOptions: CheckOptions = {
         path: rootPath,
@@ -306,6 +322,10 @@ export function createProgram(options?: CreateProgramOptions): Command {
   };
 
   const handleCacheStatus = (opts?: { json?: boolean }): void => {
+    if (opts?.json) {
+      // Machine-readable output owns stdout: diagnostics must not interleave with the JSON report.
+      logger.setDiagnosticStream("stderr");
+    }
     const report = getCacheStatus();
     if (opts?.json) {
       writeOutput(JSON.stringify(report, null, 2));
@@ -385,6 +405,11 @@ Examples:
 
 /** Parses command-line arguments and executes the requested CLI action. */
 export async function runCLI(args: string[] = process.argv.slice(2)): Promise<number> {
+  // The redraw policy and the diagnostic stream are process-global and derived from the parsed
+  // flags, so every run starts from the defaults: a previous in-process run cannot leak into it.
+  setProgressMode("auto");
+  logger.setDiagnosticStream("stdout");
+
   // Early parse of log-level so early exits (e.g. --version, --help) configure the logger
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];

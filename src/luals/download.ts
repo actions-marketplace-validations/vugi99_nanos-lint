@@ -17,8 +17,10 @@ import {
   escapePowerShellSingleQuote,
 } from "./validation.js";
 import { LuaLSError } from "../errors.js";
-import { getDirectorySize } from "../paths.js";
+import { formatBytes, getDirectorySize } from "../paths.js";
 import { withFileLock } from "../lock.js";
+import { cancelResponseBody, guardedFetch, parseDeclaredContentLength } from "../download-guard.js";
+import { createProgressBar, createSpinner, formatTransferSummary } from "../terminal-progress.js";
 
 export {
   isBinaryValid,
@@ -33,25 +35,8 @@ export {
 export const DOWNLOAD_TIMEOUT_MS = 120_000;
 export const MAX_ARCHIVE_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB
 
-export const ALLOWED_DOWNLOAD_DOMAINS: readonly string[] = ["github.com", "githubusercontent.com"];
-
-/**
- * Validates that a download URL uses HTTPS and targets an allowlisted host.
- */
-export function isAllowedDownloadUrl(urlString: string): boolean {
-  try {
-    const parsed = new URL(urlString);
-    if (parsed.protocol !== "https:") {
-      return false;
-    }
-    const hostname = parsed.hostname.toLowerCase();
-    return ALLOWED_DOWNLOAD_DOMAINS.some(
-      (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
-    );
-  } catch {
-    return false;
-  }
-}
+/** Re-exported so the allowlist policy has a single definition (see `src/download-guard.ts`). */
+export { ALLOWED_DOWNLOAD_DOMAINS, isAllowedDownloadUrl } from "../download-guard.js";
 
 /** Chunk size used when hashing an archive, so a 150 MB asset is never buffered whole. */
 const HASH_CHUNK_SIZE_BYTES = 1024 * 1024;
@@ -95,6 +80,19 @@ export async function* limitDownloadStream(
         "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN.",
       );
     }
+    yield chunk;
+  }
+}
+
+/** Reports cumulative transferred bytes while passing a download stream through unchanged. */
+export async function* trackDownloadProgress(
+  source: AsyncIterable<Uint8Array | Buffer>,
+  onProgress: (transferred: number) => void,
+): AsyncGenerator<Uint8Array | Buffer, void, unknown> {
+  let transferred = 0;
+  for await (const chunk of source) {
+    transferred += chunk.length;
+    onProgress(transferred);
     yield chunk;
   }
 }
@@ -228,50 +226,37 @@ async function downloadAndPromoteLuaLS(
       );
       fs.cpSync(existingSourceDir, tempDir, { recursive: true });
     } else {
-      if (!isAllowedDownloadUrl(url)) {
-        throw new LuaLSError(
-          `Refusing to download LuaLS from untrusted URL: ${url}`,
-          "ERR_LUALS_DOWNLOAD",
-          "Download URLs must use HTTPS and target an allowlisted GitHub host.",
-        );
-      }
-
       logger.info(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
 
       let response: Response | null = null;
       let lastErr: unknown = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const res = await fetch(url, {
+          // The guard resolves redirects hop by hop, so the release asset is never requested
+          // from a host the allowlist has not approved *before* that host is contacted.
+          const outcome = await guardedFetch(url, {
             signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
           });
-          if (res.url && !isAllowedDownloadUrl(res.url)) {
-            if (typeof res.body?.cancel === "function") {
-              try {
-                await res.body.cancel();
-              } catch (cancelErr) {
-                void cancelErr;
-              }
+          if (!outcome.ok || !outcome.response) {
+            if (outcome.reason !== "network-error") {
+              // A refused hop is a policy verdict, not a transient failure: never retry it.
+              const blockedMessage = `Redirect to untrusted URL blocked: ${outcome.url ?? url}`;
+              logger.warn(`[luals] ${blockedMessage}`);
+              throw new LuaLSError(
+                blockedMessage,
+                "ERR_LUALS_DOWNLOAD",
+                "Download redirects must stay on allowlisted HTTPS GitHub hosts.",
+              );
             }
-            logger.warn(`[luals] Redirect to untrusted URL blocked: ${res.url}`);
-            throw new LuaLSError(
-              `Redirect to untrusted URL blocked: ${res.url}`,
-              "ERR_LUALS_DOWNLOAD",
-              "Download redirects must stay on allowlisted HTTPS GitHub hosts.",
-            );
-          }
-          if (res.ok && res.body) {
-            response = res;
+            lastErr = outcome.error ?? new Error(`Failed to download ${url}`);
+          } else if (outcome.response.ok && outcome.response.body) {
+            response = outcome.response;
             break;
+          } else {
+            const res = outcome.response;
+            await cancelResponseBody(res);
+            lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
           }
-          if (typeof res.body?.cancel === "function") {
-            try {
-              await res.body.cancel();
-            } catch (cancelErr) {
-              void cancelErr;
-            }
-          }
-          lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
         } catch (err) {
           if (err instanceof LuaLSError) {
             throw err;
@@ -304,7 +289,15 @@ async function downloadAndPromoteLuaLS(
           );
         }
       }
+      const declaredTotal = parseDeclaredContentLength(response);
 
+      const downloadStartedAt = Date.now();
+      let transferred = 0;
+      const progress = createProgressBar({
+        label: `[luals] Downloading ${info.assetName}`,
+        total: declaredTotal,
+        announce: false,
+      });
       const fileStream = fs.createWriteStream(archivePath);
       try {
         const streamSource =
@@ -313,8 +306,18 @@ async function downloadAndPromoteLuaLS(
             ? Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
             : (response.body as unknown as Readable);
 
-        await pipeline(streamSource, limitDownloadStream, fileStream);
+        await pipeline(
+          streamSource,
+          limitDownloadStream,
+          (source: AsyncIterable<Uint8Array | Buffer>) =>
+            trackDownloadProgress(source, (bytes) => {
+              transferred = bytes;
+              progress.update(bytes, declaredTotal);
+            }),
+          fileStream,
+        );
       } catch (streamErr) {
+        progress.fail();
         try {
           if (fs.existsSync(archivePath)) {
             fs.unlinkSync(archivePath);
@@ -332,6 +335,9 @@ async function downloadAndPromoteLuaLS(
           { cause: streamErr },
         );
       }
+      progress.finish(
+        `[luals] Downloaded ${info.assetName} (${formatTransferSummary(transferred, Date.now() - downloadStartedAt)})`,
+      );
 
       // Audit trail only: the digest is recorded so a downloaded asset can be
       // compared out of band. It is not checked against a pinned value, because
@@ -341,54 +347,67 @@ async function downloadAndPromoteLuaLS(
 
       logger.info(`[luals] Extracting to ${destDir}...`);
 
-      await validateArchiveMembers(archivePath);
-
+      const spinner = createSpinner({
+        label: `[luals] Extracting ${info.assetName}`,
+        announce: false,
+      });
+      spinner.start();
+      let extractedSize: number;
       try {
-        // Both Windows 10+ and UNIX systems have tar built in
-        const tarArgs =
-          process.platform === "win32"
-            ? ["-xf", path.basename(archivePath), "-C", tempDir]
-            : [
-                "-xf",
-                path.basename(archivePath),
-                "--no-same-owner",
-                "--no-same-permissions",
-                "-C",
-                tempDir,
-              ];
-        await execFileAsync(getTarBinary(), tarArgs, { cwd: path.dirname(archivePath) });
-      } catch (tarErr) {
-        // Fallback for PowerShell Expand-Archive on Windows if tar fails.
-        // `validateArchiveMembers()` reconciled the central directory with the
-        // archive's local file headers before this point, so both extractors see
-        // the same members: retrying only changes which tool reports a failure.
-        if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
-          await execFileAsync("powershell.exe", [
-            "-NoProfile",
-            "-Command",
-            `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(tempDir)}' -Force`,
-          ]);
-        } else {
-          throw tarErr;
+        await validateArchiveMembers(archivePath);
+
+        try {
+          // Both Windows 10+ and UNIX systems have tar built in
+          const tarArgs =
+            process.platform === "win32"
+              ? ["-xf", path.basename(archivePath), "-C", tempDir]
+              : [
+                  "-xf",
+                  path.basename(archivePath),
+                  "--no-same-owner",
+                  "--no-same-permissions",
+                  "-C",
+                  tempDir,
+                ];
+          await execFileAsync(getTarBinary(), tarArgs, { cwd: path.dirname(archivePath) });
+        } catch (tarErr) {
+          // Fallback for PowerShell Expand-Archive on Windows if tar fails.
+          // `validateArchiveMembers()` reconciled the central directory with the
+          // archive's local file headers before this point, so both extractors see
+          // the same members: retrying only changes which tool reports a failure.
+          if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
+            await execFileAsync("powershell.exe", [
+              "-NoProfile",
+              "-Command",
+              `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(tempDir)}' -Force`,
+            ]);
+          } else {
+            throw tarErr;
+          }
         }
-      }
 
-      const extractedSize = getDirectorySize(tempDir);
-      if (extractedSize > MAX_DECOMPRESSED_SIZE_BYTES) {
-        throw new LuaLSError(
-          `Extracted archive size (${extractedSize} bytes) exceeds maximum limit (${MAX_DECOMPRESSED_SIZE_BYTES} bytes)`,
-          "ERR_LUALS_EXTRACT",
-          "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
-        );
-      }
+        spinner.updateText("[luals] Verifying extracted files");
+        extractedSize = getDirectorySize(tempDir);
+        if (extractedSize > MAX_DECOMPRESSED_SIZE_BYTES) {
+          throw new LuaLSError(
+            `Extracted archive size (${extractedSize} bytes) exceeds maximum limit (${MAX_DECOMPRESSED_SIZE_BYTES} bytes)`,
+            "ERR_LUALS_EXTRACT",
+            "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
+          );
+        }
 
-      // Cleanup archive file
-      try {
-        fs.unlinkSync(archivePath);
-      } catch (err) {
-        logger.debug(
-          `[luals] Failed to delete temporary archive ${archivePath}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        // Cleanup archive file
+        try {
+          fs.unlinkSync(archivePath);
+        } catch (err) {
+          logger.debug(
+            `[luals] Failed to delete temporary archive ${archivePath}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        spinner.stop(`[luals] Extracted ${formatBytes(extractedSize)} to ${destDir}`);
+      } catch (extractErr) {
+        spinner.fail();
+        throw extractErr;
       }
     }
 

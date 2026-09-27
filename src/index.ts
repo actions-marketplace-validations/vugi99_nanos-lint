@@ -11,3 +11,4 @@ export * from "./errors.js";
 export * from "./cache-status.js";
 export * from "./target-resolver.js";
 export * from "./deps.js";
+export * from "./terminal-progress.js";

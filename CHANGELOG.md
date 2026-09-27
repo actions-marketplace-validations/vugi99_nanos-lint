@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-09-27
+
+### Added
+
+- Added `src/download-guard.ts` with the shared outbound transfer policy: `isAllowedDownloadUrl()`, `guardedFetch()` and `cancelResponseBody()`. `guardedFetch()` resolves redirects hop by hop in `redirect: "manual"` mode, so each hop is validated against the HTTPS + GitHub allowlist before it is ever contacted, and it also refuses a 3xx without a `Location` header, a redirect chain longer than `MAX_REDIRECT_HOPS`, and a final response that left the allowlist.
+- Added `tests/unit/download-guard.test.ts` covering off-host redirects, plaintext `http://` downgrades, internal/link-local targets, hop exhaustion, unusable or missing `Location` headers, opaque redirects and transport failures.
+- Added terminal progress reporting for the long-running network and CPU operations (#50):
+  - Added `src/terminal-progress.ts` with `createProgressBar()`, `createSpinner()`, `isProgressInteractive()`, `formatTransferSummary()`, `setProgressMode()` and `restoreTerminal()`. Both displays redraw in place on a TTY (throttled to ~10 frames/s), fall back to discrete `info`-level milestones without a terminal, hide the cursor only while redrawing, and restore it on completion, failure, `SIGINT`/`SIGTERM`, uncaught exceptions and process exit.
+  - The LuaLS release archive download now renders a byte progress bar with percentage, transferred/total size, transfer speed and ETA; the transfer completion line reports size, duration and average speed.
+  - The LuaLS archive validation and extraction now render an indeterminate spinner with elapsed time, switching its label to the verification stage.
+  - The `annotations.lua` download now renders a byte progress bar with transferred size, speed and, when the transport declares an uncompressed length, percentage and ETA.
+  - Realm annotation derivation now renders an indeterminate spinner that is advanced by parse progress, so it keeps animating while the synchronous split blocks the event loop.
+  - Added `--no-progress` and the `NANOS_NO_PROGRESS` environment variable to disable the interactive display; `--format json` disables it as well.
+- Added `trackDownloadProgress()` to `src/luals/download.ts`, which reports cumulative transferred bytes while passing a download stream through unchanged.
+- Added `parseDeclaredContentLength()` to `src/download-guard.ts`, which reads a response `content-length` only when the runtime streams the bytes it describes.
+- Added unit tests in `tests/unit/terminal-progress.test.ts` plus progress assertions in `tests/unit/annotations.test.ts`, `tests/unit/realms.test.ts`, `tests/unit/luals-cache.test.ts` and `tests/unit/cli.test.ts`.
+- Added allowlist boundary coverage to `tests/unit/download-guard.test.ts` (look-alike hosts such as `evilgithub.com` and `github.com.evil.com`, uppercase hosts, userinfo, trailing-dot hosts, `https://` IP literals, non-HTTPS schemes, protocol-relative and blank `Location` headers, the exact hop-budget acceptance case), plus assertions that every refused response body is released and that an off-allowlist hop is never contacted. `tests/unit/luals-redirect-guard.test.ts` pins the same property for the LuaLS archive download, including a plaintext hop to an allowlisted host, which only the scheme check can refuse (CWE-829).
+- Added `Logger.setDiagnosticStream()`/`getDiagnosticStream()` in `src/logger.ts` and the cross-origin credential-stripping rule in `guardedFetch()`.
+
+### Changed
+
+- The download allowlist (`ALLOWED_DOWNLOAD_DOMAINS`, `isAllowedDownloadUrl()`) now lives in `src/download-guard.ts` and is re-exported from `src/luals/download.ts`, so the policy has a single definition while the existing public API is unchanged.
+- `splitAnnotationsByRealm()` accepts an optional progress callback and reports parse, classification and render stages; `readBoundedResponseBody()` in `src/annotations-download.ts` accepts an optional per-chunk progress callback.
+- The LuaLS release archive download in `src/luals/download.ts` now runs through `guardedFetch()` instead of a bare `fetch()` whose redirects were only inspected after the target had been contacted, so the archive — the request that always redirects upstream — is validated hop by hop like every other outbound request. A refused hop fails fast with `ERR_LUALS_DOWNLOAD` and is never retried; transient failures keep the existing three-attempt backoff.
+- The release-packaging tooling reuses the shared guard instead of its own copy of the check: `downloadAssetHardened()` in `scripts/packaging/verify.ts` and `resolveLuaLSReleaseVersion()` in `scripts/package-release.ts` both call `guardedFetch()`.
+- `--no-progress` (and every other global option) is now listed by `nanos-lint <command> --help`, and the flag description names realm derivation, which it also governs.
+- `runCLI()` starts each run from the default redraw policy and diagnostic stream, so an in-process repeat run cannot inherit `--no-progress` or JSON routing from the previous one.
+
+### Fixed
+
+- Progress lines now go to stderr in every mode, not only while redrawing: the non-interactive milestones, announcements and completion lines were written to stdout, contradicting the documented `stdout` guarantee. With `--format json` (and `cache status --json`) the `info`/`debug` diagnostics are routed to stderr as well, so `nanos-lint check . --format json -l info` emits a JSON report on stdout that parses at any log level.
+- `guardedFetch()` drops `Authorization`, `Cookie` and `Proxy-Authorization` when a hop leaves the origin of the original request. Re-issuing each hop manually had started forwarding credentials that the runtime strips when it follows a redirect itself.
+- A redirect with a blank `Location` header is now refused as `missing-location` instead of resolving to the current URL and burning the whole hop budget re-requesting it.
+- `cancelResponseBody()` no longer throws when a response exposes no `cancel()` or when `cancel()` returns a non-promise, so cleanup can never mask the reason a response was refused.
+- Progress percentages are no longer derived from a compressed `content-length`: GitHub serves `annotations.lua` gzip-encoded, so its declared length (108 KB) described the compressed payload while 926 KB were streamed, producing milestone lines such as `25% (32.0 KB / 106 KB)`. A declared length is now used only when the response is not content-encoded, and a total the transfer has already passed is dropped in favour of transferred bytes and speed.
+- `fetchRawAnnotationsContent()` now validates every redirect hop and the final response URL against the allowlist instead of relying on the default `redirect: "follow"`, which contacted the redirect target before any check could run. A refused redirect fails fast with `ERR_ANNOTATIONS_DOWNLOAD`, a remedy naming the refused redirect, and a `logger.warn` visible at the default log level.
+- `fetchLatestCommitId()` and `fetchLatestLuaLSVersionFromGitHub()` no longer follow redirects unchecked; both refuse an off-allowlist redirect (warning and returning `null`) so the documented transport policy covers every outbound request, not only requests that end in a file write.
+- A blocked annotations redirect can no longer poison the cache: the refused body is cancelled and neither `annotations.lua` nor `metadata.json` is rewritten, so the previously cached annotations and commit pin survive.
+- The `lock heartbeat (#44)` mtime test in `tests/unit/concurrency.test.ts` no longer depends on wall-clock scheduling (#49). It sampled the lock's `mtime` every 35 ms while asserting `isLockStale(lockPath, 80) === false`, which measured the runner's timer punctuality rather than the heartbeat: a synchronous stall longer than the staleness window starves the heartbeat callback, so `mtime` ages past the threshold and the assertion fails mid-test. Measured on Windows, the observed lock age is `stall + ~16 ms`, so the old `staleMs: 40` failed from roughly a 25 ms stall and the loosened `staleMs: 80` only moved that boundary to roughly 65 ms — no finite tolerance makes it reliable. The test now freezes `Date.now()` and drives the captured heartbeat callback directly, so a genuinely stale lock (backdated `createdAt` and `mtime`) must become fresh through exactly the production `touchLockFile()` path; fault injection confirms it still fails when the heartbeat is disabled. A second test keeps the real-timer contract by asserting the heartbeat touches the lock repeatedly during a slow task, without asserting how punctually.
+- The companion "postpones stale timeout as long as the heartbeat is beating" test no longer asserts staleness from inside a worker's timed loop — the same wall-clock dependence that failed `windows-latest`. Worker 1 now outlasts the staleness threshold while worker 2 polls the held lock, and the test asserts both that worker 2 really did evaluate the lock (so it cannot pass vacuously by waiting out the release) and that it never entered early. Measured on Windows the lock ages only 1–24 ms against a 300 ms threshold while the heartbeat beats, and fault injection still fails the test, with the reclaim actually firing once the heartbeat is disabled.
+- A CodeQL "Incomplete regular expression for hostnames" alert in `tests/unit/annotations.test.ts` is resolved by asserting the refused redirect against a literal message substring instead of interpolating the URL into a `RegExp`.
+- CI proved the remaining wall-clock sensitivity of the two heartbeat tests, so their margins were widened again: `postpones stale timeout as long as the heartbeat is beating` now uses a 1500 ms staleness window, a 50 ms heartbeat and a 3000 ms hold (20 s timeout, 20 ms poll), and `proves that without heartbeat the lock becomes stale, but with heartbeat it stays fresh` uses a 600 ms window, a 25 ms heartbeat and a 1500 ms delay. A loaded four-vCPU Windows runner shares the scheduler with every other vitest worker, so a false failure now needs a stall of more than a second; fault injection with the heartbeat disabled still fails all three timing-sensitive tests.
+
+### Security
+
+- Applied the documented _Strict Protocol and Host Allowlisting_ policy (`SECURITY.md`) to the runtime annotations download. Previously a redirect to any host — including a plaintext `http://` address or an internal/link-local one — was followed silently and the response body was cached as the user's type-definition source.
+- Completed that policy for the LuaLS release archive, which `SECURITY.md` already claimed. The archive download now validates every hop before contacting it, so a redirect aimed at an internal or plaintext target can no longer make the machine reach a host outside GitHub infrastructure even though the resulting body was refused.
+- Dropped security support for versions < 3.2.0 in SECURITY.md.
+
 ## [3.1.0] - 2026-09-25
 
 ### Added

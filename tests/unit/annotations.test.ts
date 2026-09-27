@@ -381,6 +381,93 @@ describe("annotations management and date-based caching", () => {
       }
     });
 
+    it("refuses a commit lookup redirect before the token can leave GitHub", async () => {
+      const origToken = process.env.GITHUB_TOKEN;
+      process.env.GITHUB_TOKEN = "ghp_mock_token_12345";
+      const originalFetch = globalThis.fetch;
+
+      let capturedHeaders: Record<string, string> | undefined;
+      const fetchSpy = vi
+        .fn()
+        .mockImplementation((_url: string | URL | Request, init?: RequestInit) => {
+          capturedHeaders = init?.headers as Record<string, string>;
+          return Promise.resolve({
+            ok: false,
+            status: 302,
+            headers: new Headers({ location: "https://evil.example/commits/docgen-output" }),
+          } as unknown as Response);
+        });
+      globalThis.fetch = fetchSpy;
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        expect(await fetchLatestCommitId()).toBeNull();
+
+        // Exactly one request to allowlisted GitHub infrastructure: the redirect target is
+        // refused before it is contacted, so the Authorization header is never sent off-host.
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(String(fetchSpy.mock.calls[0]?.[0])).toBe(
+          "https://api.github.com/repos/nanos-world/vscode-extension/commits/docgen-output",
+        );
+        expect(capturedHeaders?.["Authorization"]).toBe("token ghp_mock_token_12345");
+        expect(warnSpy.mock.calls.map((call) => call.join(" ")).join("\n")).toContain(
+          "Redirect blocked",
+        );
+      } finally {
+        if (origToken !== undefined) {
+          process.env.GITHUB_TOKEN = origToken;
+        } else {
+          delete process.env.GITHUB_TOKEN;
+        }
+        warnSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("reports streamed download milestones and a transfer summary (#50)", async () => {
+      const originalFetch = globalThis.fetch;
+      const content = `---@meta\n-- nanos world annotations\n${"x".repeat(1600)}`;
+      const size = Buffer.byteLength(content, "utf-8");
+      const quarter = Math.ceil(content.length / 4);
+      const chunks = [0, 1, 2, 3].map((index) =>
+        content.slice(index * quarter, (index + 1) * quarter),
+      );
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        url: RAW_ANNOTATIONS_URL,
+        headers: new Headers({ "content-length": String(size) }),
+        body: (async function* generate() {
+          for (const chunk of chunks) {
+            yield Buffer.from(chunk, "utf-8");
+          }
+        })(),
+      } as unknown as Response);
+
+      const logged: string[] = [];
+      const logSpy = vi.spyOn(console, "error").mockImplementation((message: unknown) => {
+        logged.push(String(message));
+      });
+      logger.setLevel("info");
+      try {
+        await expect(fetchRawAnnotationsContent()).resolves.toContain("nanos world annotations");
+
+        expect(
+          logged.some((line) => /^\[annotations\] Downloaded annotations\.lua \(/.test(line)),
+        ).toBe(true);
+        expect(logged.some((line) => /25% \(\d/.test(line))).toBe(true);
+        for (const line of logged) {
+          expect(line).not.toContain("\r");
+          expect(line).not.toContain("\u001b");
+        }
+      } finally {
+        logger.setLevel("warn");
+        logSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it("handles fetchRawAnnotationsContent HTTP errors and truncated payloads", async () => {
       const originalFetch = globalThis.fetch;
 
@@ -612,6 +699,137 @@ describe("annotations management and date-based caching", () => {
         await fetchRawAnnotationsContent("abcdef0123456789");
         expect(fetchedUrl).toContain("abcdef0123456789");
       } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("blocks a redirect to an untrusted host before it is contacted", async () => {
+      const evil = "---@meta\n-- nanos world\n" + "---@class AttackerInjected\n".repeat(100);
+      const contacted: string[] = [];
+      const fetchSpy = vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = typeof input === "string" ? input : input.toString();
+        contacted.push(url);
+        return Promise.resolve({
+          ok: false,
+          status: 302,
+          headers: new Headers({ location: "https://evil.example/annotations.lua" }),
+          text: () => Promise.resolve(evil),
+        } as unknown as Response);
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = fetchSpy;
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        await expect(fetchRawAnnotationsContent()).rejects.toThrow(
+          /Redirect blocked.*https:\/\/evil\.example\/annotations\.lua/,
+        );
+
+        // The refused hop is never contacted: exactly one request reaches the network.
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(contacted).toHaveLength(1);
+        expect(contacted[0]).toContain("raw.githubusercontent.com");
+        expect(contacted).not.toContain("https://evil.example/annotations.lua");
+        expect(warnSpy.mock.calls.map((call) => call.join(" ")).join("\n")).toContain(
+          "Redirect blocked",
+        );
+      } finally {
+        warnSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("blocks a redirect that downgrades the annotations download to plaintext http", async () => {
+      const insecure = "http://raw.githubusercontent.com/nanos-world/annotations.lua";
+      const contacted: string[] = [];
+      const fetchSpy = vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = typeof input === "string" ? input : input.toString();
+        contacted.push(url);
+        return Promise.resolve({
+          ok: false,
+          status: 301,
+          headers: new Headers({ location: insecure }),
+        } as unknown as Response);
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = fetchSpy;
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        // A literal pattern: the refused hop must be reported verbatim, so the assertion
+        // does not depend on regex metacharacters in the URL.
+        await expect(fetchRawAnnotationsContent()).rejects.toThrow(
+          "(http://raw.githubusercontent.com/nanos-world/annotations.lua)",
+        );
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(contacted).not.toContain(insecure);
+        expect(warnSpy.mock.calls.map((call) => call.join(" ")).join("\n")).toContain(
+          "Redirect blocked",
+        );
+      } finally {
+        warnSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("blocks an annotations redirect chain that exceeds the hop budget", async () => {
+      const fetchSpy = vi.fn().mockImplementation((input: string | URL | Request) => {
+        const url = typeof input === "string" ? input : input.toString();
+        return Promise.resolve({
+          ok: false,
+          status: 302,
+          headers: new Headers({ location: `${url}/next` }),
+        } as unknown as Response);
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = fetchSpy;
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        await expect(fetchRawAnnotationsContent()).rejects.toMatchObject({
+          code: "ERR_ANNOTATIONS_DOWNLOAD",
+          message: expect.stringContaining("Redirect chain too long"),
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(6);
+      } finally {
+        warnSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("does not poison the cached annotations when a redirect is blocked", async () => {
+      const cachedFile = path.join(tempBaseDir, "annotations.lua");
+      fs.writeFileSync(cachedFile, "-- trusted previous annotations");
+      fs.writeFileSync(
+        path.join(tempBaseDir, "metadata.json"),
+        JSON.stringify({
+          commitId: "trusted-commit",
+          lastChecked: "2026-09-01",
+          date: { year: 2026, month: 9, day: 1 },
+        }),
+      );
+
+      const evil = "---@meta\n-- nanos world\n" + "---@class AttackerInjected\n".repeat(100);
+      const fetchSpy = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 302,
+        headers: new Headers({ location: "https://evil.example/annotations.lua" }),
+        text: () => Promise.resolve(evil),
+      } as unknown as Response);
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = fetchSpy;
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        await expect(downloadAndCacheAnnotations("attacker-commit", tempBaseDir)).rejects.toThrow(
+          /Redirect blocked/,
+        );
+
+        expect(fs.readFileSync(cachedFile, "utf-8")).toBe("-- trusted previous annotations");
+        expect(fs.readFileSync(cachedFile, "utf-8")).not.toContain("AttackerInjected");
+        expect(readAnnotationsMetadata(tempBaseDir)?.commitId).toBe("trusted-commit");
+      } finally {
+        warnSpy.mockRestore();
         globalThis.fetch = originalFetch;
       }
     });

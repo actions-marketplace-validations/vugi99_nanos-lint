@@ -148,8 +148,8 @@ OPTIONS:
   -i, --ignore <pattern>   Files or directories to ignore (supports globs, repeatable, comma/newline-separated)
   -d, --dep <path>         Path to package dependency directory or Lua definition file (repeatable; resolves relative to cwd)
   -l, --log-level <level>  Logging level: error, warn, info, debug, silent (default: warn)
-                           silent suppresses all output, including the final report (only the exit code remains)
-                           error and warn (the default) suppress progress messages but still print the report
+                           silent suppresses all output, including the final report and the progress display (only the exit code remains)
+                           error and warn (the default) hide the info-level log lines and the non-interactive progress milestones but still print the report and the interactive progress bar
                            debug adds diagnostic tracing
   --checklevel=<level>     Minimum diagnostic level: Error, Warning, Information, Hint (default: Warning)
   --config=<path>          Path to custom .luarc.json configuration file
@@ -159,8 +159,37 @@ OPTIONS:
   --luals-version=<ver>    Version of LuaLS to use (default: latest, falling back to 3.19.1 when offline)
   --no-fail                Do not exit with code 1 if diagnostics are found
   --realm <realm>          Execution realm to check: all, client, server, shared (default: all)
+  --no-progress            Disable the interactive download, extraction and realm derivation progress display
   -f, --force              (init command only) Overwrite existing .luarc.json
 ```
+
+### Progress Display
+
+Downloads and extractions (`LuaLS` archive, `annotations.lua`, realm derivation) report their
+progress on **stderr**, so `stdout` keeps carrying only the diagnostic report:
+
+```
+[luals] Downloading lua-language-server-3.19.1-linux-x64.tar.gz [=====>        ] 37% (1.31 MB / 3.51 MB, 8.2 MB/s, ETA 0.3s)
+[luals] Extracting lua-language-server-3.19.1-linux-x64.tar.gz ⠹ (2.4s)
+```
+
+A live, in-place redraw is used only when stderr is an interactive terminal. Everywhere else
+(CI runners, pipes, redirected output, `TERM=dumb`) the same information is emitted as discrete
+single-line milestones, so logs stay free of carriage returns:
+
+```
+[luals] Downloading lua-language-server-3.19.1-linux-x64.tar.gz: 25% (901 KB / 3.51 MB)
+[luals] Downloaded lua-language-server-3.19.1-linux-x64.tar.gz (3.51 MB in 0.1s (37.3 MB/s))
+```
+
+Dynamic redrawing is also disabled by `--no-progress`, `NANOS_NO_PROGRESS`, `--format json`,
+`-l silent`, `CI`, `NO_COLOR` and `TERM=dumb`. When a transfer declares a compressed
+`content-length` (GitHub serves `annotations.lua` gzip-encoded), the percentage is dropped in
+favour of transferred bytes and speed instead of reporting a misleading total.
+
+Machine-readable output owns `stdout`: with `--format json` (and `cache status --json`) the
+milestones, completions and every other `info`/`debug` diagnostic move to `stderr` as well, so
+`nanos-lint check . --format json -l info | jq .` works at any log level.
 
 ### Environment Variables
 
@@ -170,7 +199,8 @@ OPTIONS:
 | `NANOS_ANNOTATIONS_PATH`, `NANOS_ANNOTATIONS` | Explicit path to a custom `annotations.lua` file                                                                                                                                                                               |
 | `NANOS_LOG_LEVEL`                             | Default logging level: `error`, `warn`, `info`, `debug`, `silent` (default: `warn`)                                                                                                                                            |
 | `GITHUB_TOKEN`                                | GitHub personal access token used for authenticated GitHub API requests (avoids unauthenticated rate limits)                                                                                                                   |
-| `NO_COLOR`                                    | Disables ANSI color output when set to any non-empty value                                                                                                                                                                     |
+| `NANOS_NO_PROGRESS`                           | Disables the interactive download/extraction progress display when set to any non-empty value other than `0`, `false`, `no` or `off`                                                                                           |
+| `NO_COLOR`                                    | Disables ANSI color output when set to any non-empty value; dynamic progress redrawing stops for any non-empty value other than `0`, `false`, `no` or `off`                                                                    |
 | `FORCE_COLOR`                                 | Forces ANSI color output even in non-TTY environments                                                                                                                                                                          |
 
 Only `NANOS_LOG_LEVEL` controls the logging level; a generic `LOG_LEVEL` environment variable is intentionally not read, because CI images commonly set it.
