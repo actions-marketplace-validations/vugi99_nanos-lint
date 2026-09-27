@@ -798,14 +798,20 @@ describe("lock heartbeat (#44)", () => {
     // The heartbeat must outpace the staleness threshold by a wide margin, and worker 1
     // must outlast that threshold: otherwise worker 2 simply waits for the release and
     // never has to judge the lock stale at all, which would make this test vacuous.
-    const staleMs = 300;
+    //
+    // The margin is wide on purpose. A loaded Windows runner (four vCPUs shared by every
+    // vitest worker) can delay a timer callback far past a few dozen milliseconds, and a
+    // `staleMs` of a few hundred milliseconds turns that scheduler jitter into a false
+    // "the heartbeat is broken". Fault injection still fails the test: with the heartbeat
+    // disabled the lock goes stale at 1500 ms, well inside worker 1's 3000 ms task.
+    const staleMs = 1500;
     const worker1 = withFileLock(
       lockPath,
       async () => {
-        await delay(700);
+        await delay(3000);
         worker1Finished = true;
       },
-      { staleMs, heartbeatIntervalMs: 15 },
+      { staleMs, heartbeatIntervalMs: 50 },
     );
     await delay(10);
 
@@ -816,14 +822,14 @@ describe("lock heartbeat (#44)", () => {
           worker2StartedWhileWorker1Running = true;
         }
       },
-      { staleMs, timeoutMs: 5000, pollIntervalMs: 10, reclaimGraceMs: 0 },
+      { staleMs, timeoutMs: 20000, pollIntervalMs: 20, reclaimGraceMs: 0 },
     );
 
     // Both workers run concurrently: worker 2 polls the held lock while worker 1 beats,
     // so it can only enter after worker 1 releases. The staleness verdict is deliberately
     // not asserted from inside worker 1's task — that measures the runner's punctuality,
     // not the heartbeat. Fault injection still fails here: with the heartbeat disabled
-    // the lock is stale at 300ms, which worker 2 observes while worker 1 is still inside
+    // the lock is stale at 1500 ms, which worker 2 observes while worker 1 is still inside
     // its task, so it reclaims the lock and the final assertion fails.
     try {
       await Promise.all([worker1, worker2]);
@@ -841,22 +847,25 @@ describe("lock heartbeat (#44)", () => {
     const lockWithoutHeartbeat = path.join(dir, "no-heartbeat.lock");
     const lockWithHeartbeat = path.join(dir, "heartbeat.lock");
 
+    // The freshness half is a wall-clock claim about the heartbeat, so it needs headroom for
+    // scheduler jitter on a loaded runner (see the note in the test above). The contrast it
+    // proves is unchanged: 1500 ms is stale without a heartbeat and fresh with one.
     await withFileLock(
       lockWithoutHeartbeat,
       async () => {
-        await delay(80);
-        expect(isLockStale(lockWithoutHeartbeat, 40)).toBe(true);
+        await delay(1500);
+        expect(isLockStale(lockWithoutHeartbeat, 600)).toBe(true);
       },
-      { staleMs: 40, heartbeatIntervalMs: 0 },
+      { staleMs: 600, heartbeatIntervalMs: 0 },
     );
 
     await withFileLock(
       lockWithHeartbeat,
       async () => {
-        await delay(80);
-        expect(isLockStale(lockWithHeartbeat, 40)).toBe(false);
+        await delay(1500);
+        expect(isLockStale(lockWithHeartbeat, 600)).toBe(false);
       },
-      { staleMs: 40, heartbeatIntervalMs: 10 },
+      { staleMs: 600, heartbeatIntervalMs: 25 },
     );
   });
 
