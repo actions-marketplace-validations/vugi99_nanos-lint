@@ -18,6 +18,9 @@ export const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
 
 export const DEFAULT_LOG_LEVEL: LogLevel = "warn";
 
+/** Stream carrying `info`/`debug` diagnostics; `stderr` keeps stdout machine-readable. */
+export type DiagnosticStream = "stdout" | "stderr";
+
 /** Validates whether a string corresponds to a recognized log level. */
 export function isValidLogLevel(level: string): level is LogLevel {
   return level in LOG_LEVEL_PRIORITY;
@@ -32,6 +35,7 @@ export function parseLogLevel(raw?: string | null): LogLevel {
 
 export class Logger {
   private level: LogLevel = DEFAULT_LOG_LEVEL;
+  private diagnosticStream: DiagnosticStream = "stdout";
 
   constructor(initialLevel?: LogLevel) {
     if (initialLevel && isValidLogLevel(initialLevel)) {
@@ -54,6 +58,19 @@ export class Logger {
   /** Returns the current active log level. */
   public getLevel(): LogLevel {
     return this.level;
+  }
+
+  /**
+   * Selects the stream used by `info`/`debug`. Machine-readable formats switch this to
+   * `stderr`, so a report on stdout is never interleaved with diagnostic lines.
+   */
+  public setDiagnosticStream(stream: DiagnosticStream): void {
+    this.diagnosticStream = stream;
+  }
+
+  /** Returns the stream used by `info`/`debug`. */
+  public getDiagnosticStream(): DiagnosticStream {
+    return this.diagnosticStream;
   }
 
   /** Checks if a message at the specified level should be emitted. */
@@ -80,17 +97,30 @@ export class Logger {
     }
   }
 
-  /** Logs an informational message to stdout. */
+  /** Logs an informational message to stdout, or to stderr when stdout carries a report. */
   public info(...args: unknown[]): void {
     if (this.isEnabledFor("info")) {
-      console.log(...args);
+      this.emitDiagnostic(args, "log");
     }
   }
 
-  /** Logs a debug-level diagnostic message to stdout. */
+  /** Logs a debug-level diagnostic message to stdout, or to stderr when stdout carries a report. */
   public debug(...args: unknown[]): void {
     if (this.isEnabledFor("debug")) {
+      this.emitDiagnostic(args, "debug");
+    }
+  }
+
+  /** Writes an `info`/`debug` diagnostic on the configured stream. */
+  private emitDiagnostic(args: unknown[], stdoutMethod: "log" | "debug"): void {
+    if (this.diagnosticStream === "stderr") {
+      console.error(...args);
+      return;
+    }
+    if (stdoutMethod === "debug") {
       console.debug(...args);
+    } else {
+      console.log(...args);
     }
   }
 }

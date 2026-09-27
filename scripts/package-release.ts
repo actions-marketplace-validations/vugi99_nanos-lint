@@ -13,6 +13,7 @@ import {
   MAX_ANNOTATIONS_SIZE_BYTES,
 } from "../src/annotations-metadata.js";
 import { computeFileSha256 } from "../src/luals/download.js";
+import { guardedFetch } from "../src/download-guard.js";
 
 export function sanitizeTag(tag: string): string {
   const trimmed = tag.trim();
@@ -36,11 +37,12 @@ export async function resolveLuaLSReleaseVersion(token?: string): Promise<string
     headers["Authorization"] = `token ${token}`;
   }
   try {
-    const res = await fetch(
+    const result = await guardedFetch(
       "https://api.github.com/repos/LuaLS/lua-language-server/releases/latest",
       { headers, signal: AbortSignal.timeout(10000) },
     );
-    if (res.ok) {
+    const res = result.response;
+    if (result.ok && res && res.ok) {
       const data = (await res.json()) as { tag_name?: string };
       if (typeof data.tag_name === "string" && data.tag_name) {
         const ver = data.tag_name.replace(/^v/, "");

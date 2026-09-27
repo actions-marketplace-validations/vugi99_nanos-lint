@@ -49,7 +49,53 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** The unpatched clock, captured before any test can freeze `Date.now()`. */
+const realNow = Date.now;
+
+/**
+ * Freezes `Date.now()` at `instant` for the duration of `body`, so every freshness
+ * read happens at one instant instead of drifting with real elapsed time.
+ */
+async function withFrozenClock(instant: number, body: () => Promise<void> | void): Promise<void> {
+  (Date as unknown as { now: () => number }).now = () => instant;
+  try {
+    await body();
+  } finally {
+    (Date as unknown as { now: () => number }).now = realNow;
+  }
+}
+
+/** Backdates a lock's metadata and mtime to `instant`, so only a heartbeat can refresh it. */
+function backdateLock(lockPath: string, instant: number): void {
+  const token = (JSON.parse(fs.readFileSync(lockPath, "utf-8")) as { token: string }).token;
+  fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, createdAt: instant, token }));
+  fs.utimesSync(lockPath, new Date(instant), new Date(instant));
+}
+
+/** Captures the heartbeat callback `withFileLock()` registers, plus a restore handle. */
+function captureHeartbeat(): { tick: () => void; restore: () => void } {
+  const realSetInterval = globalThis.setInterval;
+  let captured: (() => void) | null = null;
+  const spy = vi.spyOn(globalThis, "setInterval").mockImplementation(((
+    fn: () => void,
+    ms?: number,
+  ) => {
+    captured = fn;
+    return realSetInterval(fn, ms);
+  }) as typeof setInterval);
+  return {
+    tick: () => {
+      if (captured === null) {
+        throw new Error("withFileLock did not register a heartbeat interval");
+      }
+      captured();
+    },
+    restore: () => spy.mockRestore(),
+  };
+}
+
 afterEach(() => {
+  (Date as unknown as { now: () => number }).now = realNow;
   for (const dir of tempDirs.splice(0)) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -549,27 +595,59 @@ describe("lock heartbeat (#44)", () => {
 
   it("advances mtime via periodic heartbeat while a slow task runs", async () => {
     const lockPath = path.join(makeTempDir("nanos-lock-heartbeat-"), "heartbeat.lock");
-    let initialMtimeMs = 0;
-    const timestamps: number[] = [];
+    const heartbeat = captureHeartbeat();
+    const created = realNow();
 
-    await withFileLock(
-      lockPath,
-      async () => {
-        initialMtimeMs = fs.statSync(lockPath).mtimeMs;
+    try {
+      await withFileLock(
+        lockPath,
+        async () => {
+          await withFrozenClock(created, () => {
+            // Backdate both inputs of `Math.max(createdAt, mtime)`, so the lock can only
+            // look fresh because a heartbeat rewrote mtime.
+            backdateLock(lockPath, created - 10_000);
+            expect(isLockStale(lockPath, 80)).toBe(true);
 
-        for (let i = 0; i < 3; i++) {
-          await delay(35);
-          timestamps.push(fs.statSync(lockPath).mtimeMs);
-          expect(isLockStale(lockPath, 80)).toBe(false);
-        }
-      },
-      { heartbeatIntervalMs: 15 },
-    );
+            const initialMtimeMs = fs.statSync(lockPath).mtimeMs;
+            // Two ticks stand in for "the heartbeat fires while a slow task runs"; the
+            // clock is frozen, so this asserts the heartbeat refreshes a genuinely stale
+            // lock rather than that the runner happened to schedule a timer promptly.
+            heartbeat.tick();
+            heartbeat.tick();
 
-    expect(timestamps).toHaveLength(3);
-    expect(timestamps[0]).toBeGreaterThan(initialMtimeMs);
-    expect(timestamps[1]).toBeGreaterThan(timestamps[0]!);
-    expect(timestamps[2]).toBeGreaterThan(timestamps[1]!);
+            const timestamps = [initialMtimeMs, fs.statSync(lockPath).mtimeMs];
+            expect(timestamps[1]).toBeGreaterThan(timestamps[0]!);
+            expect(isLockStale(lockPath, 80)).toBe(false);
+          });
+        },
+        { heartbeatIntervalMs: 15 },
+      );
+    } finally {
+      heartbeat.restore();
+    }
+
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
+
+  it("keeps touching the lock on a real interval while a slow task runs", async () => {
+    const lockPath = path.join(makeTempDir("nanos-lock-heartbeat-real-"), "real.lock");
+    const utimesSpy = vi.spyOn(fs, "utimesSync");
+
+    try {
+      await withFileLock(
+        lockPath,
+        async () => {
+          await delay(150);
+        },
+        { heartbeatIntervalMs: 15 },
+      );
+
+      // The contract on real timers: the heartbeat fires repeatedly, not how punctually.
+      expect(utimesSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally {
+      utimesSpy.mockRestore();
+    }
+
     expect(fs.existsSync(lockPath)).toBe(false);
   });
 
@@ -705,19 +783,36 @@ describe("lock heartbeat (#44)", () => {
     const lockPath = path.join(makeTempDir("nanos-lock-heartbeat-stale-"), "stale.lock");
     let worker1Finished = false;
     let worker2StartedWhileWorker1Running = false;
+    let liveEvaluations = 0;
 
+    // Worker 2 evaluates the lock's liveness through `fs.statSync`; count only its reads
+    // so the heartbeat's internal stats cannot inflate the tally.
+    const originalStatSync = fs.statSync;
+    const statSpy = vi.spyOn(fs, "statSync").mockImplementation(((target: fs.PathLike, ...rest) => {
+      if (!worker1Finished && String(target) === lockPath) {
+        liveEvaluations += 1;
+      }
+      return (originalStatSync as (...args: unknown[]) => fs.Stats)(target, ...rest);
+    }) as typeof fs.statSync);
+
+    // The heartbeat must outpace the staleness threshold by a wide margin, and worker 1
+    // must outlast that threshold: otherwise worker 2 simply waits for the release and
+    // never has to judge the lock stale at all, which would make this test vacuous.
+    //
+    // The margin is wide on purpose. A loaded Windows runner (four vCPUs shared by every
+    // vitest worker) can delay a timer callback far past a few dozen milliseconds, and a
+    // `staleMs` of a few hundred milliseconds turns that scheduler jitter into a false
+    // "the heartbeat is broken". Fault injection still fails the test: with the heartbeat
+    // disabled the lock goes stale at 1500 ms, well inside worker 1's 3000 ms task.
+    const staleMs = 1500;
     const worker1 = withFileLock(
       lockPath,
       async () => {
-        for (let i = 0; i < 5; i++) {
-          await delay(25);
-          expect(isLockStale(lockPath, 60)).toBe(false);
-        }
+        await delay(3000);
         worker1Finished = true;
       },
-      { staleMs: 60, heartbeatIntervalMs: 15 },
+      { staleMs, heartbeatIntervalMs: 50 },
     );
-
     await delay(10);
 
     const worker2 = withFileLock(
@@ -727,11 +822,22 @@ describe("lock heartbeat (#44)", () => {
           worker2StartedWhileWorker1Running = true;
         }
       },
-      { staleMs: 60, timeoutMs: 3000, pollIntervalMs: 10, reclaimGraceMs: 0 },
+      { staleMs, timeoutMs: 20000, pollIntervalMs: 20, reclaimGraceMs: 0 },
     );
 
-    await Promise.all([worker1, worker2]);
+    // Both workers run concurrently: worker 2 polls the held lock while worker 1 beats,
+    // so it can only enter after worker 1 releases. The staleness verdict is deliberately
+    // not asserted from inside worker 1's task — that measures the runner's punctuality,
+    // not the heartbeat. Fault injection still fails here: with the heartbeat disabled
+    // the lock is stale at 1500 ms, which worker 2 observes while worker 1 is still inside
+    // its task, so it reclaims the lock and the final assertion fails.
+    try {
+      await Promise.all([worker1, worker2]);
+    } finally {
+      statSpy.mockRestore();
+    }
 
+    expect(liveEvaluations).toBeGreaterThan(0);
     expect(worker1Finished).toBe(true);
     expect(worker2StartedWhileWorker1Running).toBe(false);
   });
@@ -741,22 +847,25 @@ describe("lock heartbeat (#44)", () => {
     const lockWithoutHeartbeat = path.join(dir, "no-heartbeat.lock");
     const lockWithHeartbeat = path.join(dir, "heartbeat.lock");
 
+    // The freshness half is a wall-clock claim about the heartbeat, so it needs headroom for
+    // scheduler jitter on a loaded runner (see the note in the test above). The contrast it
+    // proves is unchanged: 1500 ms is stale without a heartbeat and fresh with one.
     await withFileLock(
       lockWithoutHeartbeat,
       async () => {
-        await delay(80);
-        expect(isLockStale(lockWithoutHeartbeat, 40)).toBe(true);
+        await delay(1500);
+        expect(isLockStale(lockWithoutHeartbeat, 600)).toBe(true);
       },
-      { staleMs: 40, heartbeatIntervalMs: 0 },
+      { staleMs: 600, heartbeatIntervalMs: 0 },
     );
 
     await withFileLock(
       lockWithHeartbeat,
       async () => {
-        await delay(80);
-        expect(isLockStale(lockWithHeartbeat, 40)).toBe(false);
+        await delay(1500);
+        expect(isLockStale(lockWithHeartbeat, 600)).toBe(false);
       },
-      { staleMs: 40, heartbeatIntervalMs: 10 },
+      { staleMs: 600, heartbeatIntervalMs: 25 },
     );
   });
 

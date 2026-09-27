@@ -50,6 +50,35 @@ describe("transport hardening for package downloads", () => {
     );
   });
 
+  it("never contacts an off-allowlist redirect target", async () => {
+    const dest = path.join(tmpDir, "out.tar.gz");
+    const contacted: string[] = [];
+    globalThis.fetch = vi.fn().mockImplementation((url: string | URL | Request) => {
+      contacted.push(String(url));
+      return Promise.resolve({
+        status: 302,
+        url: String(url),
+        headers: new Headers({ location: "http://169.254.169.254/archive.tar.gz" }),
+        body: { cancel: vi.fn().mockResolvedValue(undefined) },
+      } as unknown as Response);
+    });
+
+    await expect(
+      downloadAssetHardened("https://github.com/LuaLS/release.tar.gz", dest),
+    ).rejects.toThrow(/landing on unapproved host/);
+    expect(contacted).toEqual(["https://github.com/LuaLS/release.tar.gz"]);
+  });
+
+  it("retries transport failures and reports the last error", async () => {
+    const dest = path.join(tmpDir, "out.tar.gz");
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error("ECONNRESET"));
+
+    await expect(
+      downloadAssetHardened("https://github.com/LuaLS/release.tar.gz", dest),
+    ).rejects.toThrow(/Failed to download.*ECONNRESET/s);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  }, 20000);
+
   it("rejects downloads whose content-length header exceeds limit", async () => {
     const dest = path.join(tmpDir, "out.tar.gz");
     const headers = new Headers();

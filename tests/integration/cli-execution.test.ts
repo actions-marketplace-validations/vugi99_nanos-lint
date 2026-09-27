@@ -75,6 +75,26 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     expect(stdout).toMatch(/Diagnosis completed, no problems found across \d+ files?\./);
   });
 
+  it("keeps stdout machine-readable for --format json even with info diagnostics", async () => {
+    const { stdout } = await execFileAsync(process.execPath, [
+      distCli,
+      "check",
+      path.join(rootDir, "tests", "pass"),
+      "--format",
+      "json",
+      "-l",
+      "info",
+    ]);
+
+    // Progress milestones and info diagnostics are written to stderr, so the JSON report on
+    // stdout stays parseable at any log level (the guarantee README documents).
+    const report = JSON.parse(stdout) as { passed?: boolean; totalFiles?: number };
+    expect(report.passed).toBe(true);
+    expect(report.totalFiles).toBeGreaterThan(0);
+    expect(stdout).not.toContain("\r");
+    expect(stdout).not.toContain("\u001b");
+  }, 60000);
+
   it("executes dist/cli.js check tests/fail/type_mismatch.lua directly and exits with code 1", async () => {
     try {
       await execFileAsync(process.execPath, [

@@ -11,12 +11,16 @@ import {
   escapePowerShellSingleQuote,
 } from "../../src/luals/validation.js";
 import {
-  isAllowedDownloadUrl,
   computeFileSha256,
   limitDownloadStream,
   MAX_ARCHIVE_SIZE_BYTES,
   DOWNLOAD_TIMEOUT_MS,
 } from "../../src/luals/download.js";
+import {
+  cancelResponseBody,
+  guardedFetch,
+  type GuardedFetchResult,
+} from "../../src/download-guard.js";
 import type { TargetArchitecture } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -169,40 +173,32 @@ export function verifyExtractedTreeInvariants(
 }
 
 export async function downloadAssetHardened(url: string, destPath: string): Promise<string> {
-  if (!isAllowedDownloadUrl(url)) {
-    throw new Error(`Refusing to download from unapproved or non-HTTPS URL: ${url}`);
-  }
-
   let response: Response | null = null;
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
+    let outcome: GuardedFetchResult;
     try {
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-      });
-      if (res.url && !isAllowedDownloadUrl(res.url)) {
-        if (typeof res.body?.cancel === "function") {
-          await res.body.cancel().catch(() => {});
-        }
-        throw new Error(`Download redirect landed on unapproved host: ${res.url}`);
-      }
-      if (res.ok && res.body) {
-        response = res;
+      // Hop-by-hop redirect validation, so an unapproved host is never contacted at all.
+      outcome = await guardedFetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+    } catch (err) {
+      outcome = { ok: false, reason: "network-error", error: err };
+    }
+
+    if (outcome.ok && outcome.response) {
+      if (outcome.response.ok && outcome.response.body) {
+        response = outcome.response;
         break;
       }
-      if (typeof res.body?.cancel === "function") {
-        await res.body.cancel().catch(() => {});
-      }
-      lastErr = new Error(`HTTP ${res.status} ${res.statusText}`);
-    } catch (err) {
-      if (
-        err instanceof Error &&
-        err.message.includes("Download redirect landed on unapproved host")
-      ) {
-        throw err;
-      }
-      lastErr = err;
+      await cancelResponseBody(outcome.response);
+      lastErr = new Error(`HTTP ${outcome.response.status} ${outcome.response.statusText}`);
+    } else if (outcome.reason === "disallowed-url") {
+      throw new Error(`Refusing to download from unapproved or non-HTTPS URL: ${url}`);
+    } else if (outcome.reason !== "network-error") {
+      throw new Error(`Download redirect landing on unapproved host: ${outcome.url ?? url}`);
+    } else {
+      lastErr = outcome.error;
     }
+
     if (attempt < 3) {
       await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
     }

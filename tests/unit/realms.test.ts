@@ -180,6 +180,75 @@ describe("realm annotations cache (#15)", () => {
   });
 });
 
+describe("realm derivation progress (#50)", () => {
+  it("reports parse progress while splitting a multi-megabyte annotations file", () => {
+    const lines = ["---@meta", ""];
+    for (let index = 0; index < 900; index++) {
+      lines.push(MARKER("both"), "---@class Shared", `Shared${index} = {}`, "");
+      lines.push(MARKER("client-only"), `function Shared${index}:Only() end`, "");
+    }
+
+    let ticks = 0;
+    const split = splitAnnotationsByRealm(lines.join("\n"), () => {
+      ticks += 1;
+    });
+
+    expect(ticks).toBeGreaterThan(1);
+    expect(split.client).toContain("Shared0 = {}");
+    expect(split.client).toContain("function Shared0:Only() end");
+    expect(split.server).not.toContain("function Shared0:Only() end");
+  });
+
+  it("logs the derivation start and completion without dynamic redraws", () => {
+    const root = makeTempDir("nanos-realm-progress-");
+    const source = path.join(root, "annotations.lua");
+    fs.writeFileSync(source, ANNOTATIONS_FIXTURE, "utf-8");
+
+    const logged: string[] = [];
+    const logSpy = vi.spyOn(console, "error").mockImplementation((message: unknown) => {
+      logged.push(String(message));
+    });
+    logger.setLevel("info");
+    try {
+      deriveRealmAnnotationFiles(source, path.join(root, "derived"));
+      expect(
+        logged.some((line) => line.startsWith("[realms] Deriving client/server annotations")),
+      ).toBe(true);
+      expect(
+        logged.some((line) => /^\[realms\] Derived client\/server annotations in /.test(line)),
+      ).toBe(true);
+      for (const line of logged) {
+        expect(line).not.toContain("\r");
+        expect(line).not.toContain("\u001b");
+      }
+    } finally {
+      logger.setLevel("warn");
+      logSpy.mockRestore();
+    }
+  });
+
+  it("skips the progress display when the derived files are already cached", () => {
+    const root = makeTempDir("nanos-realm-progress-cached-");
+    const source = path.join(root, "annotations.lua");
+    fs.writeFileSync(source, ANNOTATIONS_FIXTURE, "utf-8");
+    const cacheDir = path.join(root, "derived");
+    deriveRealmAnnotationFiles(source, cacheDir);
+
+    const logged: string[] = [];
+    const logSpy = vi.spyOn(console, "error").mockImplementation((message: unknown) => {
+      logged.push(String(message));
+    });
+    logger.setLevel("info");
+    try {
+      deriveRealmAnnotationFiles(source, cacheDir);
+      expect(logged).toEqual([]);
+    } finally {
+      logger.setLevel("warn");
+      logSpy.mockRestore();
+    }
+  });
+});
+
 describe("realm file assignment (#35)", () => {
   it("assigns files by pattern and lets the last matching entry win", () => {
     const root = makeTempDir("nanos-realm-files-");
