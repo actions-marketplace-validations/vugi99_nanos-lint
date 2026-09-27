@@ -4,6 +4,7 @@ import path from "node:path";
 import { logger } from "./logger.js";
 import { writeAtomicFileSync } from "./lock.js";
 import { systemPaths } from "./paths.js";
+import { createSpinner } from "./terminal-progress.js";
 
 /** Realm name used by a pass; `global` is normalized to `shared` before this point. */
 export type RealmPassName = "client" | "server" | "shared";
@@ -19,6 +20,9 @@ const SIDE_MARKERS: ReadonlyArray<readonly [image: string, realm: RealmPassName]
 
 /** Declaration forms recognized while segmenting `annotations.lua`. */
 type AnnotationUnitKind = "comment" | "class" | "static" | "instance" | "other";
+
+/** Number of source lines parsed between two spinner ticks while splitting realms. */
+const PARSE_PROGRESS_STEP_LINES = 2_000;
 
 interface AnnotationUnit {
   doc: string[];
@@ -88,10 +92,18 @@ function kindOf(declaration: string | null): AnnotationUnitKind {
 }
 
 /** Segments annotations into comment runs plus their optional declaration statement. */
-function parseAnnotationUnits(text: string): AnnotationUnit[] {
+function parseAnnotationUnits(text: string, onProgress?: () => void): AnnotationUnit[] {
   const lines = text.split(/\r?\n/);
   const units: AnnotationUnit[] = [];
   let index = 0;
+  let nextTick = PARSE_PROGRESS_STEP_LINES;
+
+  const tick = (): void => {
+    if (onProgress !== undefined && index >= nextTick) {
+      nextTick = index + PARSE_PROGRESS_STEP_LINES;
+      onProgress();
+    }
+  };
 
   const push = (doc: string[], decl: string[] | null): void => {
     const first = decl?.[0] ?? null;
@@ -107,6 +119,7 @@ function parseAnnotationUnits(text: string): AnnotationUnit[] {
   };
 
   while (index < lines.length) {
+    tick();
     const doc: string[] = [];
     while (
       index < lines.length &&
@@ -248,11 +261,15 @@ function renderRealm(units: AnnotationUnit[], realm: RealmPassName): string {
  * and a realm-specific class table is dropped from the other realm unless it still has
  * instance members there.
  */
-export function splitAnnotationsByRealm(text: string): { client: string; server: string } {
-  const units = parseAnnotationUnits(text);
+export function splitAnnotationsByRealm(
+  text: string,
+  onProgress?: () => void,
+): { client: string; server: string } {
+  const units = parseAnnotationUnits(text, onProgress);
   const classRealms = classRealmsOf(units);
   const crossRealm = crossRealmClasses(units);
   const memberRealms = markedMemberRealms(units);
+  onProgress?.();
 
   for (const unit of units) {
     if (unit.owner) {
@@ -270,8 +287,12 @@ export function splitAnnotationsByRealm(text: string): { client: string; server:
         ? classRealm
         : "shared";
   }
+  onProgress?.();
 
-  return { client: renderRealm(units, "client"), server: renderRealm(units, "server") };
+  const client = renderRealm(units, "client");
+  onProgress?.();
+  const server = renderRealm(units, "server");
+  return { client, server };
 }
 
 export interface DerivedRealmAnnotations {
@@ -312,11 +333,20 @@ export function deriveRealmAnnotationFiles(
     return { client: clientPath, server: serverPath };
   }
 
-  const source = fs.readFileSync(annotationsPath, "utf-8");
-  const split = splitAnnotationsByRealm(source);
-  fs.mkdirSync(targetDir, { recursive: true });
-  writeAtomicFileSync(clientPath, split.client);
-  writeAtomicFileSync(serverPath, split.server);
-  logger.debug(`[realms] Derived realm annotations in ${targetDir}.`);
+  const spinner = createSpinner({ label: "[realms] Deriving client/server annotations" });
+  spinner.start();
+  try {
+    const source = fs.readFileSync(annotationsPath, "utf-8");
+    const split = splitAnnotationsByRealm(source, () => spinner.tick());
+    spinner.updateText("[realms] Writing derived annotations");
+    fs.mkdirSync(targetDir, { recursive: true });
+    writeAtomicFileSync(clientPath, split.client);
+    writeAtomicFileSync(serverPath, split.server);
+    logger.debug(`[realms] Derived realm annotations in ${targetDir}.`);
+    spinner.stop(`[realms] Derived client/server annotations in ${targetDir}.`);
+  } catch (err) {
+    spinner.fail();
+    throw err;
+  }
   return { client: clientPath, server: serverPath };
 }

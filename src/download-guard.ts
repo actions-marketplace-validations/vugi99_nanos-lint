@@ -62,6 +62,27 @@ function getRedirectLocation(res: Response): string | null {
   return res.headers.get("location");
 }
 
+/**
+ * Reads the `content-length` of a response whose bytes are streamed as received.
+ *
+ * A content-encoded response (`content-encoding: gzip`, `br`, ...) is decoded by the runtime
+ * while its `content-length` still counts the compressed payload, so that value describes
+ * neither the byte stream a progress bar counts nor the text that reaches the cache. Such a
+ * response reports no usable length and progress falls back to transferred bytes and speed.
+ */
+export function parseDeclaredContentLength(res: Response): number | undefined {
+  const encoding = (res.headers?.get?.("content-encoding") ?? "").trim().toLowerCase();
+  if (encoding !== "" && encoding !== "identity") {
+    return undefined;
+  }
+  const header = res.headers?.get?.("content-length");
+  if (!header) {
+    return undefined;
+  }
+  const declared = parseInt(header, 10);
+  return Number.isFinite(declared) && declared > 0 ? declared : undefined;
+}
+
 /** Classifies a response the runtime followed by itself despite `redirect: "manual"`. */
 function isOpaqueRedirect(res: Response): boolean {
   return res.type === "opaqueredirect";

@@ -5,6 +5,7 @@ import {
   cancelResponseBody,
   guardedFetch,
   isAllowedDownloadUrl,
+  parseDeclaredContentLength,
 } from "../../src/download-guard.js";
 
 /** A response double with a mutable `url`, mirroring the fields `guardedFetch()` reads. */
@@ -232,5 +233,40 @@ describe("download redirect guard", () => {
     ).resolves.toBeUndefined();
 
     await expect(cancelResponseBody({} as unknown as Response)).resolves.toBeUndefined();
+  });
+});
+
+describe("declared content length (#50)", () => {
+  const withHeaders = (init: Record<string, string>): Response =>
+    ({ headers: new Headers(init) }) as unknown as Response;
+
+  it("reads a positive content-length of an uncompressed response", () => {
+    expect(parseDeclaredContentLength(withHeaders({ "content-length": "3600" }))).toBe(3600);
+    expect(
+      parseDeclaredContentLength(
+        withHeaders({ "content-encoding": "IDENTITY ", "content-length": "12" }),
+      ),
+    ).toBe(12);
+  });
+
+  it("ignores the compressed length of a content-encoded response", () => {
+    expect(
+      parseDeclaredContentLength(
+        withHeaders({ "content-encoding": "gzip", "content-length": "108241" }),
+      ),
+    ).toBe(undefined);
+    expect(
+      parseDeclaredContentLength(withHeaders({ "content-encoding": "br", "content-length": "10" })),
+    ).toBe(undefined);
+  });
+
+  it("ignores missing, malformed and non-positive lengths", () => {
+    expect(parseDeclaredContentLength(withHeaders({}))).toBe(undefined);
+    expect(parseDeclaredContentLength(withHeaders({ "content-length": "chunked" }))).toBe(
+      undefined,
+    );
+    expect(parseDeclaredContentLength(withHeaders({ "content-length": "0" }))).toBe(undefined);
+    expect(parseDeclaredContentLength(withHeaders({ "content-length": "-5" }))).toBe(undefined);
+    expect(parseDeclaredContentLength({} as unknown as Response)).toBe(undefined);
   });
 });

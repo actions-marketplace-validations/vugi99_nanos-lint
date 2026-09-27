@@ -17,9 +17,10 @@ import {
   escapePowerShellSingleQuote,
 } from "./validation.js";
 import { LuaLSError } from "../errors.js";
-import { getDirectorySize } from "../paths.js";
+import { formatBytes, getDirectorySize } from "../paths.js";
 import { withFileLock } from "../lock.js";
-import { isAllowedDownloadUrl } from "../download-guard.js";
+import { isAllowedDownloadUrl, parseDeclaredContentLength } from "../download-guard.js";
+import { createProgressBar, createSpinner, formatTransferSummary } from "../terminal-progress.js";
 
 export {
   isBinaryValid,
@@ -79,6 +80,19 @@ export async function* limitDownloadStream(
         "Verify the LuaLS release asset size or specify a local binary with LUALS_BIN.",
       );
     }
+    yield chunk;
+  }
+}
+
+/** Reports cumulative transferred bytes while passing a download stream through unchanged. */
+export async function* trackDownloadProgress(
+  source: AsyncIterable<Uint8Array | Buffer>,
+  onProgress: (transferred: number) => void,
+): AsyncGenerator<Uint8Array | Buffer, void, unknown> {
+  let transferred = 0;
+  for await (const chunk of source) {
+    transferred += chunk.length;
+    onProgress(transferred);
     yield chunk;
   }
 }
@@ -288,7 +302,15 @@ async function downloadAndPromoteLuaLS(
           );
         }
       }
+      const declaredTotal = parseDeclaredContentLength(response);
 
+      const downloadStartedAt = Date.now();
+      let transferred = 0;
+      const progress = createProgressBar({
+        label: `[luals] Downloading ${info.assetName}`,
+        total: declaredTotal,
+        announce: false,
+      });
       const fileStream = fs.createWriteStream(archivePath);
       try {
         const streamSource =
@@ -297,8 +319,18 @@ async function downloadAndPromoteLuaLS(
             ? Readable.fromWeb(response.body as import("node:stream/web").ReadableStream)
             : (response.body as unknown as Readable);
 
-        await pipeline(streamSource, limitDownloadStream, fileStream);
+        await pipeline(
+          streamSource,
+          limitDownloadStream,
+          (source: AsyncIterable<Uint8Array | Buffer>) =>
+            trackDownloadProgress(source, (bytes) => {
+              transferred = bytes;
+              progress.update(bytes, declaredTotal);
+            }),
+          fileStream,
+        );
       } catch (streamErr) {
+        progress.fail();
         try {
           if (fs.existsSync(archivePath)) {
             fs.unlinkSync(archivePath);
@@ -316,6 +348,9 @@ async function downloadAndPromoteLuaLS(
           { cause: streamErr },
         );
       }
+      progress.finish(
+        `[luals] Downloaded ${info.assetName} (${formatTransferSummary(transferred, Date.now() - downloadStartedAt)})`,
+      );
 
       // Audit trail only: the digest is recorded so a downloaded asset can be
       // compared out of band. It is not checked against a pinned value, because
@@ -325,54 +360,67 @@ async function downloadAndPromoteLuaLS(
 
       logger.info(`[luals] Extracting to ${destDir}...`);
 
-      await validateArchiveMembers(archivePath);
-
+      const spinner = createSpinner({
+        label: `[luals] Extracting ${info.assetName}`,
+        announce: false,
+      });
+      spinner.start();
+      let extractedSize: number;
       try {
-        // Both Windows 10+ and UNIX systems have tar built in
-        const tarArgs =
-          process.platform === "win32"
-            ? ["-xf", path.basename(archivePath), "-C", tempDir]
-            : [
-                "-xf",
-                path.basename(archivePath),
-                "--no-same-owner",
-                "--no-same-permissions",
-                "-C",
-                tempDir,
-              ];
-        await execFileAsync(getTarBinary(), tarArgs, { cwd: path.dirname(archivePath) });
-      } catch (tarErr) {
-        // Fallback for PowerShell Expand-Archive on Windows if tar fails.
-        // `validateArchiveMembers()` reconciled the central directory with the
-        // archive's local file headers before this point, so both extractors see
-        // the same members: retrying only changes which tool reports a failure.
-        if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
-          await execFileAsync("powershell.exe", [
-            "-NoProfile",
-            "-Command",
-            `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(tempDir)}' -Force`,
-          ]);
-        } else {
-          throw tarErr;
+        await validateArchiveMembers(archivePath);
+
+        try {
+          // Both Windows 10+ and UNIX systems have tar built in
+          const tarArgs =
+            process.platform === "win32"
+              ? ["-xf", path.basename(archivePath), "-C", tempDir]
+              : [
+                  "-xf",
+                  path.basename(archivePath),
+                  "--no-same-owner",
+                  "--no-same-permissions",
+                  "-C",
+                  tempDir,
+                ];
+          await execFileAsync(getTarBinary(), tarArgs, { cwd: path.dirname(archivePath) });
+        } catch (tarErr) {
+          // Fallback for PowerShell Expand-Archive on Windows if tar fails.
+          // `validateArchiveMembers()` reconciled the central directory with the
+          // archive's local file headers before this point, so both extractors see
+          // the same members: retrying only changes which tool reports a failure.
+          if (process.platform === "win32" && info.assetName.endsWith(".zip")) {
+            await execFileAsync("powershell.exe", [
+              "-NoProfile",
+              "-Command",
+              `Expand-Archive -Path '${escapePowerShellSingleQuote(archivePath)}' -DestinationPath '${escapePowerShellSingleQuote(tempDir)}' -Force`,
+            ]);
+          } else {
+            throw tarErr;
+          }
         }
-      }
 
-      const extractedSize = getDirectorySize(tempDir);
-      if (extractedSize > MAX_DECOMPRESSED_SIZE_BYTES) {
-        throw new LuaLSError(
-          `Extracted archive size (${extractedSize} bytes) exceeds maximum limit (${MAX_DECOMPRESSED_SIZE_BYTES} bytes)`,
-          "ERR_LUALS_EXTRACT",
-          "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
-        );
-      }
+        spinner.updateText("[luals] Verifying extracted files");
+        extractedSize = getDirectorySize(tempDir);
+        if (extractedSize > MAX_DECOMPRESSED_SIZE_BYTES) {
+          throw new LuaLSError(
+            `Extracted archive size (${extractedSize} bytes) exceeds maximum limit (${MAX_DECOMPRESSED_SIZE_BYTES} bytes)`,
+            "ERR_LUALS_EXTRACT",
+            "Run 'nanos-lint clean-cache' and ensure there is sufficient disk space.",
+          );
+        }
 
-      // Cleanup archive file
-      try {
-        fs.unlinkSync(archivePath);
-      } catch (err) {
-        logger.debug(
-          `[luals] Failed to delete temporary archive ${archivePath}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        // Cleanup archive file
+        try {
+          fs.unlinkSync(archivePath);
+        } catch (err) {
+          logger.debug(
+            `[luals] Failed to delete temporary archive ${archivePath}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        spinner.stop(`[luals] Extracted ${formatBytes(extractedSize)} to ${destDir}`);
+      } catch (extractErr) {
+        spinner.fail();
+        throw extractErr;
       }
     }
 

@@ -11,6 +11,7 @@ import { cleanCache, systemPaths } from "./paths.js";
 import { getCacheStatus, formatCacheStatusPretty } from "./cache-status.js";
 import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
+import { setProgressMode } from "./terminal-progress.js";
 import { ConfigError, NanosLintError } from "./errors.js";
 import { computeUnrequestedExclusions, resolveCheckTargets } from "./target-resolver.js";
 import type { CheckOptions, DiagnosticSeverity } from "./types.js";
@@ -76,13 +77,17 @@ export function createProgram(options?: CreateProgramOptions): Command {
         .choices(["error", "warn", "info", "debug", "silent"])
         .default(DEFAULT_LOG_LEVEL),
     )
+    .option("--no-progress", "Disable the interactive download and extraction progress display")
     .hook("preAction", (thisCommand, actionCommand) => {
       const target = actionCommand || thisCommand;
       const opts = target.optsWithGlobals
-        ? target.optsWithGlobals<{ logLevel?: string }>()
-        : target.opts<{ logLevel?: string }>();
+        ? target.optsWithGlobals<{ logLevel?: string; progress?: boolean }>()
+        : target.opts<{ logLevel?: string; progress?: boolean }>();
       if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
         logger.setLevel(opts.logLevel as LogLevel);
+      }
+      if (opts.progress === false) {
+        setProgressMode("off");
       }
     })
     .exitOverride()
@@ -152,6 +157,10 @@ export function createProgram(options?: CreateProgramOptions): Command {
       const format = opts.github
         ? "github"
         : opts.format || (process.env.GITHUB_ACTIONS ? "github" : "pretty");
+
+      if (format === "json") {
+        setProgressMode("off");
+      }
 
       const checkOptions: CheckOptions = {
         path: rootPath,

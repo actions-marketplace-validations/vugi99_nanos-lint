@@ -424,6 +424,50 @@ describe("annotations management and date-based caching", () => {
       }
     });
 
+    it("reports streamed download milestones and a transfer summary (#50)", async () => {
+      const originalFetch = globalThis.fetch;
+      const content = `---@meta\n-- nanos world annotations\n${"x".repeat(1600)}`;
+      const size = Buffer.byteLength(content, "utf-8");
+      const quarter = Math.ceil(content.length / 4);
+      const chunks = [0, 1, 2, 3].map((index) =>
+        content.slice(index * quarter, (index + 1) * quarter),
+      );
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        url: RAW_ANNOTATIONS_URL,
+        headers: new Headers({ "content-length": String(size) }),
+        body: (async function* generate() {
+          for (const chunk of chunks) {
+            yield Buffer.from(chunk, "utf-8");
+          }
+        })(),
+      } as unknown as Response);
+
+      const logged: string[] = [];
+      const logSpy = vi.spyOn(console, "log").mockImplementation((message: unknown) => {
+        logged.push(String(message));
+      });
+      logger.setLevel("info");
+      try {
+        await expect(fetchRawAnnotationsContent()).resolves.toContain("nanos world annotations");
+
+        expect(
+          logged.some((line) => /^\[annotations\] Downloaded annotations\.lua \(/.test(line)),
+        ).toBe(true);
+        expect(logged.some((line) => /25% \(\d/.test(line))).toBe(true);
+        for (const line of logged) {
+          expect(line).not.toContain("\r");
+          expect(line).not.toContain("\u001b");
+        }
+      } finally {
+        logger.setLevel("warn");
+        logSpy.mockRestore();
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     it("handles fetchRawAnnotationsContent HTTP errors and truncated payloads", async () => {
       const originalFetch = globalThis.fetch;
 

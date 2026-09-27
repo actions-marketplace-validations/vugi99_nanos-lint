@@ -11,13 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added `src/download-guard.ts` with the shared outbound transfer policy: `isAllowedDownloadUrl()`, `guardedFetch()` and `cancelResponseBody()`. `guardedFetch()` resolves redirects hop by hop in `redirect: "manual"` mode, so each hop is validated against the HTTPS + GitHub allowlist before it is ever contacted, and it also refuses a 3xx without a `Location` header, a redirect chain longer than `MAX_REDIRECT_HOPS`, and a final response that left the allowlist.
 - Added `tests/unit/download-guard.test.ts` covering off-host redirects, plaintext `http://` downgrades, internal/link-local targets, hop exhaustion, unusable or missing `Location` headers, opaque redirects and transport failures.
+- Added terminal progress reporting for the long-running network and CPU operations (#50):
+  - Added `src/terminal-progress.ts` with `createProgressBar()`, `createSpinner()`, `isProgressInteractive()`, `formatTransferSummary()`, `setProgressMode()` and `restoreTerminal()`. Both displays redraw in place on a TTY (throttled to ~10 frames/s), fall back to discrete `info`-level milestones without a terminal, hide the cursor only while redrawing, and restore it on completion, failure, `SIGINT`/`SIGTERM`, uncaught exceptions and process exit.
+  - The LuaLS release archive download now renders a byte progress bar with percentage, transferred/total size, transfer speed and ETA; the transfer completion line reports size, duration and average speed.
+  - The LuaLS archive validation and extraction now render an indeterminate spinner with elapsed time, switching its label to the verification stage.
+  - The `annotations.lua` download now renders a byte progress bar with transferred size, speed and, when the transport declares an uncompressed length, percentage and ETA.
+  - Realm annotation derivation now renders an indeterminate spinner that is advanced by parse progress, so it keeps animating while the synchronous split blocks the event loop.
+  - Added `--no-progress` and the `NANOS_NO_PROGRESS` environment variable to disable the interactive display; `--format json` disables it as well.
+- Added `trackDownloadProgress()` to `src/luals/download.ts`, which reports cumulative transferred bytes while passing a download stream through unchanged.
+- Added `parseDeclaredContentLength()` to `src/download-guard.ts`, which reads a response `content-length` only when the runtime streams the bytes it describes.
+- Added unit tests in `tests/unit/terminal-progress.test.ts` plus progress assertions in `tests/unit/download-guard.test.ts`, `tests/unit/annotations.test.ts`, `tests/unit/realms.test.ts`, `tests/unit/luals-utils.test.ts` and `tests/unit/cli.test.ts`.
 
 ### Changed
 
 - The download allowlist (`ALLOWED_DOWNLOAD_DOMAINS`, `isAllowedDownloadUrl()`) now lives in `src/download-guard.ts` and is re-exported from `src/luals/download.ts`, so the policy has a single definition while the existing public API is unchanged.
+- `splitAnnotationsByRealm()` accepts an optional progress callback and reports parse, classification and render stages; `readBoundedResponseBody()` in `src/annotations-download.ts` accepts an optional per-chunk progress callback.
 
 ### Fixed
 
+- Progress percentages are no longer derived from a compressed `content-length`: GitHub serves `annotations.lua` gzip-encoded, so its declared length (108 KB) described the compressed payload while 926 KB were streamed, producing milestone lines such as `25% (32.0 KB / 106 KB)`. A declared length is now used only when the response is not content-encoded, and a total the transfer has already passed is dropped in favour of transferred bytes and speed.
 - `fetchRawAnnotationsContent()` now validates every redirect hop and the final response URL against the allowlist instead of relying on the default `redirect: "follow"`, which contacted the redirect target before any check could run. A refused redirect fails fast with `ERR_ANNOTATIONS_DOWNLOAD`, a remedy naming the refused redirect, and a `logger.warn` visible at the default log level.
 - `fetchLatestCommitId()` and `fetchLatestLuaLSVersionFromGitHub()` no longer follow redirects unchecked; both refuse an off-allowlist redirect (warning and returning `null`) so the documented transport policy covers every outbound request, not only requests that end in a file write.
 - A blocked annotations redirect can no longer poison the cache: the refused body is cancelled and neither `annotations.lua` nor `metadata.json` is rewritten, so the previously cached annotations and commit pin survive.

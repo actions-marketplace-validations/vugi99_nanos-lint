@@ -3,7 +3,12 @@ import path from "node:path";
 import { logger } from "./logger.js";
 import { AnnotationsError } from "./errors.js";
 import { withFileLock, writeAtomicFile } from "./lock.js";
-import { guardedFetch, type GuardedFetchResult } from "./download-guard.js";
+import {
+  guardedFetch,
+  parseDeclaredContentLength,
+  type GuardedFetchResult,
+} from "./download-guard.js";
+import { createProgressBar, formatTransferSummary } from "./terminal-progress.js";
 import {
   ANNOTATIONS_FILENAME,
   METADATA_FILENAME,
@@ -29,6 +34,7 @@ async function readBoundedResponseBody(
   res: Response,
   maxBytes: number,
   onExceeded: (bytes: number, reason: "header" | "stream") => never | void,
+  onProgress?: (transferred: number) => void,
 ): Promise<string | null> {
   const lengthHeader = res.headers?.get?.("content-length");
   if (lengthHeader) {
@@ -59,6 +65,7 @@ async function readBoundedResponseBody(
         onExceeded(total, "stream");
         return null;
       }
+      onProgress?.(total);
       chunks.push(buf);
     }
     return Buffer.concat(chunks).toString("utf-8");
@@ -195,25 +202,53 @@ export async function fetchRawAnnotationsContent(commitSha?: string): Promise<st
     );
   }
 
-  const text = await readBoundedResponseBody(res, MAX_ANNOTATIONS_SIZE_BYTES, (bytes, reason) => {
-    const msg =
-      reason === "header"
-        ? `Annotations file size (${bytes} bytes) exceeds maximum limit (${MAX_ANNOTATIONS_SIZE_BYTES} bytes)`
-        : `Annotations file download exceeded maximum allowed size of ${MAX_ANNOTATIONS_SIZE_BYTES} bytes`;
-    throw new AnnotationsError(
-      msg,
-      "ERR_ANNOTATIONS_TOO_LARGE",
-      "Specify a local annotations file via --annotations <path>.",
-    );
+  const declaredTotal = parseDeclaredContentLength(res);
+  const startedAt = Date.now();
+  let transferred = 0;
+  const commitLabel = commitSha ? ` (${commitSha.slice(0, 7)})` : "";
+  const progress = createProgressBar({
+    label: `[annotations] Downloading ${ANNOTATIONS_FILENAME}${commitLabel}`,
+    total: declaredTotal,
+    announce: false,
   });
 
-  if (!text || text.length < MIN_ANNOTATIONS_SIZE_BYTES) {
-    throw new AnnotationsError(
-      "Downloaded annotations.lua appears truncated or invalid",
-      "ERR_ANNOTATIONS_INVALID",
-      "Retry downloading or pass a local annotations file via --annotations <path>.",
+  let text: string | null;
+  try {
+    text = await readBoundedResponseBody(
+      res,
+      MAX_ANNOTATIONS_SIZE_BYTES,
+      (bytes, reason) => {
+        const msg =
+          reason === "header"
+            ? `Annotations file size (${bytes} bytes) exceeds maximum limit (${MAX_ANNOTATIONS_SIZE_BYTES} bytes)`
+            : `Annotations file download exceeded maximum allowed size of ${MAX_ANNOTATIONS_SIZE_BYTES} bytes`;
+        throw new AnnotationsError(
+          msg,
+          "ERR_ANNOTATIONS_TOO_LARGE",
+          "Specify a local annotations file via --annotations <path>.",
+        );
+      },
+      (bytes) => {
+        transferred = bytes;
+        progress.update(bytes, declaredTotal);
+      },
     );
+
+    if (!text || text.length < MIN_ANNOTATIONS_SIZE_BYTES) {
+      throw new AnnotationsError(
+        "Downloaded annotations.lua appears truncated or invalid",
+        "ERR_ANNOTATIONS_INVALID",
+        "Retry downloading or pass a local annotations file via --annotations <path>.",
+      );
+    }
+  } catch (err) {
+    progress.fail();
+    throw err;
   }
+
+  progress.finish(
+    `[annotations] Downloaded ${ANNOTATIONS_FILENAME} (${formatTransferSummary(transferred, Date.now() - startedAt)})`,
+  );
   return text;
 }
 

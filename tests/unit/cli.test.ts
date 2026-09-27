@@ -9,6 +9,7 @@ import * as lualsModule from "../../src/luals.js";
 import * as annotationsModule from "../../src/annotations.js";
 import * as realmsModule from "../../src/realms.js";
 import { logger } from "../../src/logger.js";
+import { getProgressMode, setProgressMode } from "../../src/terminal-progress.js";
 
 describe("cli module flag and command parsing", () => {
   it("prints help and returns 0 on --help and -h", async () => {
@@ -613,6 +614,40 @@ describe("cli module flag and command parsing", () => {
       expect(logger.getLevel()).toBe("info");
       logSpy.mockRestore();
       logger.setLevel("warn");
+    });
+
+    it("disables interactive progress with --no-progress and --format json (Issue #50)", async () => {
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const annotSpy = vi
+        .spyOn(annotationsModule, "resolveAnnotations")
+        .mockResolvedValue("/mock/annotations.lua");
+      const checkSpy = vi.spyOn(lualsModule, "runLuaLSCheck").mockResolvedValue({
+        passed: true,
+        totalProblems: 0,
+        totalFiles: 1,
+        diagnostics: {},
+      } as never);
+
+      try {
+        setProgressMode("auto");
+        expect(await runCLI(["version", "--no-progress"])).toBe(0);
+        expect(getProgressMode()).toBe("off");
+
+        setProgressMode("auto");
+        expect(await runCLI(["check", ".", "--format", "json"])).toBe(0);
+        expect(getProgressMode()).toBe("off");
+
+        setProgressMode("auto");
+        expect(await runCLI(["check", ".", "--format", "pretty", "--no-progress"])).toBe(0);
+        expect(getProgressMode()).toBe("off");
+        expect(checkSpy).toHaveBeenCalled();
+      } finally {
+        setProgressMode("auto");
+        annotSpy.mockRestore();
+        checkSpy.mockRestore();
+        logSpy.mockRestore();
+        logger.setLevel("warn");
+      }
     });
 
     it("silences the diagnosis report only with --log-level=silent", async () => {
