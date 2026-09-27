@@ -88,6 +88,41 @@ describe("LuaLS archive redirect guard", () => {
     }
   });
 
+  it("refuses a plaintext hop even when it targets an allowlisted host", async () => {
+    const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-redirect-plaintext-"));
+    const originalFetch = globalThis.fetch;
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const contacted: string[] = [];
+    // The host is on the allowlist, so only the scheme check can refuse this hop: the
+    // archive is never fetched over plaintext, which is what CWE-829 is about.
+    globalThis.fetch = vi.fn().mockImplementation((url: string | URL | Request) => {
+      contacted.push(String(url));
+      return Promise.resolve({
+        status: 302,
+        url: String(url),
+        headers: new Headers({
+          location: "http://objects.githubusercontent.com/asset.tar.gz",
+        }),
+        body: { cancel: vi.fn().mockResolvedValue(undefined) },
+      } as unknown as Response);
+    });
+    try {
+      await expect(
+        downloadAndExtractLuaLS("3.19.1", tempTarget, { reuseExisting: false }),
+      ).rejects.toMatchObject({
+        code: "ERR_LUALS_DOWNLOAD",
+        message: expect.stringContaining(
+          "Redirect to untrusted URL blocked: http://objects.githubusercontent.com/asset.tar.gz",
+        ),
+      });
+      expect(contacted).toHaveLength(1);
+    } finally {
+      warnSpy.mockRestore();
+      globalThis.fetch = originalFetch;
+      fs.rmSync(tempTarget, { recursive: true, force: true });
+    }
+  });
+
   it("surfaces untrusted redirect error when body has no cancel or cancel rejects", async () => {
     const tempTarget = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-redirect-nocancel-"));
     const originalFetch = globalThis.fetch;
