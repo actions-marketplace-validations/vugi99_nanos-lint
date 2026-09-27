@@ -19,6 +19,7 @@ import {
 import { LuaLSError } from "../errors.js";
 import { getDirectorySize } from "../paths.js";
 import { withFileLock } from "../lock.js";
+import { isAllowedDownloadUrl } from "../download-guard.js";
 
 export {
   isBinaryValid,
@@ -33,25 +34,8 @@ export {
 export const DOWNLOAD_TIMEOUT_MS = 120_000;
 export const MAX_ARCHIVE_SIZE_BYTES = 150 * 1024 * 1024; // 150 MB
 
-export const ALLOWED_DOWNLOAD_DOMAINS: readonly string[] = ["github.com", "githubusercontent.com"];
-
-/**
- * Validates that a download URL uses HTTPS and targets an allowlisted host.
- */
-export function isAllowedDownloadUrl(urlString: string): boolean {
-  try {
-    const parsed = new URL(urlString);
-    if (parsed.protocol !== "https:") {
-      return false;
-    }
-    const hostname = parsed.hostname.toLowerCase();
-    return ALLOWED_DOWNLOAD_DOMAINS.some(
-      (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
-    );
-  } catch {
-    return false;
-  }
-}
+/** Re-exported so the allowlist policy has a single definition (see `src/download-guard.ts`). */
+export { ALLOWED_DOWNLOAD_DOMAINS, isAllowedDownloadUrl } from "../download-guard.js";
 
 /** Chunk size used when hashing an archive, so a 150 MB asset is never buffered whole. */
 const HASH_CHUNK_SIZE_BYTES = 1024 * 1024;
