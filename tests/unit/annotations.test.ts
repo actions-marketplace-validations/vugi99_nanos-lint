@@ -741,6 +741,9 @@ describe("annotations management and date-based caching", () => {
 
     it("blocks a redirect that downgrades the annotations download to plaintext http", async () => {
       const insecure = "http://raw.githubusercontent.com/nanos-world/annotations.lua";
+      // The URL contains dots, so escape them before using it as a pattern: an unescaped
+      // '.' would also match any other character and could match an unexpected host.
+      const insecurePattern = insecure.replace(/\./g, "\\.");
       const contacted: string[] = [];
       const fetchSpy = vi.fn().mockImplementation((input: string | URL | Request) => {
         const url = typeof input === "string" ? input : input.toString();
@@ -757,7 +760,7 @@ describe("annotations management and date-based caching", () => {
 
       try {
         await expect(fetchRawAnnotationsContent()).rejects.toThrow(
-          new RegExp(`Redirect blocked.*${insecure}`),
+          new RegExp(`Redirect blocked.*${insecurePattern}`),
         );
         expect(fetchSpy).toHaveBeenCalledTimes(1);
         expect(contacted).not.toContain(insecure);
