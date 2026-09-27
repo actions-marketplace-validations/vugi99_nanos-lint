@@ -52,7 +52,10 @@ const CURSOR_SHOW = "\u001b[?25h";
 describe("terminal progress", () => {
   const originalEnv = { ...process.env };
   let stdout: ReturnType<typeof vi.spyOn>;
+  /** Progress lines (announcements, milestones, completions) are written to stderr. */
   let stderr: ReturnType<typeof vi.spyOn>;
+  /** Warn-severity lines keep using `console.warn`, which also targets stderr. */
+  let warned: ReturnType<typeof vi.spyOn>;
 
   const barOptions = (overrides: Partial<ProgressOptions> = {}): ProgressOptions => ({
     label: "[luals] Downloading lua-language-server.tar.gz",
@@ -71,7 +74,8 @@ describe("terminal progress", () => {
     setProgressMode("auto");
     logger.setLevel("info");
     stdout = vi.spyOn(console, "log").mockImplementation(() => {});
-    stderr = vi.spyOn(console, "warn").mockImplementation(() => {});
+    stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+    warned = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -250,7 +254,7 @@ describe("terminal progress", () => {
       bar.fail("download failed");
 
       expect(stream.text()).toContain(CURSOR_SHOW);
-      expect(stderr).toHaveBeenCalledWith("download failed");
+      expect(warned).toHaveBeenCalledWith("download failed");
     });
 
     it("leaves the completion message as a permanent log line", () => {
@@ -259,7 +263,8 @@ describe("terminal progress", () => {
       const bar = createProgressBar(barOptions({ stream, now: clock.now, throttleMs: 1 }));
 
       bar.finish("[luals] Downloaded 1.00 KB in 1.0s (1.00 KB/s)");
-      expect(stdout).toHaveBeenCalledWith("[luals] Downloaded 1.00 KB in 1.0s (1.00 KB/s)");
+      expect(stderr).toHaveBeenCalledWith("[luals] Downloaded 1.00 KB in 1.0s (1.00 KB/s)");
+      expect(stdout).not.toHaveBeenCalled();
     });
 
     it("fits frames to the terminal width and truncates long labels", () => {
@@ -326,7 +331,7 @@ describe("terminal progress", () => {
         interactive: false,
       });
 
-      expect(stdout).toHaveBeenCalledWith("[luals] Downloading archive.zip (1000 B)...");
+      expect(stderr).toHaveBeenCalledWith("[luals] Downloading archive.zip (1000 B)...");
       bar.update(100);
       bar.update(260);
       bar.update(510);
@@ -334,7 +339,7 @@ describe("terminal progress", () => {
       bar.update(990);
       bar.finish("[luals] Downloaded archive.zip");
 
-      const lines = stdout.mock.calls.map((call: unknown[]) => String(call[0]));
+      const lines = stderr.mock.calls.map((call: unknown[]) => String(call[0]));
       expect(lines).toEqual([
         "[luals] Downloading archive.zip (1000 B)...",
         "[luals] Downloading archive.zip: 25% (260 B / 1000 B)",
@@ -346,6 +351,8 @@ describe("terminal progress", () => {
         expect(line).not.toContain("\r");
         expect(line).not.toContain("\u001b");
       }
+      // The documented contract: progress never reaches stdout, so a report stays readable.
+      expect(stdout).not.toHaveBeenCalled();
     });
 
     it("stays silent when announcing is disabled and the total is unknown", () => {
@@ -360,6 +367,7 @@ describe("terminal progress", () => {
       bar.update(1000);
       bar.finish();
       expect(stdout).not.toHaveBeenCalled();
+      expect(stderr).not.toHaveBeenCalled();
     });
 
     it("omits all output at silent log level", () => {
@@ -374,6 +382,7 @@ describe("terminal progress", () => {
       expect(stream.chunks).toEqual([]);
       expect(stdout).not.toHaveBeenCalled();
       expect(stderr).not.toHaveBeenCalled();
+      expect(warned).not.toHaveBeenCalled();
     });
 
     it("auto-detects a non-TTY stream", () => {
@@ -382,7 +391,7 @@ describe("terminal progress", () => {
       bar.finish();
 
       expect(stream.text()).toBe("");
-      expect(stdout).toHaveBeenCalledWith("auto (10 B)...");
+      expect(stderr).toHaveBeenCalledWith("auto (10 B)...");
     });
 
     it("auto-detects an interactive TTY stream", () => {
@@ -425,7 +434,7 @@ describe("terminal progress", () => {
 
       spinner.stop("[realms] Derived annotations");
       expect(stream.text()).toContain(CURSOR_SHOW);
-      expect(stdout).toHaveBeenCalledWith("[realms] Derived annotations");
+      expect(stderr).toHaveBeenCalledWith("[realms] Derived annotations");
       expect(vi.getTimerCount()).toBe(0);
     });
 
@@ -481,7 +490,7 @@ describe("terminal progress", () => {
       spinner.start();
       spinner.fail("derivation failed");
       expect(stream.text()).toContain(CURSOR_SHOW);
-      expect(stderr).toHaveBeenCalledWith("derivation failed");
+      expect(warned).toHaveBeenCalledWith("derivation failed");
     });
   });
 
@@ -494,10 +503,11 @@ describe("terminal progress", () => {
       spinner.updateText("[realms] Writing annotations");
       spinner.stop("[realms] Derived annotations");
 
-      expect(stdout.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([
+      expect(stderr.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([
         "[realms] Deriving annotations...",
         "[realms] Derived annotations",
       ]);
+      expect(stdout).not.toHaveBeenCalled();
     });
 
     it("suppresses the announcement when disabled", () => {
@@ -506,6 +516,7 @@ describe("terminal progress", () => {
       spinner.tick();
       spinner.stop();
       expect(stdout).not.toHaveBeenCalled();
+      expect(stderr).not.toHaveBeenCalled();
     });
   });
 

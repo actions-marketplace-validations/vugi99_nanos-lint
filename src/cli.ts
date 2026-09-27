@@ -54,6 +54,7 @@ interface CheckCommandOptions {
   lualsVersion: string;
   fail: boolean;
   logLevel?: string;
+  progress?: boolean;
   github?: boolean;
   ignore?: string[];
   dep?: string[];
@@ -77,7 +78,10 @@ export function createProgram(options?: CreateProgramOptions): Command {
         .choices(["error", "warn", "info", "debug", "silent"])
         .default(DEFAULT_LOG_LEVEL),
     )
-    .option("--no-progress", "Disable the interactive download and extraction progress display")
+    .option(
+      "--no-progress",
+      "Disable the interactive download, extraction and realm derivation progress display",
+    )
     .hook("preAction", (thisCommand, actionCommand) => {
       const target = actionCommand || thisCommand;
       const opts = target.optsWithGlobals
@@ -91,6 +95,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
       }
     })
     .exitOverride()
+    .configureHelp({ showGlobalOptions: true })
     .configureOutput({
       writeOut: (str) => console.log(str.trimEnd()),
       writeErr: (str) => logger.error(str.trimEnd()),
@@ -160,6 +165,8 @@ export function createProgram(options?: CreateProgramOptions): Command {
 
       if (format === "json") {
         setProgressMode("off");
+        // Machine-readable output owns stdout: diagnostics must not interleave with the JSON report.
+        logger.setDiagnosticStream("stderr");
       }
 
       const checkOptions: CheckOptions = {
@@ -315,6 +322,10 @@ export function createProgram(options?: CreateProgramOptions): Command {
   };
 
   const handleCacheStatus = (opts?: { json?: boolean }): void => {
+    if (opts?.json) {
+      // Machine-readable output owns stdout: diagnostics must not interleave with the JSON report.
+      logger.setDiagnosticStream("stderr");
+    }
     const report = getCacheStatus();
     if (opts?.json) {
       writeOutput(JSON.stringify(report, null, 2));
@@ -394,6 +405,11 @@ Examples:
 
 /** Parses command-line arguments and executes the requested CLI action. */
 export async function runCLI(args: string[] = process.argv.slice(2)): Promise<number> {
+  // The redraw policy and the diagnostic stream are process-global and derived from the parsed
+  // flags, so every run starts from the defaults: a previous in-process run cannot leak into it.
+  setProgressMode("auto");
+  logger.setDiagnosticStream("stdout");
+
   // Early parse of log-level so early exits (e.g. --version, --help) configure the logger
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];

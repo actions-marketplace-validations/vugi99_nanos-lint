@@ -446,7 +446,7 @@ describe("annotations management and date-based caching", () => {
       } as unknown as Response);
 
       const logged: string[] = [];
-      const logSpy = vi.spyOn(console, "log").mockImplementation((message: unknown) => {
+      const logSpy = vi.spyOn(console, "error").mockImplementation((message: unknown) => {
         logged.push(String(message));
       });
       logger.setLevel("info");

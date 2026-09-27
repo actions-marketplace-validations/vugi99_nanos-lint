@@ -20,15 +20,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `--no-progress` and the `NANOS_NO_PROGRESS` environment variable to disable the interactive display; `--format json` disables it as well.
 - Added `trackDownloadProgress()` to `src/luals/download.ts`, which reports cumulative transferred bytes while passing a download stream through unchanged.
 - Added `parseDeclaredContentLength()` to `src/download-guard.ts`, which reads a response `content-length` only when the runtime streams the bytes it describes.
-- Added unit tests in `tests/unit/terminal-progress.test.ts` plus progress assertions in `tests/unit/download-guard.test.ts`, `tests/unit/annotations.test.ts`, `tests/unit/realms.test.ts`, `tests/unit/luals-utils.test.ts` and `tests/unit/cli.test.ts`.
+- Added unit tests in `tests/unit/terminal-progress.test.ts` plus progress assertions in `tests/unit/annotations.test.ts`, `tests/unit/realms.test.ts`, `tests/unit/luals-cache.test.ts` and `tests/unit/cli.test.ts`.
+- Added allowlist boundary coverage to `tests/unit/download-guard.test.ts` (look-alike hosts such as `evilgithub.com` and `github.com.evil.com`, uppercase hosts, userinfo, trailing-dot hosts, `https://` IP literals, non-HTTPS schemes, protocol-relative and blank `Location` headers, the exact hop-budget acceptance case), plus assertions that every refused response body is released and that an off-allowlist hop is never contacted.
+- Added `Logger.setDiagnosticStream()`/`getDiagnosticStream()` in `src/logger.ts` and the cross-origin credential-stripping rule in `guardedFetch()`.
 
 ### Changed
 
 - The download allowlist (`ALLOWED_DOWNLOAD_DOMAINS`, `isAllowedDownloadUrl()`) now lives in `src/download-guard.ts` and is re-exported from `src/luals/download.ts`, so the policy has a single definition while the existing public API is unchanged.
 - `splitAnnotationsByRealm()` accepts an optional progress callback and reports parse, classification and render stages; `readBoundedResponseBody()` in `src/annotations-download.ts` accepts an optional per-chunk progress callback.
+- The LuaLS release archive download in `src/luals/download.ts` now runs through `guardedFetch()` instead of a bare `fetch()` whose redirects were only inspected after the target had been contacted, so the archive — the request that always redirects upstream — is validated hop by hop like every other outbound request. A refused hop fails fast with `ERR_LUALS_DOWNLOAD` and is never retried; transient failures keep the existing three-attempt backoff.
+- The release-packaging tooling reuses the shared guard instead of its own copy of the check: `downloadAssetHardened()` in `scripts/packaging/verify.ts` and `resolveLuaLSReleaseVersion()` in `scripts/package-release.ts` both call `guardedFetch()`.
+- `--no-progress` (and every other global option) is now listed by `nanos-lint <command> --help`, and the flag description names realm derivation, which it also governs.
+- `runCLI()` starts each run from the default redraw policy and diagnostic stream, so an in-process repeat run cannot inherit `--no-progress` or JSON routing from the previous one.
 
 ### Fixed
 
+- Progress lines now go to stderr in every mode, not only while redrawing: the non-interactive milestones, announcements and completion lines were written to stdout, contradicting the documented `stdout` guarantee. With `--format json` (and `cache status --json`) the `info`/`debug` diagnostics are routed to stderr as well, so `nanos-lint check . --format json -l info` emits a JSON report on stdout that parses at any log level.
+- `guardedFetch()` drops `Authorization`, `Cookie` and `Proxy-Authorization` when a hop leaves the origin of the original request. Re-issuing each hop manually had started forwarding credentials that the runtime strips when it follows a redirect itself.
+- A redirect with a blank `Location` header is now refused as `missing-location` instead of resolving to the current URL and burning the whole hop budget re-requesting it.
+- `cancelResponseBody()` no longer throws when a response exposes no `cancel()` or when `cancel()` returns a non-promise, so cleanup can never mask the reason a response was refused.
 - Progress percentages are no longer derived from a compressed `content-length`: GitHub serves `annotations.lua` gzip-encoded, so its declared length (108 KB) described the compressed payload while 926 KB were streamed, producing milestone lines such as `25% (32.0 KB / 106 KB)`. A declared length is now used only when the response is not content-encoded, and a total the transfer has already passed is dropped in favour of transferred bytes and speed.
 - `fetchRawAnnotationsContent()` now validates every redirect hop and the final response URL against the allowlist instead of relying on the default `redirect: "follow"`, which contacted the redirect target before any check could run. A refused redirect fails fast with `ERR_ANNOTATIONS_DOWNLOAD`, a remedy naming the refused redirect, and a `logger.warn` visible at the default log level.
 - `fetchLatestCommitId()` and `fetchLatestLuaLSVersionFromGitHub()` no longer follow redirects unchecked; both refuse an off-allowlist redirect (warning and returning `null`) so the documented transport policy covers every outbound request, not only requests that end in a file write.
@@ -40,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Applied the documented _Strict Protocol and Host Allowlisting_ policy (`SECURITY.md`) to the runtime annotations download. Previously a redirect to any host — including a plaintext `http://` address or an internal/link-local one — was followed silently and the response body was cached as the user's type-definition source.
+- Completed that policy for the LuaLS release archive, which `SECURITY.md` already claimed. The archive download now validates every hop before contacting it, so a redirect aimed at an internal or plaintext target can no longer make the machine reach a host outside GitHub infrastructure even though the resulting body was refused.
 
 ## [3.1.0] - 2026-09-25
 

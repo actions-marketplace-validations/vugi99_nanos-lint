@@ -19,7 +19,7 @@ import {
 import { LuaLSError } from "../errors.js";
 import { formatBytes, getDirectorySize } from "../paths.js";
 import { withFileLock } from "../lock.js";
-import { isAllowedDownloadUrl, parseDeclaredContentLength } from "../download-guard.js";
+import { cancelResponseBody, guardedFetch, parseDeclaredContentLength } from "../download-guard.js";
 import { createProgressBar, createSpinner, formatTransferSummary } from "../terminal-progress.js";
 
 export {
@@ -226,50 +226,37 @@ async function downloadAndPromoteLuaLS(
       );
       fs.cpSync(existingSourceDir, tempDir, { recursive: true });
     } else {
-      if (!isAllowedDownloadUrl(url)) {
-        throw new LuaLSError(
-          `Refusing to download LuaLS from untrusted URL: ${url}`,
-          "ERR_LUALS_DOWNLOAD",
-          "Download URLs must use HTTPS and target an allowlisted GitHub host.",
-        );
-      }
-
       logger.info(`[luals] Downloading LuaLS ${resolvedVersion} from ${url}...`);
 
       let response: Response | null = null;
       let lastErr: unknown = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const res = await fetch(url, {
+          // The guard resolves redirects hop by hop, so the release asset is never requested
+          // from a host the allowlist has not approved *before* that host is contacted.
+          const outcome = await guardedFetch(url, {
             signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
           });
-          if (res.url && !isAllowedDownloadUrl(res.url)) {
-            if (typeof res.body?.cancel === "function") {
-              try {
-                await res.body.cancel();
-              } catch (cancelErr) {
-                void cancelErr;
-              }
+          if (!outcome.ok || !outcome.response) {
+            if (outcome.reason !== "network-error") {
+              // A refused hop is a policy verdict, not a transient failure: never retry it.
+              const blockedMessage = `Redirect to untrusted URL blocked: ${outcome.url ?? url}`;
+              logger.warn(`[luals] ${blockedMessage}`);
+              throw new LuaLSError(
+                blockedMessage,
+                "ERR_LUALS_DOWNLOAD",
+                "Download redirects must stay on allowlisted HTTPS GitHub hosts.",
+              );
             }
-            logger.warn(`[luals] Redirect to untrusted URL blocked: ${res.url}`);
-            throw new LuaLSError(
-              `Redirect to untrusted URL blocked: ${res.url}`,
-              "ERR_LUALS_DOWNLOAD",
-              "Download redirects must stay on allowlisted HTTPS GitHub hosts.",
-            );
-          }
-          if (res.ok && res.body) {
-            response = res;
+            lastErr = outcome.error ?? new Error(`Failed to download ${url}`);
+          } else if (outcome.response.ok && outcome.response.body) {
+            response = outcome.response;
             break;
+          } else {
+            const res = outcome.response;
+            await cancelResponseBody(res);
+            lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
           }
-          if (typeof res.body?.cancel === "function") {
-            try {
-              await res.body.cancel();
-            } catch (cancelErr) {
-              void cancelErr;
-            }
-          }
-          lastErr = new Error(`Failed to download ${url}: ${res.status} ${res.statusText}`);
         } catch (err) {
           if (err instanceof LuaLSError) {
             throw err;

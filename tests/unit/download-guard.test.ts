@@ -14,6 +14,8 @@ function fakeResponse(init: {
   url?: string;
   location?: string | null;
   type?: string;
+  /** Spy recorded as the response body's `cancel()`, so body release can be asserted. */
+  cancel?: () => Promise<void>;
 }): Response {
   const headers = new Headers();
   if (init.location !== null && init.location !== undefined) {
@@ -24,7 +26,7 @@ function fakeResponse(init: {
     url: init.url ?? "",
     headers,
     type: init.type ?? "basic",
-    body: { cancel: vi.fn().mockResolvedValue(undefined) },
+    body: { cancel: init.cancel ?? vi.fn().mockResolvedValue(undefined) },
   } as unknown as Response;
 }
 
@@ -133,6 +135,77 @@ describe("download redirect guard", () => {
     expect(contacted).toHaveLength(MAX_REDIRECT_HOPS + 1);
   });
 
+  it("accepts a chain of exactly the maximum hop budget", async () => {
+    const contacted: string[] = [];
+    stubFetch((url) => {
+      contacted.push(url);
+      return contacted.length > MAX_REDIRECT_HOPS
+        ? fakeResponse({ status: 200, url })
+        : fakeResponse({ status: 302, location: `${url}/next` });
+    });
+
+    const result = await guardedFetch("https://github.com/hop-0");
+
+    expect(result.ok).toBe(true);
+    expect(contacted).toHaveLength(MAX_REDIRECT_HOPS + 1);
+  });
+
+  it("refuses a protocol-relative Location that points off-allowlist", async () => {
+    const contacted: string[] = [];
+    stubFetch((url) => {
+      contacted.push(url);
+      return fakeResponse({ status: 302, location: "//evil.example/annotations.lua" });
+    });
+
+    const result = await guardedFetch("https://raw.githubusercontent.com/nanos-world/annotations");
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "disallowed-redirect",
+      url: "https://evil.example/annotations.lua",
+    });
+    expect(contacted).toHaveLength(1);
+  });
+
+  it("refuses an empty Location header instead of re-requesting the same URL", async () => {
+    const contacted: string[] = [];
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    stubFetch((url) => {
+      contacted.push(url);
+      return fakeResponse({ status: 302, location: "", cancel });
+    });
+
+    const result = await guardedFetch("https://github.com/loop");
+
+    expect(result).toMatchObject({ ok: false, reason: "missing-location" });
+    expect(contacted).toHaveLength(1);
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the body of every refused response", async () => {
+    const redirectCancel = vi.fn().mockResolvedValue(undefined);
+    stubFetch(() =>
+      fakeResponse({ status: 302, location: "https://evil.example/x", cancel: redirectCancel }),
+    );
+    const redirectResult = await guardedFetch("https://github.com/redirected");
+    expect(redirectResult.ok).toBe(false);
+    expect(redirectCancel).toHaveBeenCalledTimes(1);
+
+    const finalCancel = vi.fn().mockResolvedValue(undefined);
+    stubFetch(() =>
+      fakeResponse({ status: 200, url: "https://evil.example/x", cancel: finalCancel }),
+    );
+    const finalResult = await guardedFetch("https://github.com/final");
+    expect(finalResult.ok).toBe(false);
+    expect(finalCancel).toHaveBeenCalledTimes(1);
+
+    const opaqueCancel = vi.fn().mockResolvedValue(undefined);
+    stubFetch(() => fakeResponse({ status: 0, type: "opaqueredirect", cancel: opaqueCancel }));
+    const opaqueResult = await guardedFetch("https://github.com/opaque-body");
+    expect(opaqueResult.ok).toBe(false);
+    expect(opaqueCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses a redirect response that carries no Location header", async () => {
     stubFetch(() => fakeResponse({ status: 302, location: null }));
 
@@ -233,6 +306,128 @@ describe("download redirect guard", () => {
     ).resolves.toBeUndefined();
 
     await expect(cancelResponseBody({} as unknown as Response)).resolves.toBeUndefined();
+  });
+});
+
+describe("allowlist boundaries", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("accepts GitHub hosts and their subdomains over HTTPS", () => {
+    for (const url of [
+      "https://github.com/LuaLS/lua-language-server/releases",
+      "https://api.github.com/repos/x/y",
+      "https://raw.githubusercontent.com/nanos-world/x/annotations.lua",
+      "https://objects.githubusercontent.com/asset.tar.gz",
+      "https://release-assets.githubusercontent.com/asset.zip",
+      "https://gist.github.com/x",
+      "https://a.b.github.com/x",
+      "https://githubusercontent.com/x",
+      "https://GITHUB.COM/x",
+      "https://github.com:8443/x",
+    ]) {
+      expect(isAllowedDownloadUrl(url), url).toBe(true);
+    }
+  });
+
+  it("refuses look-alike hosts that merely contain an allowlisted domain", () => {
+    for (const url of [
+      "https://evilgithub.com/x",
+      "https://notgithub.com/x",
+      "https://xgithub.com/x",
+      "https://github.com.evil.com/x",
+      "https://raw.githubusercontent.com.evil.com/x",
+      "https://githubusercontent.com.evil.com/x",
+      "https://evilgithubusercontent.com/x",
+      "https://github.com./x",
+      "https://github.com@evil.com/x",
+    ]) {
+      expect(isAllowedDownloadUrl(url), url).toBe(false);
+    }
+  });
+
+  it("refuses non-HTTPS schemes, IP literals and non-host targets", () => {
+    for (const url of [
+      "http://github.com/x",
+      "ftp://github.com/x",
+      "data:text/plain,hello",
+      "file:///etc/passwd",
+      "https://169.254.169.254/latest/meta-data/",
+      "https://[::1]/x",
+      "https://[::ffff:169.254.169.254]/x",
+      "//github.com/x",
+      "",
+      "not-a-url",
+    ]) {
+      expect(isAllowedDownloadUrl(url), url).toBe(false);
+    }
+  });
+
+  it("refuses a link-local redirect target even when the scheme is HTTPS", async () => {
+    const contacted: string[] = [];
+    stubFetch((url) => {
+      contacted.push(url);
+      return fakeResponse({
+        status: 302,
+        location: "https://169.254.169.254/latest/meta-data/",
+      });
+    });
+
+    const result = await guardedFetch("https://api.github.com/repos/x/y");
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: "disallowed-redirect",
+      url: "https://169.254.169.254/latest/meta-data/",
+    });
+    expect(contacted).toEqual(["https://api.github.com/repos/x/y"]);
+  });
+});
+
+describe("credentials across redirect hops", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Runs a one-hop redirect from `from` to `to`, returning the `init` of every request. */
+  async function hopInits(from: string, to: string): Promise<RequestInit[]> {
+    const inits: RequestInit[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string, init: RequestInit) => {
+        inits.push(init);
+        const url = String(input);
+        return Promise.resolve(
+          url === from
+            ? fakeResponse({ status: 302, location: to })
+            : fakeResponse({ status: 200, url }),
+        );
+      }),
+    );
+    await guardedFetch(from, {
+      headers: { "User-Agent": "nanos-lint", Authorization: "token SECRET" },
+    });
+    return inits;
+  }
+
+  it("drops credentials on a hop to another allowlisted origin", async () => {
+    const inits = await hopInits(
+      "https://api.github.com/repos/x/y",
+      "https://objects.githubusercontent.com/asset",
+    );
+
+    expect(inits).toHaveLength(2);
+    expect(new Headers(inits[0]?.headers).get("authorization")).toBe("token SECRET");
+    expect(new Headers(inits[1]?.headers).get("authorization")).toBeNull();
+    expect(new Headers(inits[1]?.headers).get("user-agent")).toBe("nanos-lint");
+  });
+
+  it("keeps credentials on a same-origin hop", async () => {
+    const inits = await hopInits("https://api.github.com/repos/x/y", "/repos/x/y/next");
+
+    expect(inits).toHaveLength(2);
+    expect(new Headers(inits[1]?.headers).get("authorization")).toBe("token SECRET");
   });
 });
 

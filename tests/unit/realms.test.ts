@@ -205,7 +205,7 @@ describe("realm derivation progress (#50)", () => {
     fs.writeFileSync(source, ANNOTATIONS_FIXTURE, "utf-8");
 
     const logged: string[] = [];
-    const logSpy = vi.spyOn(console, "log").mockImplementation((message: unknown) => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation((message: unknown) => {
       logged.push(String(message));
     });
     logger.setLevel("info");
@@ -235,7 +235,7 @@ describe("realm derivation progress (#50)", () => {
     deriveRealmAnnotationFiles(source, cacheDir);
 
     const logged: string[] = [];
-    const logSpy = vi.spyOn(console, "log").mockImplementation((message: unknown) => {
+    const logSpy = vi.spyOn(console, "error").mockImplementation((message: unknown) => {
       logged.push(String(message));
     });
     logger.setLevel("info");

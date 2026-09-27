@@ -129,6 +129,27 @@ function writeToStderr(sequence: string): void {
   }
 }
 
+/**
+ * Writes a progress line to stderr, so stdout keeps carrying only the command report.
+ *
+ * Without a terminal the displays fall back to these discrete milestones, which are just as
+ * much part of the progress display as an in-place redraw and therefore share its stream.
+ */
+function logProgressLine(message: string): void {
+  if (logger.isEnabledFor("info")) {
+    console.error(message);
+  }
+}
+
+/** Writes a settle message on the stream matching its severity. */
+function logSettle(message: string, level: "info" | "warn"): void {
+  if (level === "warn") {
+    logger.warn(message);
+    return;
+  }
+  logProgressLine(message);
+}
+
 /** Restores the cursor and abandons the active progress line; safe to call at any time. */
 export function restoreTerminal(): void {
   if (!cursorHidden) {
@@ -310,7 +331,7 @@ export function createProgressBar(options: ProgressBarOptions): ProgressBarHandl
   let milestone = 0;
 
   if (!state.interactive && options.announce !== false) {
-    logger.info(`${state.label}${total ? ` (${formatBytes(total)})` : ""}...`);
+    logProgressLine(`${state.label}${total ? ` (${formatBytes(total)})` : ""}...`);
   }
   if (state.interactive) {
     drawFrame(state, renderBarFrame(state, 0, total), true);
@@ -319,7 +340,7 @@ export function createProgressBar(options: ProgressBarOptions): ProgressBarHandl
   const settle = (message: string | undefined, level: "info" | "warn"): void => {
     endFrame(state);
     if (message) {
-      logger[level](message);
+      logSettle(message, level);
     }
   };
 
@@ -348,7 +369,7 @@ export function createProgressBar(options: ProgressBarOptions): ProgressBarHandl
       ) {
         const reached = PROGRESS_MILESTONES[milestone] ?? 1;
         milestone += 1;
-        logger.info(
+        logProgressLine(
           `${state.label}: ${Math.round(reached * 100)}% (${formatBytes(transferred)} / ${formatBytes(total)})`,
         );
       }
@@ -375,7 +396,7 @@ export function createSpinner(options: ProgressOptions): SpinnerHandle {
     clearTimer();
     endFrame(state);
     if (message) {
-      logger[level](message);
+      logSettle(message, level);
     }
   };
 
@@ -383,7 +404,7 @@ export function createSpinner(options: ProgressOptions): SpinnerHandle {
     start: (): void => {
       if (!state.interactive) {
         if (options.announce !== false) {
-          logger.info(`${state.label}...`);
+          logProgressLine(`${state.label}...`);
         }
         return;
       }

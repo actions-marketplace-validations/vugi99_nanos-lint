@@ -12,6 +12,35 @@ export const ALLOWED_DOWNLOAD_DOMAINS: readonly string[] = ["github.com", "githu
 /** Maximum number of redirect hops followed before a request is refused. */
 export const MAX_REDIRECT_HOPS = 5;
 
+/** Headers that must never follow a redirect to another origin. */
+const CREDENTIAL_HEADERS: readonly string[] = ["authorization", "cookie", "proxy-authorization"];
+
+/** Returns the origin of an already validated URL, or null when it cannot be parsed. */
+function originOf(urlString: string): string | null {
+  try {
+    return new URL(urlString).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the caller's headers with credentials removed.
+ *
+ * The runtime strips `Authorization` when it follows a redirect by itself, so dropping it here
+ * keeps that guarantee once the guard re-issues each hop manually instead of following it.
+ */
+function withoutCredentialHeaders(headers: RequestInit["headers"]): RequestInit["headers"] {
+  if (headers === undefined) {
+    return undefined;
+  }
+  const stripped = new Headers(headers);
+  for (const name of CREDENTIAL_HEADERS) {
+    stripped.delete(name);
+  }
+  return stripped;
+}
+
 /** Validates that a URL uses HTTPS and targets an allowlisted GitHub host. */
 export function isAllowedDownloadUrl(urlString: string): boolean {
   try {
@@ -47,10 +76,21 @@ export interface GuardedFetchResult {
   error?: unknown;
 }
 
-/** Releases a response body without letting cleanup failures mask the block reason. */
+/**
+ * Releases a response body without letting cleanup failures mask the block reason.
+ *
+ * Every failure mode is swallowed on purpose: a missing body, a double that exposes no
+ * `cancel()`, and a `cancel()` that rejects or returns a non-promise must all leave the
+ * caller free to report why the response was refused.
+ */
 export async function cancelResponseBody(res: Response): Promise<void> {
-  if (typeof res.body?.cancel === "function") {
-    await res.body.cancel().catch(() => {});
+  try {
+    if (typeof res.body?.cancel === "function") {
+      await res.body.cancel();
+    }
+  } catch (err) {
+    // Cleanup is best-effort: the refusal reason is the actionable information.
+    void err;
   }
 }
 
@@ -105,12 +145,14 @@ export async function guardedFetch(
   }
 
   let currentUrl = url;
+  let currentInit = init;
   let followed = 0;
+  const requestOrigin = originOf(url);
 
   for (;;) {
     let response: Response;
     try {
-      response = await fetch(currentUrl, { ...init, redirect: "manual" });
+      response = await fetch(currentUrl, { ...currentInit, redirect: "manual" });
     } catch (err) {
       return { ok: false, reason: "network-error", url: currentUrl, error: err };
     }
@@ -132,9 +174,10 @@ export async function guardedFetch(
       return { ok: true, response };
     }
 
-    // A 3xx without a usable target is never accepted as a final response.
+    // A 3xx without a usable target is never accepted as a final response. A blank `Location`
+    // would otherwise resolve to the current URL and spin until the hop budget runs out.
     const location = getRedirectLocation(response);
-    if (location === null) {
+    if (location === null || location.trim() === "") {
       await cancelResponseBody(response);
       return { ok: false, reason: "missing-location", url: currentUrl };
     }
@@ -156,6 +199,12 @@ export async function guardedFetch(
     followed++;
     if (followed > MAX_REDIRECT_HOPS) {
       return { ok: false, reason: "too-many-redirects", url: nextUrl };
+    }
+    // The hop target is trusted, but a credential minted for the original host is not:
+    // mirror the runtime's own cross-origin credential stripping.
+    const nextOrigin = originOf(nextUrl);
+    if (requestOrigin !== null && nextOrigin !== null && nextOrigin !== requestOrigin) {
+      currentInit = { ...init, headers: withoutCredentialHeaders(init.headers) };
     }
     currentUrl = nextUrl;
   }

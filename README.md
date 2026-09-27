@@ -159,7 +159,7 @@ OPTIONS:
   --luals-version=<ver>    Version of LuaLS to use (default: latest, falling back to 3.19.1 when offline)
   --no-fail                Do not exit with code 1 if diagnostics are found
   --realm <realm>          Execution realm to check: all, client, server, shared (default: all)
-  --no-progress            Disable the interactive download and extraction progress display
+  --no-progress            Disable the interactive download, extraction and realm derivation progress display
   -f, --force              (init command only) Overwrite existing .luarc.json
 ```
 
@@ -187,6 +187,10 @@ Dynamic redrawing is also disabled by `--no-progress`, `NANOS_NO_PROGRESS`, `--f
 `content-length` (GitHub serves `annotations.lua` gzip-encoded), the percentage is dropped in
 favour of transferred bytes and speed instead of reporting a misleading total.
 
+Machine-readable output owns `stdout`: with `--format json` (and `cache status --json`) the
+milestones, completions and every other `info`/`debug` diagnostic move to `stderr` as well, so
+`nanos-lint check . --format json -l info | jq .` works at any log level.
+
 ### Environment Variables
 
 | Variable                                      | Description                                                                                                                                                                                                                    |
@@ -196,7 +200,7 @@ favour of transferred bytes and speed instead of reporting a misleading total.
 | `NANOS_LOG_LEVEL`                             | Default logging level: `error`, `warn`, `info`, `debug`, `silent` (default: `warn`)                                                                                                                                            |
 | `GITHUB_TOKEN`                                | GitHub personal access token used for authenticated GitHub API requests (avoids unauthenticated rate limits)                                                                                                                   |
 | `NANOS_NO_PROGRESS`                           | Disables the interactive download/extraction progress display when set to any non-empty value other than `0`, `false`, `no` or `off`                                                                                           |
-| `NO_COLOR`                                    | Disables ANSI color output and dynamic progress redrawing when set to any non-empty value                                                                                                                                      |
+| `NO_COLOR`                                    | Disables ANSI color output when set to any non-empty value; dynamic progress redrawing stops for any non-empty value other than `0`, `false`, `no` or `off`                                                                    |
 | `FORCE_COLOR`                                 | Forces ANSI color output even in non-TTY environments                                                                                                                                                                          |
 
 Only `NANOS_LOG_LEVEL` controls the logging level; a generic `LOG_LEVEL` environment variable is intentionally not read, because CI images commonly set it.

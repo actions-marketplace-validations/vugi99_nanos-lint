@@ -173,5 +173,36 @@ describe("logger module", () => {
     it("provides a singleton logger instance", () => {
       expect(logger).toBeInstanceOf(Logger);
     });
+
+    it("routes info and debug diagnostics to stderr on request", () => {
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+      const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {});
+
+      const l = new Logger("debug");
+      expect(l.getDiagnosticStream()).toBe("stdout");
+
+      l.info("info message");
+      l.debug("debug message");
+      expect(logSpy).toHaveBeenCalledWith("info message");
+      expect(debugSpy).toHaveBeenCalledWith("debug message");
+
+      logSpy.mockClear();
+      debugSpy.mockClear();
+      l.setDiagnosticStream("stderr");
+      expect(l.getDiagnosticStream()).toBe("stderr");
+
+      l.info("info message");
+      l.debug("debug message");
+      expect(errorSpy).toHaveBeenCalledWith("info message");
+      expect(errorSpy).toHaveBeenCalledWith("debug message");
+      expect(logSpy).not.toHaveBeenCalled();
+      expect(debugSpy).not.toHaveBeenCalled();
+
+      // warn/error already target stderr and stay there.
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      l.warn("warn message");
+      expect(warnSpy).toHaveBeenCalledWith("warn message");
+    });
   });
 });
