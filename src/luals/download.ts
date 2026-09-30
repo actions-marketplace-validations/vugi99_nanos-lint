@@ -10,6 +10,7 @@ import { DEFAULT_LUALS_VERSION, resolveLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
 import { findExistingLuaLSDir, getBaseLuaLSCacheDir, getCacheDir } from "./cache.js";
 import {
+  rethrowLuaLSPermissionError,
   isBinaryValid,
   MAX_DECOMPRESSED_SIZE_BYTES,
   validateArchiveMembers,
@@ -115,6 +116,7 @@ function isCompleteLuaLSInstall(
   try {
     return fs.readFileSync(completeMarker, "utf-8").trim() === version && isBinaryValid(binaryPath);
   } catch (err) {
+    rethrowLuaLSPermissionError(err, completeMarker);
     logger.debug(
       `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -185,6 +187,7 @@ async function downloadAndPromoteLuaLS(
           return binaryPath;
         }
       } catch (err) {
+        rethrowLuaLSPermissionError(err, completeMarker);
         logger.debug(
           `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -194,6 +197,7 @@ async function downloadAndPromoteLuaLS(
     try {
       fs.rmSync(destDir, { recursive: true, force: true });
     } catch (err) {
+      rethrowLuaLSPermissionError(err, destDir);
       logger.warn(
         `[luals] Failed to remove stale or invalid cache dir ${destDir}: ${err instanceof Error ? err.message : String(err)}`,
       );

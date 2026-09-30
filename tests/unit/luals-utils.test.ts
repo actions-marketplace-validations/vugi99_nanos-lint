@@ -297,6 +297,7 @@ describe("luals utilities", () => {
     it("returns false when file is large enough but execFileSync fails", () => {
       const tempFakeBin = path.join(os.tmpdir(), `test-fake-large-${Date.now()}.exe`);
       fs.writeFileSync(tempFakeBin, Buffer.alloc(100_005));
+      if (process.platform !== "win32") fs.chmodSync(tempFakeBin, 0o755);
       try {
         expect(isBinaryValid(tempFakeBin)).toBe(false);
       } finally {
@@ -330,6 +331,7 @@ describe("luals utilities", () => {
       // Deliberately below the downloaded-archive size floor: the size heuristic
       // must not decide the outcome here.
       fs.writeFileSync(tempFile, "not a lua-language-server");
+      if (process.platform !== "win32") fs.chmodSync(tempFile, 0o755);
       try {
         expect(isBinaryRunnable(tempFile)).toBe(false);
       } finally {
@@ -435,6 +437,7 @@ describe("luals utilities", () => {
       const origBin = process.env.LUALS_BIN;
       const tempBin = path.join(os.tmpdir(), `fake-luals-${Date.now()}.exe`);
       fs.writeFileSync(tempBin, "binary");
+      if (process.platform !== "win32") fs.chmodSync(tempBin, 0o755);
       process.env.LUALS_BIN = tempBin;
       try {
         await expect(resolveLuaLSBinary()).rejects.toThrow(

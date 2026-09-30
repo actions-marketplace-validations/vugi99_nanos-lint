@@ -114,6 +114,7 @@ describe("LuaLS weekly cache check and version management", () => {
       const v1Bin = path.join(v1Dir, info.binaryRelativePath);
       fs.mkdirSync(path.dirname(v1Bin), { recursive: true });
       fs.writeFileSync(v1Bin, Buffer.alloc(100_005));
+      if (process.platform !== "win32") fs.chmodSync(v1Bin, 0o755);
       fs.writeFileSync(path.join(v1Dir, ".complete"), "3.19.1");
 
       // Version 2: mismatched marker
