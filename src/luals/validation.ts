@@ -335,6 +335,30 @@ export async function validateArchiveMembers(
  */
 export const MIN_DOWNLOADED_BINARY_SIZE_BYTES = 100_000;
 
+/** Propagates blocked LuaLS execution or cache access without triggering repair. */
+export function rethrowLuaLSPermissionError(
+  err: unknown,
+  targetPath: string,
+  operation: "execute" | "access" = "access",
+): void {
+  if (
+    err instanceof LuaLSError &&
+    (err.code === "ERR_LUALS_EXECUTION_DENIED" || err.code === "ERR_LUALS_CACHE_PERMISSION")
+  ) {
+    throw err;
+  }
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  if (code !== "EPERM" && code !== "EACCES") return;
+  throw new LuaLSError(
+    `Cannot ${operation} LuaLS ${operation === "execute" ? "binary" : "cache path"} '${targetPath}': ${code}: ${err instanceof Error ? err.message : String(err)}`,
+    operation === "execute" ? "ERR_LUALS_EXECUTION_DENIED" : "ERR_LUALS_CACHE_PERMISSION",
+    operation === "execute"
+      ? "Run nanos-lint in an environment that permits LuaLS execution and check the binary's execute permissions and sandbox policy. The existing cache has been preserved."
+      : "Allow access to the LuaLS cache directory or use a writable cache directory.",
+    { cause: err },
+  );
+}
+
 /**
  * Runs `binaryPath --version` and checks that it reports a LuaLS version.
  * Shared by every binary validation path; the size heuristic stays separate
@@ -349,6 +373,7 @@ function reportsLuaLSVersion(binaryPath: string): boolean {
     });
     return /^\d+\.\d+\.\d+/.test(output.trim());
   } catch (err) {
+    rethrowLuaLSPermissionError(err, binaryPath, "execute");
     logger.debug(
       `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -371,6 +396,7 @@ export function isBinaryValid(binaryPath: string): boolean {
     }
     return reportsLuaLSVersion(binaryPath);
   } catch (err) {
+    rethrowLuaLSPermissionError(err, binaryPath);
     logger.debug(
       `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -389,6 +415,7 @@ export function isBinaryRunnable(binaryPath: string): boolean {
       return false;
     }
   } catch (err) {
+    rethrowLuaLSPermissionError(err, binaryPath);
     logger.debug(
       `[luals] Binary validation check failed for ${binaryPath}: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -416,6 +443,7 @@ export function assertValidLuaLSBinary(binaryPath: string, source: string): stri
   try {
     stats = fs.statSync(binaryPath);
   } catch (err) {
+    rethrowLuaLSPermissionError(err, binaryPath);
     throw new LuaLSError(
       `${source} points to '${binaryPath}', which does not exist or cannot be read: ${err instanceof Error ? err.message : String(err)}`,
       "ERR_LUALS_BIN_INVALID",

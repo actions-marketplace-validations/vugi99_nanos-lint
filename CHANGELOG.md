@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve LuaLS caches when validation is blocked by `EPERM` or `EACCES`, and report the binary path and execution permissions or sandbox policy remedy instead of attempting corruption repair (#53). Cache repair permission failures now surface directly.
+
 ## [3.2.0] - 2026-09-27
 
 ### Added

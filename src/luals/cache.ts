@@ -5,7 +5,7 @@ import { logger } from "../logger.js";
 import { getPackageRoot } from "../config.js";
 import { FALLBACK_LUALS_VERSION, sanitizeLuaLSVersion } from "./version.js";
 import { getPlatformInfo } from "./platform.js";
-import { isBinaryValid } from "./validation.js";
+import { isBinaryValid, rethrowLuaLSPermissionError } from "./validation.js";
 import { writeAtomicFileSync } from "../lock.js";
 
 /** Returns the base directory in the system cache where LuaLS versions and metadata are stored. */
@@ -170,6 +170,7 @@ export function listCachedLuaLSVersions(baseCacheDir: string = getBaseLuaLSCache
             versions.push(version);
           }
         } catch (err) {
+          rethrowLuaLSPermissionError(err, bin);
           logger.debug(
             `[luals] Error validating cached version ${version}: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -178,6 +179,7 @@ export function listCachedLuaLSVersions(baseCacheDir: string = getBaseLuaLSCache
     }
     return versions;
   } catch (err) {
+    rethrowLuaLSPermissionError(err, baseCacheDir);
     logger.debug(
       `[luals] Failed to list cached LuaLS versions: ${err instanceof Error ? err.message : String(err)}`,
     );
@@ -247,6 +249,7 @@ export function findExistingLuaLSDir(
         return primaryCache;
       }
     } catch (err) {
+      rethrowLuaLSPermissionError(err, primaryMarker);
       logger.debug(
         `[luals] Error checking primary LuaLS cache marker at ${primaryMarker}: ${err instanceof Error ? err.message : String(err)}`,
       );
