@@ -26,7 +26,11 @@ import {
   cleanupOldCachedLuaLSVersions,
   getIsoWeek,
 } from "./cache.js";
-import { isBinaryValid, assertValidLuaLSBinary } from "./validation.js";
+import {
+  isBinaryValid,
+  assertValidLuaLSBinary,
+  rethrowLuaLSPermissionError,
+} from "./validation.js";
 import { downloadAndExtractLuaLS } from "./download.js";
 import { countCheckedFiles } from "./files.js";
 
@@ -102,6 +106,7 @@ export async function resolveLuaLSBinary(
             }
           }
         } catch (err) {
+          rethrowLuaLSPermissionError(err, completeMarker);
           logger.debug(
             `[luals] Failed to read complete marker at ${completeMarker}: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -116,6 +121,7 @@ export async function resolveLuaLSBinary(
       try {
         fs.rmSync(cachedDir, { recursive: true, force: true });
       } catch (err) {
+        rethrowLuaLSPermissionError(err, cachedDir);
         logger.warn(
           `[luals] Failed to remove corrupted cache directory ${cachedDir}: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -132,6 +138,7 @@ export async function resolveLuaLSBinary(
           return found;
         }
       } catch (err) {
+        rethrowLuaLSPermissionError(err, "lua-language-server", "execute");
         logger.debug(
           `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -146,6 +153,7 @@ export async function resolveLuaLSBinary(
         options,
       );
     } catch (err) {
+      rethrowLuaLSPermissionError(err, cachedDir);
       if (wasCorrupted) {
         const isOffline = isOfflineError(err);
         const reason = isOffline
@@ -260,6 +268,7 @@ export async function resolveLuaLSBinary(
         return found;
       }
     } catch (err) {
+      rethrowLuaLSPermissionError(err, "lua-language-server", "execute");
       logger.debug(
         `[luals] LuaLS binary not found in PATH: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -271,6 +280,7 @@ export async function resolveLuaLSBinary(
   try {
     downloadedBinary = await downloadAndExtractLuaLS(targetVersion, targetCacheDir, options);
   } catch (err) {
+    rethrowLuaLSPermissionError(err, targetCacheDir);
     if (wasCorrupted) {
       const isOffline = isOfflineError(err);
       const reason = isOffline ? "while offline" : err instanceof Error ? err.message : String(err);
