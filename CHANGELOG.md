@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-09-30
+
 ### Changed
 
 - Updated `@types/node` from 26.6.2 to 26.6.3 via Dependabot (#52).
@@ -15,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Preserve LuaLS caches when validation is blocked by `EPERM` or `EACCES`, and report the binary path and execution permissions or sandbox policy remedy instead of attempting corruption repair (#53). Cache repair permission failures now surface directly.
+
+### Security
+
+- Dropped security support for versions < 3.2.1 in `SECURITY.md`.
 
 ## [3.2.0] - 2026-09-27
 
