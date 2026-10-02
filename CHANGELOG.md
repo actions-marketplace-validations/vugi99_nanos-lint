@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-02
+
 ### Added
 
 - Added `copy-annotations` CLI command (with `export-annotations` alias) and programmatic `copyAnnotations()` export to copy cached nanos world definitions into a workspace or custom target path (#56). Targets not ending in `.lua` (case-insensitive) are treated as directories.
