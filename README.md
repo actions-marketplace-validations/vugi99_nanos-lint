@@ -134,7 +134,8 @@ nanos-lint [command] [options] [paths...]
 
 COMMANDS:
   check [paths...]         Check workspace files or directories (default)
-  init [path]              Scaffold a .luarc.json configuration in the workspace (copies definitions to .nanos-lint/; supports --annotations <path>)
+  init [path]              Scaffold a .luarc.json configuration in the workspace (supports --vendor, --force)
+  copy-annotations [dest]  Copy cached annotations.lua definitions into a target file or directory (alias: export-annotations; targets not ending in .lua are treated as directories)
   warmup, download         Pre-fetch and cache both LuaLS binary and annotations for offline execution
   cache status, cache info Show cache status, installed versions, and disk usage (supports --json)
   cache clean              Clear the nanos-lint cache directory
@@ -153,14 +154,15 @@ OPTIONS:
                            debug adds diagnostic tracing
   --checklevel=<level>     Minimum diagnostic level: Error, Warning, Information, Hint (default: Warning)
   --config=<path>          Path to custom .luarc.json configuration file
-  --annotations=<path>     Path to custom annotations.lua file (applies to both check and init)
+  --annotations=<path>     Path to custom annotations.lua file (applies to check, init --vendor, and copy-annotations)
   --format=<format>        Output format: pretty, json, github (default: pretty)
   --github                 Output in GitHub Actions format (shortcut for --format=github)
   --luals-version=<ver>    Version of LuaLS to use (default: latest, falling back to 3.19.1 when offline)
   --no-fail                Do not exit with code 1 if diagnostics are found
   --realm <realm>          Execution realm to check: all, client, server, shared (default: all)
   --no-progress            Disable the interactive download, extraction and realm derivation progress display
-  -f, --force              (init command only) Overwrite existing .luarc.json
+  --vendor                 (init command only) Vendor annotations.lua into .nanos-lint/ inside workspace
+  -f, --force              (init and copy-annotations only) Overwrite existing files
 ```
 
 ### Progress Display
@@ -223,13 +225,31 @@ If your project already has a `.luarc.json`, `nanos-lint` automatically merges i
 }
 ```
 
-To scaffold a portable `.luarc.json` with vendored type annotations in your project, run:
+To scaffold a `.luarc.json` configuration in your project:
 
 ```bash
 npx nanos-lint init
 # Or overwrite an existing configuration:
 npx nanos-lint init --force
 ```
+
+By default `init` writes no annotations reference at all: `workspace.library` stays empty and
+`nanos-lint check` injects the managed cache path into its own temporary merged configuration at
+runtime, so a later cache update is picked up without touching repository files. Editors that read
+`.luarc.json` directly need a pinned copy, which is always an explicit opt-in:
+
+```bash
+# Initialize with annotations vendored into .nanos-lint/ and pinned in workspace.library
+npx nanos-lint init --vendor
+
+# Or copy the cached annotations to a custom file, or to any target that does not end in
+# ".lua" (treated as a directory). Copying alone does not pin anything: add the resulting
+# path to workspace.library yourself.
+npx nanos-lint copy-annotations
+npx nanos-lint copy-annotations ./types
+```
+
+`copy-annotations` refuses to overwrite an existing file unless `--force` is passed.
 
 ### Realm Mapping (`nanos.realms`)
 
@@ -369,7 +389,7 @@ npm run check:all
 npm run format:check    # Prettier code formatting (auto-fix via npm run format:fix)
 npm run lint            # ESLint
 npm run lint:deps       # Dependency architecture & license checks (dependency-cruiser)
-npm run lint:comments   # Comment density limit (<= 15%)
+npm run lint:comments   # Comment density limit (<= 10%)
 npm run lint:docstrings # Docstring coverage (>= 90% top-level/exported function coverage per file in src/)
 npm run typecheck       # TypeScript typecheck
 npm run build           # Build distribution bundle

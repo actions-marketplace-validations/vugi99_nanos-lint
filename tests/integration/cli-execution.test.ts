@@ -66,6 +66,42 @@ describe.skipIf(!isLiveTestsEnabled())("CLI entrypoint execution regression test
     expect(stdout.trim()).toMatch(/^nanos-lint v\d+\.\d+\.\d+$/);
   });
 
+  it("copies annotations to the default .nanos-lint destination and refuses silent overwrites (#56)", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-copy-annotations-"));
+    try {
+      const annotations = await getSharedAnnotations();
+
+      const { stdout } = await execFileAsync(
+        process.execPath,
+        [distCli, "copy-annotations", "--annotations", annotations],
+        { cwd: tempDir },
+      );
+      const copied = path.join(tempDir, ".nanos-lint", "annotations.lua");
+      expect(stdout).toContain("[copy-annotations] Copied nanos world annotations to:");
+      expect(fs.statSync(copied).size).toBe(fs.statSync(annotations).size);
+
+      // The documented export-annotations alias resolves the same default and still needs --force.
+      try {
+        await execFileAsync(
+          process.execPath,
+          [distCli, "export-annotations", "--annotations", annotations],
+          { cwd: tempDir },
+        );
+        expect.fail("Expected export-annotations to refuse overwriting without --force");
+      } catch (err: unknown) {
+        expect((err as { code?: number }).code).toBe(1);
+      }
+
+      await execFileAsync(
+        process.execPath,
+        [distCli, "export-annotations", "--force", "--annotations", annotations],
+        { cwd: tempDir },
+      );
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("executes dist/cli.js check tests/pass directly and exits with code 0", async () => {
     const { stdout } = await execFileAsync(process.execPath, [
       distCli,
