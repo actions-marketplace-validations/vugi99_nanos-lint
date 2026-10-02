@@ -107,7 +107,7 @@ describe("cli module flag and command parsing", () => {
     errSpy.mockRestore();
   });
 
-  it("executes init subcommand successfully", async () => {
+  it("executes init subcommand successfully without vendoring annotations", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cli-init-test-"));
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
@@ -115,9 +115,70 @@ describe("cli module flag and command parsing", () => {
       const code = await runCLI(["init", tempDir]);
       expect(code).toBe(0);
       expect(fs.existsSync(path.join(tempDir, ".luarc.json"))).toBe(true);
+      expect(fs.existsSync(path.join(tempDir, ".nanos-lint"))).toBe(false);
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
       logSpy.mockRestore();
+    }
+  });
+
+  it("executes init subcommand with --vendor when requested", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cli-init-vendor-"));
+    const dummyAnnotations = path.join(tempDir, "source.lua");
+    fs.writeFileSync(dummyAnnotations, "-- valid annotations\nlocal a = 1\n");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      const code = await runCLI(["init", tempDir, "--vendor", "--annotations", dummyAnnotations]);
+      expect(code).toBe(0);
+      expect(fs.existsSync(path.join(tempDir, ".luarc.json"))).toBe(true);
+      expect(fs.existsSync(path.join(tempDir, ".nanos-lint", "annotations.lua"))).toBe(true);
+      const config = JSON.parse(fs.readFileSync(path.join(tempDir, ".luarc.json"), "utf-8"));
+      expect(config.workspace?.library).toEqual([".nanos-lint/annotations.lua"]);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      logSpy.mockRestore();
+    }
+  });
+
+  it("handles copy-annotations subcommand with target path and force overwrite", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cli-copy-ann-"));
+    const dummyAnnotations = path.join(tempDir, "source.lua");
+    fs.writeFileSync(dummyAnnotations, "-- valid annotations\nlocal a = 1\n");
+    const targetFile = path.join(tempDir, "pinned", "annotations.lua");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const code1 = await runCLI([
+        "copy-annotations",
+        targetFile,
+        "--annotations",
+        dummyAnnotations,
+      ]);
+      expect(code1).toBe(0);
+      expect(fs.existsSync(targetFile)).toBe(true);
+
+      const codeFail = await runCLI([
+        "copy-annotations",
+        targetFile,
+        "--annotations",
+        dummyAnnotations,
+      ]);
+      expect(codeFail).toBe(1);
+
+      const codeForce = await runCLI([
+        "copy-annotations",
+        targetFile,
+        "--force",
+        "--annotations",
+        dummyAnnotations,
+      ]);
+      expect(codeForce).toBe(0);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      logSpy.mockRestore();
+      errSpy.mockRestore();
     }
   });
 

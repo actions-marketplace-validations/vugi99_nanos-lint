@@ -205,8 +205,8 @@ describe.skipIf(!isLiveTestsEnabled())("LuaLS live integration tests", () => {
     fs.mkdirSync(tempWorkspace, { recursive: true });
 
     try {
-      // 1. Initialize workspace (copies .nanos-lint/annotations.lua and writes .luarc.json)
       initWorkspace(tempWorkspace, { force: true });
+      expect(fs.existsSync(path.join(tempWorkspace, ".nanos-lint"))).toBe(false);
 
       // 2. Add valid nanos world code that relies on types from annotations.lua
       const code = `

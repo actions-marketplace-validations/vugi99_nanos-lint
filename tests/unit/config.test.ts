@@ -395,32 +395,58 @@ describe("config module", () => {
       }
     });
 
-    it("handles initWorkspace error cases and options", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-init-options-"));
+    it("handles initWorkspace default mode without vendoring annotations (#56)", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-init-default-"));
       try {
-        const dummyAnnotations = path.join(tempDir, "annotations.lua");
-        fs.writeFileSync(dummyAnnotations, "-- dummy");
-
-        // Fails when annotationsPath does not exist
-        expect(() => {
-          initWorkspace(tempDir, { annotationsPath: "/nonexistent/annotations.lua" });
-        }).toThrow(/Definitions file not found/);
-
-        // First initialization succeeds
-        const created = initWorkspace(tempDir, { annotationsPath: dummyAnnotations });
+        const created = initWorkspace(tempDir);
         expect(fs.existsSync(created)).toBe(true);
+        expect(fs.existsSync(path.join(tempDir, ".nanos-lint"))).toBe(false);
 
-        // Fails when .luarc.json already exists without force
+        const config = JSON.parse(fs.readFileSync(created, "utf-8"));
+        expect(config.workspace?.library).toEqual([]);
+
         expect(() => {
-          initWorkspace(tempDir, { annotationsPath: dummyAnnotations });
+          initWorkspace(tempDir);
         }).toThrow(/\.luarc\.json already exists/);
 
-        // Succeeds with force: true
-        const overwritten = initWorkspace(tempDir, {
-          force: true,
+        const overwritten = initWorkspace(tempDir, { force: true });
+        expect(overwritten).toBe(created);
+
+        const resolved = resolveWorkspaceConfig(tempDir, undefined, {
+          annotationsPath: "/managed/cache/annotations.lua",
+        });
+        const merged = JSON.parse(fs.readFileSync(resolved.configPath, "utf-8"));
+        expect(merged.workspace?.library).toContain("/managed/cache/annotations.lua");
+        if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
+          fs.unlinkSync(resolved.configPath);
+        }
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("handles initWorkspace explicit vendoring mode (#56)", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-init-vendor-"));
+      try {
+        const dummyAnnotations = path.join(tempDir, "source-annotations.lua");
+        fs.writeFileSync(dummyAnnotations, "-- dummy annotations");
+
+        expect(() => {
+          initWorkspace(tempDir, {
+            vendor: true,
+            annotationsPath: "/nonexistent/annotations.lua",
+          });
+        }).toThrow(/Definitions file not found/);
+
+        const created = initWorkspace(tempDir, {
+          vendor: true,
           annotationsPath: dummyAnnotations,
         });
-        expect(overwritten).toBe(created);
+        expect(fs.existsSync(created)).toBe(true);
+
+        const config = JSON.parse(fs.readFileSync(created, "utf-8"));
+        expect(config.workspace?.library).toEqual([".nanos-lint/annotations.lua"]);
+        expect(fs.existsSync(path.join(tempDir, ".nanos-lint", "annotations.lua"))).toBe(true);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }

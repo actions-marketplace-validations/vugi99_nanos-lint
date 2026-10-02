@@ -205,7 +205,11 @@ describe("Regression tests for audit review issues", () => {
         const existingConfig = path.join(tempDir, ".luarc.json");
         fs.writeFileSync(existingConfig, '{"old": true}', "utf-8");
 
-        const created = initWorkspace(tempDir, { force: true, annotationsPath: dummyAnnotations });
+        const created = initWorkspace(tempDir, {
+          force: true,
+          annotationsPath: dummyAnnotations,
+          vendor: true,
+        });
         expect(created).toBe(existingConfig);
 
         const config = JSON.parse(fs.readFileSync(existingConfig, "utf-8"));

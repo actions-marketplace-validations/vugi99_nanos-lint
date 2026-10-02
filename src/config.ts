@@ -567,6 +567,7 @@ export function resolveRealmMappings(userConfig: LuaRCConfig): ResolvedRealmMapp
 export interface InitWorkspaceOptions {
   force?: boolean;
   annotationsPath?: string;
+  vendor?: boolean;
 }
 
 /**
@@ -583,34 +584,36 @@ export function initWorkspace(workspacePath: string, options?: InitWorkspaceOpti
   }
 
   const template = loadConfigFile(getDefaultTemplatePath());
-  const sourceAnnotations = options?.annotationsPath || getDefaultAnnotationsPath();
 
-  if (!fs.existsSync(sourceAnnotations)) {
-    throw new ConfigError(
-      `Definitions file not found at ${sourceAnnotations}. Make sure annotations have been downloaded or pass a valid file with --annotations.`,
-      "ERR_ANNOTATIONS_NOT_FOUND",
-      "Run 'nanos-lint warmup' to download annotations or provide --annotations <path>.",
-    );
-  }
+  if (options?.vendor) {
+    const sourceAnnotations = options.annotationsPath || getDefaultAnnotationsPath();
 
-  // Copy annotations to .nanos-lint/annotations.lua inside workspace for portability
-  const targetNanosDir = path.join(workspacePath, ".nanos-lint");
-  fs.mkdirSync(targetNanosDir, { recursive: true });
-  const targetAnnotations = path.join(targetNanosDir, "annotations.lua");
-  fs.copyFileSync(sourceAnnotations, targetAnnotations);
+    if (!fs.existsSync(sourceAnnotations)) {
+      throw new ConfigError(
+        `Definitions file not found at ${sourceAnnotations}. Make sure annotations have been downloaded or pass a valid file with --annotations.`,
+        "ERR_ANNOTATIONS_NOT_FOUND",
+        "Run 'nanos-lint warmup' to download annotations or provide --annotations <path>.",
+      );
+    }
 
-  template.workspace = template.workspace ?? {};
-  template.workspace.library = [".nanos-lint/annotations.lua"];
+    const targetNanosDir = path.join(workspacePath, ".nanos-lint");
+    fs.mkdirSync(targetNanosDir, { recursive: true });
+    const targetAnnotations = path.join(targetNanosDir, "annotations.lua");
+    fs.copyFileSync(sourceAnnotations, targetAnnotations);
 
-  const existingIgnore = template.workspace.ignoreDir ?? [];
-  if (!existingIgnore.includes(".nanos-lint")) {
-    template.workspace.ignoreDir = [".nanos-lint", ...existingIgnore];
-  }
+    template.workspace = template.workspace ?? {};
+    template.workspace.library = [".nanos-lint/annotations.lua"];
 
-  template.files = template.files ?? {};
-  const existingExclude = template.files.exclude ?? [];
-  if (!existingExclude.includes(".nanos-lint/**")) {
-    template.files.exclude = [".nanos-lint/**", ...existingExclude];
+    const existingIgnore = template.workspace.ignoreDir ?? [];
+    if (!existingIgnore.includes(".nanos-lint")) {
+      template.workspace.ignoreDir = [".nanos-lint", ...existingIgnore];
+    }
+
+    template.files = template.files ?? {};
+    const existingExclude = template.files.exclude ?? [];
+    if (!existingExclude.includes(".nanos-lint/**")) {
+      template.files.exclude = [".nanos-lint/**", ...existingExclude];
+    }
   }
 
   fs.writeFileSync(targetFile, JSON.stringify(template, null, 2), "utf-8");

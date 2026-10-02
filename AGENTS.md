@@ -89,7 +89,7 @@ npm run lint
 # 3. Check architecture and dependency boundaries via dependency-cruiser
 npm run lint:deps
 
-# 4. Check comment density (<= 15% limit on files >= 50 lines)
+# 4. Check comment density (<= 10% limit on files >= 50 lines)
 npm run lint:comments
 
 # 5. Check docstring coverage (>= 90% top-level/exported function coverage per file in src/)
@@ -149,7 +149,7 @@ Whenever preparing or publishing a new tagged release or cutting a new version:
 
 - **Do Not Close Issues**: Issues must NOT be manually closed during development. They will be closed after the PR is merged into `master`.
 - **Pull Requests and Merges**: Do not open a PR or merge `dev` to `master` until explicitly instructed by the user.
-- **Commit and Push Per Issue**: Commit and push to `dev` between handling each issue and at the end of the tasks.
+- **Commit Per Issue**: Commit to `dev` between handling each issue and at the end of the tasks. Changes should be pushed only on user request.
 
 ---
 
