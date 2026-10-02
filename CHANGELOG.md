@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-02
+
 ### Added
 
 - Added `copy-annotations` CLI command (with `export-annotations` alias) and programmatic `copyAnnotations()` export to copy cached nanos world definitions into a workspace or custom target path (#56). Targets not ending in `.lua` (case-insensitive) are treated as directories.
@@ -22,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `nanos-lint init --annotations` without `--vendor` now fails with `ERR_ANNOTATIONS_WITHOUT_VENDOR` instead of silently writing a configuration that ignores the custom definitions file (#56).
+
+### Security
+
+- Updated security supported versions policy in `SECURITY.md` to specify that only the latest release is supported and older releases are not supported. Updated agent guidance and release skills accordingly.
 
 ## [3.2.1] - 2026-09-30
 

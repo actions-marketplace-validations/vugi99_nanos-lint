@@ -1,6 +1,6 @@
 ---
 name: new-release
-description: Ship a new nanos-lint release from master — bump the npm version, drop security support for older versions, promote CHANGELOG Unreleased, bump the action.yml npx fallback, tag v<version>, and push.
+description: Ship a new nanos-lint release from master — bump the npm version, promote CHANGELOG Unreleased, bump the action.yml npx fallback, tag v<version>, and push.
 whenToUse: Use when the user asks to ship, cut, or publish a new version/release of nanos-lint (for example "bump to 2.8.3", "release v2.9.0", "ship a new version"). Requires the target version as input.
 ---
 
@@ -23,21 +23,12 @@ Cut a tagged release on `master`. The target version is **user input** — take 
 npm version "$VERSION" --no-git-tag-version
 ```
 
-- This updates `package.json` and `package-lock.json`. Use `--no-git-tag-version` so the commit and the `v$VERSION` tag are created once, deliberately, in steps 4–6 — after the CHANGELOG, `SECURITY.md`, and `action.yml` are all updated.
+- This updates `package.json` and `package-lock.json`. Use `--no-git-tag-version` so the commit and the `v$VERSION` tag are created once, deliberately, in steps 4–6 — after the CHANGELOG and `action.yml` are all updated.
 - Verify afterwards that `package.json` reports `$VERSION`.
 
-### 2. Drop security support for `< $VERSION`
+### 2. Verify security support policy
 
-Update the Supported Versions table in `SECURITY.md` so the new version is the only supported line:
-
-```markdown
-| Version  | Supported          |
-| -------- | ------------------ |
-| >= X.Y.Z | :white_check_mark: |
-| < X.Y.Z  | :x:                |
-```
-
-Record the drop in the CHANGELOG under the release's `### Security` heading, e.g. `- Dropped security support for versions < X.Y.Z in SECURITY.md.` (this matches how previous releases recorded it).
+`nanos-lint` supports only the latest release for security updates, while older releases are not supported (`SECURITY.md`). Because the policy is stated generally (Latest supported, older releases not supported), no version-specific edits or drops to `SECURITY.md` are required when bumping releases.
 
 ### 3. Update `CHANGELOG.md`
 
@@ -63,7 +54,7 @@ Leave the version comment in place; only the version number changes.
 ### 5. Commit the release
 
 ```bash
-git add package.json package-lock.json CHANGELOG.md SECURITY.md action.yml
+git add package.json package-lock.json CHANGELOG.md action.yml
 git commit -m "chore(release): v$VERSION"
 ```
 
@@ -100,8 +91,7 @@ GitHub does not provide an API to publish or update actions on the GitHub Market
 Summarize concisely:
 
 - The released version and the tag pushed.
-- The files changed (`package.json`, `package-lock.json`, `CHANGELOG.md`, `SECURITY.md`, `action.yml`, etc.).
-- The old → new supported-versions range.
+- The files changed (`package.json`, `package-lock.json`, `CHANGELOG.md`, `action.yml`, etc.).
 - That the `release.yml` run is triggered, and the link to it if available (`gh run list --workflow=release.yml`).
 - A reminder for the admin to publish the release to GitHub Marketplace via the GitHub Releases Web UI (#4).
 
