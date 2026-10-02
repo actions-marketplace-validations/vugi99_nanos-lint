@@ -9,6 +9,7 @@ import { resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
 import { getCacheStatus, formatCacheStatusPretty } from "./cache-status.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
+import { writeOutput } from "./output.js";
 import { setProgressMode } from "./terminal-progress.js";
 import { NanosLintError } from "./errors.js";
 import { executeCheckCommand, type CheckCommandOptions } from "./cli-check.js";
@@ -24,13 +25,6 @@ function getVersionString(): string {
       `Could not read version from package.json: ${err instanceof Error ? err.message : String(err)}`,
     );
     return "nanos-lint v1.0.0";
-  }
-}
-
-/** Writes command results to stdout unless the level is `silent`. */
-function writeOutput(message: string): void {
-  if (logger.isOutputEnabled()) {
-    console.log(message);
   }
 }
 
@@ -145,8 +139,7 @@ export function createProgram(options?: CreateProgramOptions): Command {
       "--vendor",
       "Vendor annotations.lua into .nanos-lint/ inside workspace for portable standalone editor setup",
     )
-    .option("--vendor-annotations", "Alias for --vendor")
-    .option("--annotations <path>", "Path to custom annotations.lua file (used when vendoring)")
+    .option("--annotations <path>", "Path to custom annotations.lua file (requires --vendor)")
     .action(
       async (
         targetPath: string = ".",
@@ -154,16 +147,14 @@ export function createProgram(options?: CreateProgramOptions): Command {
           force?: boolean;
           annotations?: string;
           vendor?: boolean;
-          vendorAnnotations?: boolean;
         },
       ) => {
-        const shouldVendor = Boolean(opts.vendor || opts.vendorAnnotations);
-        let annotationsPath: string | undefined;
-        if (shouldVendor) {
-          annotationsPath = await resolveAnnotations({
-            customPath: opts.annotations,
-          });
-        }
+        const shouldVendor = Boolean(opts.vendor);
+        // Without --vendor the path is passed through on purpose: initWorkspace rejects the
+        // combination instead of silently generating a configuration that ignores the file.
+        const annotationsPath = shouldVendor
+          ? await resolveAnnotations({ customPath: opts.annotations })
+          : opts.annotations;
         const created = initWorkspace(path.resolve(targetPath), {
           force: opts.force,
           annotationsPath,
@@ -178,15 +169,12 @@ export function createProgram(options?: CreateProgramOptions): Command {
     .command("copy-annotations [destination]")
     .alias("export-annotations")
     .description(
-      "Copy cached nanos world annotations.lua definitions into a target file or directory",
+      "Copy cached nanos world annotations.lua definitions into a target file or directory (targets not ending in .lua are treated as directories)",
     )
     .option("-f, --force", "Overwrite existing annotations file")
     .option("--annotations <path>", "Path to custom annotations.lua source file")
     .action(
-      async (
-        destination: string = ".nanos-lint/annotations.lua",
-        opts: { force?: boolean; annotations?: string },
-      ) => {
+      async (destination: string | undefined, opts: { force?: boolean; annotations?: string }) => {
         const copied = await copyAnnotations(destination, {
           force: opts.force,
           annotationsPath: opts.annotations,

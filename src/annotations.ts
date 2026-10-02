@@ -209,20 +209,24 @@ export interface CopyAnnotationsOptions {
   cacheDir?: string;
 }
 
+const DEFAULT_COPY_TARGET = `.nanos-lint/${ANNOTATIONS_FILENAME}`;
+
 /**
  * Copies nanos world annotations.lua definitions into a target file or directory.
+ * A target counts as a directory when it ends with a separator, already is a directory,
+ * or does not end in `.lua` (case-insensitively).
  */
 export async function copyAnnotations(
-  targetPath: string = ".nanos-lint/annotations.lua",
+  targetPath: string = DEFAULT_COPY_TARGET,
   options: CopyAnnotationsOptions = {},
 ): Promise<string> {
   let resolvedTarget = path.resolve(targetPath);
-  if (
+  const isDirectoryTarget =
     targetPath.endsWith("/") ||
     targetPath.endsWith("\\") ||
     (fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isDirectory()) ||
-    path.extname(resolvedTarget) !== ".lua"
-  ) {
+    path.extname(resolvedTarget).toLowerCase() !== ".lua";
+  if (isDirectoryTarget) {
     resolvedTarget = path.join(resolvedTarget, ANNOTATIONS_FILENAME);
   }
 

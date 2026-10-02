@@ -135,7 +135,7 @@ nanos-lint [command] [options] [paths...]
 COMMANDS:
   check [paths...]         Check workspace files or directories (default)
   init [path]              Scaffold a .luarc.json configuration in the workspace (supports --vendor, --force)
-  copy-annotations [dest]  Copy cached annotations.lua definitions into a target file or directory (alias: export-annotations)
+  copy-annotations [dest]  Copy cached annotations.lua definitions into a target file or directory (alias: export-annotations; targets not ending in .lua are treated as directories)
   warmup, download         Pre-fetch and cache both LuaLS binary and annotations for offline execution
   cache status, cache info Show cache status, installed versions, and disk usage (supports --json)
   cache clean              Clear the nanos-lint cache directory
@@ -233,14 +233,23 @@ npx nanos-lint init
 npx nanos-lint init --force
 ```
 
-By default, `init` creates `.luarc.json` configured for `nanos-lint`'s managed annotations cache without vendoring or pinning local copies. To copy or pin annotations into the repository:
+By default `init` writes no annotations reference at all: `workspace.library` stays empty and
+`nanos-lint check` injects the managed cache path into its own temporary merged configuration at
+runtime, so a later cache update is picked up without touching repository files. Editors that read
+`.luarc.json` directly need a pinned copy, which is always an explicit opt-in:
 
 ```bash
-# Copy cached annotations into .nanos-lint/annotations.lua (or a custom path)
-npx nanos-lint copy-annotations
-# Or initialize with vendored annotations directly
+# Initialize with annotations vendored into .nanos-lint/ and pinned in workspace.library
 npx nanos-lint init --vendor
+
+# Or copy the cached annotations to a custom file, or to any target that does not end in
+# ".lua" (treated as a directory). Copying alone does not pin anything: add the resulting
+# path to workspace.library yourself.
+npx nanos-lint copy-annotations
+npx nanos-lint copy-annotations ./types
 ```
+
+`copy-annotations` refuses to overwrite an existing file unless `--force` is passed.
 
 ### Realm Mapping (`nanos.realms`)
 

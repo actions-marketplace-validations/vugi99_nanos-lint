@@ -1045,6 +1045,17 @@ describe("annotations management and date-based caching", () => {
       expect(fs.readFileSync(dest, "utf-8")).toBe("-- new content");
     });
 
+    it("treats a target with an uppercase .LUA extension as a file (#56)", async () => {
+      const source = path.join(tempBaseDir, "uppercase-source.lua");
+      fs.writeFileSync(source, "-- uppercase target");
+      const target = path.join(tempBaseDir, "TYPES.LUA");
+
+      const result = await copyAnnotations(target, { annotationsPath: source });
+      expect(result).toBe(path.resolve(target));
+      expect(fs.statSync(result).isFile()).toBe(true);
+      expect(fs.readFileSync(result, "utf-8")).toBe("-- uppercase target");
+    });
+
     it("throws when custom annotationsPath does not exist", async () => {
       const dest = path.join(tempBaseDir, "will-fail.lua");
       await expect(

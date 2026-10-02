@@ -566,7 +566,9 @@ export function resolveRealmMappings(userConfig: LuaRCConfig): ResolvedRealmMapp
 
 export interface InitWorkspaceOptions {
   force?: boolean;
+  /** Definitions file vendored into `.nanos-lint/`; only meaningful together with `vendor`. */
   annotationsPath?: string;
+  /** Copies `annotations.lua` into the workspace and pins it in `workspace.library`. */
   vendor?: boolean;
 }
 
@@ -580,6 +582,14 @@ export function initWorkspace(workspacePath: string, options?: InitWorkspaceOpti
       `.luarc.json already exists at ${targetFile}. Use --force to overwrite.`,
       "ERR_CONFIG_EXISTS",
       "Pass --force to overwrite the existing .luarc.json file.",
+    );
+  }
+
+  if (options?.annotationsPath && !options.vendor) {
+    throw new ConfigError(
+      "--annotations requires --vendor: nanos-lint init does not pin or vendor annotations.lua by default.",
+      "ERR_ANNOTATIONS_WITHOUT_VENDOR",
+      "Run 'nanos-lint init --vendor --annotations <path>' (or pass vendor: true), or omit the custom path to use the managed annotations cache.",
     );
   }
 

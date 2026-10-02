@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added `copy-annotations` CLI command (with `export-annotations` alias) and programmatic `copyAnnotations()` export to copy cached nanos world definitions into a workspace or custom target path (#56).
+- Added `copy-annotations` CLI command (with `export-annotations` alias) and programmatic `copyAnnotations()` export to copy cached nanos world definitions into a workspace or custom target path (#56). Targets not ending in `.lua` (case-insensitive) are treated as directories.
 - Added `--vendor` option to `nanos-lint init` allowing explicit opt-in to copying annotations into `.nanos-lint/` and configuring `workspace.library` (#56).
 
 ### Changed
@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lowered comment density quality gate threshold from 15.0% to 10.0% across all source, test, and script files.
 - `nanos-lint init` no longer pins or vendors `annotations.lua` by default; workspaces are initialized with managed annotations dynamic resolution (#56).
 - Removed automatic push guidance from `AGENTS.md` so changes are pushed only on explicit user request.
+- Extracted the `check` command implementation into `src/cli-check.ts` and the shared stdout helper into `src/output.ts` (internal refactor, no behavior change).
+
+### Fixed
+
+- `nanos-lint init --annotations` without `--vendor` now fails with `ERR_ANNOTATIONS_WITHOUT_VENDOR` instead of silently writing a configuration that ignores the custom definitions file (#56).
 
 ## [3.2.1] - 2026-09-30
 

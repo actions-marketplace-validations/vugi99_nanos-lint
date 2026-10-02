@@ -412,14 +412,35 @@ describe("config module", () => {
         const overwritten = initWorkspace(tempDir, { force: true });
         expect(overwritten).toBe(created);
 
+        const managedAnnotations = path.join(tempDir, "managed-cache", "annotations.lua");
+        fs.mkdirSync(path.dirname(managedAnnotations), { recursive: true });
+        fs.writeFileSync(managedAnnotations, "-- managed annotations");
         const resolved = resolveWorkspaceConfig(tempDir, undefined, {
-          annotationsPath: "/managed/cache/annotations.lua",
+          annotationsPath: managedAnnotations,
         });
         const merged = JSON.parse(fs.readFileSync(resolved.configPath, "utf-8"));
-        expect(merged.workspace?.library).toContain("/managed/cache/annotations.lua");
+        // mergeConfigs normalizes library paths to forward slashes for LuaLS.
+        expect(merged.workspace?.library).toContain(managedAnnotations.split(path.sep).join("/"));
         if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
           fs.unlinkSync(resolved.configPath);
         }
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects annotationsPath without explicit vendoring (#56)", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-init-no-vendor-"));
+      try {
+        const dummyAnnotations = path.join(tempDir, "source-annotations.lua");
+        fs.writeFileSync(dummyAnnotations, "-- dummy annotations");
+
+        expect(() => {
+          initWorkspace(tempDir, { annotationsPath: dummyAnnotations });
+        }).toThrow(/requires --vendor/);
+        // The flag combination is rejected before anything is written.
+        expect(fs.existsSync(path.join(tempDir, ".luarc.json"))).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, ".nanos-lint"))).toBe(false);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }

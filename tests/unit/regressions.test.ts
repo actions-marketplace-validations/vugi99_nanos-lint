@@ -626,6 +626,7 @@ describe("Regression tests for audit review issues", () => {
         const configFile = initWorkspace(tempDir, {
           force: true,
           annotationsPath: dummyAnnotations,
+          vendor: true,
         });
         const config = JSON.parse(fs.readFileSync(configFile, "utf-8"));
 

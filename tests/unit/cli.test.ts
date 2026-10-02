@@ -141,6 +141,25 @@ describe("cli module flag and command parsing", () => {
     }
   });
 
+  it("rejects init --annotations without --vendor (#56)", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cli-init-ann-"));
+    const dummyAnnotations = path.join(tempDir, "source.lua");
+    fs.writeFileSync(dummyAnnotations, "-- valid annotations\nlocal a = 1\n");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const code = await runCLI(["init", tempDir, "--annotations", dummyAnnotations]);
+      expect(code).toBe(1);
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("requires --vendor"));
+      expect(fs.existsSync(path.join(tempDir, ".luarc.json"))).toBe(false);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+    }
+  });
+
   it("handles copy-annotations subcommand with target path and force overwrite", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-cli-copy-ann-"));
     const dummyAnnotations = path.join(tempDir, "source.lua");

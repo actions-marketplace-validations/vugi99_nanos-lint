@@ -7,6 +7,7 @@ import { resolveAnnotations } from "./annotations.js";
 import { runLuaLSCheck } from "./luals.js";
 import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel } from "./logger.js";
+import { writeOutput } from "./output.js";
 import { setProgressMode } from "./terminal-progress.js";
 import { ConfigError } from "./errors.js";
 import { computeUnrequestedExclusions, resolveCheckTargets } from "./target-resolver.js";
@@ -25,13 +26,6 @@ export interface CheckCommandOptions {
   ignore?: string[];
   dep?: string[];
   realm?: RealmSelection;
-}
-
-/** Writes command results to stdout unless the level is silent. */
-function writeOutput(message: string): void {
-  if (logger.isOutputEnabled()) {
-    console.log(message);
-  }
 }
 
 /** Executes the check command on target paths with specified options. */
