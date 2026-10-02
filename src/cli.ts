@@ -2,19 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command, CommanderError, Option } from "commander";
-import { resolveWorkspaceConfig, initWorkspace, getPackageRoot, loadUserConfig } from "./config.js";
-import { planRealmCheck, runRealmAwareCheck, type RealmSelection } from "./realms.js";
-import { collectDeps, resolvePackageDependencies } from "./deps.js";
-import { resolveAnnotations, readAnnotationsMetadata } from "./annotations.js";
-import { runLuaLSCheck, resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
+import { initWorkspace, getPackageRoot } from "./config.js";
+import { collectDeps } from "./deps.js";
+import { resolveAnnotations, readAnnotationsMetadata, copyAnnotations } from "./annotations.js";
+import { resolveLuaLSBinary, DEFAULT_LUALS_VERSION } from "./luals.js";
 import { cleanCache, systemPaths } from "./paths.js";
 import { getCacheStatus, formatCacheStatusPretty } from "./cache-status.js";
-import { formatReport } from "./reporter.js";
 import { logger, LogLevel, isValidLogLevel, DEFAULT_LOG_LEVEL } from "./logger.js";
+import { writeOutput } from "./output.js";
 import { setProgressMode } from "./terminal-progress.js";
-import { ConfigError, NanosLintError } from "./errors.js";
-import { computeUnrequestedExclusions, resolveCheckTargets } from "./target-resolver.js";
-import type { CheckOptions, DiagnosticSeverity } from "./types.js";
+import { NanosLintError } from "./errors.js";
+import { executeCheckCommand, type CheckCommandOptions } from "./cli-check.js";
 
 /** Retrieves the formatted package name and version string from package.json. */
 function getVersionString(): string {
@@ -30,13 +28,6 @@ function getVersionString(): string {
   }
 }
 
-/** Writes command results to stdout unless the level is `silent`. */
-function writeOutput(message: string): void {
-  if (logger.isOutputEnabled()) {
-    console.log(message);
-  }
-}
-
 /** Accumulates repeatable --ignore pattern arguments, splitting by comma and newline. */
 export function collectIgnorePatterns(val: string, prev?: string[]): string[] {
   const parts = val
@@ -44,21 +35,6 @@ export function collectIgnorePatterns(val: string, prev?: string[]): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
   return (prev ?? []).concat(parts);
-}
-
-interface CheckCommandOptions {
-  checklevel: DiagnosticSeverity;
-  config?: string;
-  annotations?: string;
-  format?: "pretty" | "json" | "github";
-  lualsVersion: string;
-  fail: boolean;
-  logLevel?: string;
-  progress?: boolean;
-  github?: boolean;
-  ignore?: string[];
-  dep?: string[];
-  realm?: RealmSelection;
 }
 
 export interface CreateProgramOptions {
@@ -152,121 +128,61 @@ export function createProgram(options?: CreateProgramOptions): Command {
         .default("all"),
     )
     .action(async (targetPaths: string[] = ["."], opts: CheckCommandOptions) => {
-      if (opts.logLevel && isValidLogLevel(opts.logLevel)) {
-        logger.setLevel(opts.logLevel as LogLevel);
-      }
-
-      const rawPaths = targetPaths && targetPaths.length > 0 ? targetPaths : ["."];
-      const { rootPath, targetPaths: canonicalTargets } = resolveCheckTargets(rawPaths);
-
-      const format = opts.github
-        ? "github"
-        : opts.format || (process.env.GITHUB_ACTIONS ? "github" : "pretty");
-
-      if (format === "json") {
-        setProgressMode("off");
-        // Machine-readable output owns stdout: diagnostics must not interleave with the JSON report.
-        logger.setDiagnosticStream("stderr");
-      }
-
-      const checkOptions: CheckOptions = {
-        path: rootPath,
-        paths: canonicalTargets,
-        configpath: opts.config,
-        checklevel: opts.checklevel,
-        format,
-        lualsVersion: opts.lualsVersion,
-        failOnError: opts.fail !== false,
-        ignore: opts.ignore,
-        deps: opts.dep,
-      };
-
-      if (opts.config) {
-        const resolvedConfig = path.resolve(opts.config);
-        if (!fs.existsSync(resolvedConfig)) {
-          throw new ConfigError(
-            `Configuration file not found: ${resolvedConfig}`,
-            "ERR_CONFIG_NOT_FOUND",
-            "Verify the path passed to --config exists and is readable.",
-          );
-        }
-      }
-
-      const annotationsPath = await resolveAnnotations({
-        customPath: opts.annotations,
-      });
-
-      const userConfig = loadUserConfig(rootPath, checkOptions.configpath);
-      const realmPlan = planRealmCheck({
-        targetPath: rootPath,
-        userConfig,
-        selection: opts.realm ?? "all",
-        annotationsPath,
-        customConfigPath: checkOptions.configpath,
-        ignore: checkOptions.ignore,
-        targetPaths: canonicalTargets,
-        cliDeps: checkOptions.deps,
-      });
-
-      let result;
-      if (realmPlan) {
-        try {
-          result = await runRealmAwareCheck(realmPlan, rootPath, checkOptions);
-        } finally {
-          realmPlan.cleanup();
-        }
-      } else {
-        const resolvedDeps = resolvePackageDependencies(rootPath, userConfig, checkOptions.deps);
-        const unrequestedExclusions = computeUnrequestedExclusions(rootPath, canonicalTargets);
-        const resolved = resolveWorkspaceConfig(rootPath, checkOptions.configpath, {
-          ignore: checkOptions.ignore,
-          annotationsPath,
-          dependencyLibraries: resolvedDeps.all,
-          unrequestedExclusions,
-        });
-        try {
-          result = await runLuaLSCheck(rootPath, resolved.configPath, checkOptions);
-        } finally {
-          if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
-            try {
-              fs.unlinkSync(resolved.configPath);
-            } catch (err) {
-              logger.warn(
-                `Failed to clean up temporary config file ${resolved.configPath}: ${err instanceof Error ? err.message : String(err)}`,
-              );
-            }
-          }
-        }
-      }
-
-      const output = formatReport(result, checkOptions.format, process.cwd());
-      if (output) {
-        writeOutput(output);
-      }
-
-      if (!result.passed && checkOptions.failOnError) {
-        setExitCode(1);
-      } else {
-        setExitCode(0);
-      }
+      await executeCheckCommand(targetPaths, opts, setExitCode);
     });
 
   program
     .command("init [path]")
     .description("Scaffold a .luarc.json configuration in the workspace")
     .option("-f, --force", "Overwrite existing .luarc.json configuration")
-    .option("--annotations <path>", "Path to custom annotations.lua file")
-    .action(async (targetPath: string = ".", opts: { force?: boolean; annotations?: string }) => {
-      const annotationsPath = await resolveAnnotations({
-        customPath: opts.annotations,
-      });
-      const created = initWorkspace(path.resolve(targetPath), {
-        force: opts.force,
-        annotationsPath,
-      });
-      writeOutput(`[init] Initialized nanos world LuaLS configuration: ${created}`);
-      setExitCode(0);
-    });
+    .option(
+      "--vendor",
+      "Vendor annotations.lua into .nanos-lint/ inside workspace for portable standalone editor setup",
+    )
+    .option("--annotations <path>", "Path to custom annotations.lua file (requires --vendor)")
+    .action(
+      async (
+        targetPath: string = ".",
+        opts: {
+          force?: boolean;
+          annotations?: string;
+          vendor?: boolean;
+        },
+      ) => {
+        const shouldVendor = Boolean(opts.vendor);
+        // Without --vendor the path is passed through on purpose: initWorkspace rejects the
+        // combination instead of silently generating a configuration that ignores the file.
+        const annotationsPath = shouldVendor
+          ? await resolveAnnotations({ customPath: opts.annotations })
+          : opts.annotations;
+        const created = initWorkspace(path.resolve(targetPath), {
+          force: opts.force,
+          annotationsPath,
+          vendor: shouldVendor,
+        });
+        writeOutput(`[init] Initialized nanos world LuaLS configuration: ${created}`);
+        setExitCode(0);
+      },
+    );
+
+  program
+    .command("copy-annotations [destination]")
+    .alias("export-annotations")
+    .description(
+      "Copy cached nanos world annotations.lua definitions into a target file or directory (targets not ending in .lua are treated as directories)",
+    )
+    .option("-f, --force", "Overwrite existing annotations file")
+    .option("--annotations <path>", "Path to custom annotations.lua source file")
+    .action(
+      async (destination: string | undefined, opts: { force?: boolean; annotations?: string }) => {
+        const copied = await copyAnnotations(destination, {
+          force: opts.force,
+          annotationsPath: opts.annotations,
+        });
+        writeOutput(`[copy-annotations] Copied nanos world annotations to: ${copied}`);
+        setExitCode(0);
+      },
+    );
 
   program
     .command("warmup")
@@ -396,6 +312,7 @@ Examples:
   $ npx nanos-lint check . --realm server
   $ npx nanos-lint check Shared/ Server/ --realm server
   $ npx nanos-lint init
+  $ npx nanos-lint copy-annotations
   $ npx nanos-lint clean-cache
 `,
   );

@@ -9,7 +9,7 @@ interface CommentGateException {
   reason: string;
 }
 
-const DEFAULT_MAX_PERCENTAGE = 15.0;
+const DEFAULT_MAX_PERCENTAGE = 10.0;
 const MIN_LINES_THRESHOLD = 50;
 
 const EXCEPTIONS: Record<string, CommentGateException> = {
@@ -169,7 +169,7 @@ export function runCommentLint(): boolean {
   }
 
   if (failed) {
-    console.error("\n[ERROR] One or more files exceeded the comment density limit (<= 15.0%).");
+    console.error("\n[ERROR] One or more files exceeded the comment density limit (<= 10.0%).");
     return false;
   }
 

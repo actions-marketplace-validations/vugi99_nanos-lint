@@ -202,3 +202,49 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
     );
   }
 }
+
+export interface CopyAnnotationsOptions {
+  force?: boolean;
+  annotationsPath?: string;
+  cacheDir?: string;
+}
+
+const DEFAULT_COPY_TARGET = `.nanos-lint/${ANNOTATIONS_FILENAME}`;
+
+/**
+ * Copies nanos world annotations.lua definitions into a target file or directory.
+ * A target counts as a directory when it ends with a separator, already is a directory,
+ * or does not end in `.lua` (case-insensitively).
+ */
+export async function copyAnnotations(
+  targetPath: string = DEFAULT_COPY_TARGET,
+  options: CopyAnnotationsOptions = {},
+): Promise<string> {
+  let resolvedTarget = path.resolve(targetPath);
+  const isDirectoryTarget =
+    targetPath.endsWith("/") ||
+    targetPath.endsWith("\\") ||
+    (fs.existsSync(resolvedTarget) && fs.statSync(resolvedTarget).isDirectory()) ||
+    path.extname(resolvedTarget).toLowerCase() !== ".lua";
+  if (isDirectoryTarget) {
+    resolvedTarget = path.join(resolvedTarget, ANNOTATIONS_FILENAME);
+  }
+
+  if (fs.existsSync(resolvedTarget) && !options.force) {
+    throw new AnnotationsError(
+      `Target annotations file already exists: ${resolvedTarget}. Use --force to overwrite.`,
+      "ERR_ANNOTATIONS_EXISTS",
+      "Pass --force to overwrite the existing annotations file.",
+    );
+  }
+
+  const sourcePath = options.annotationsPath
+    ? validateCustomAnnotationsPath(options.annotationsPath, "custom")
+    : await resolveAnnotations({ cacheDir: options.cacheDir });
+
+  const targetDir = path.dirname(resolvedTarget);
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.copyFileSync(sourcePath, resolvedTarget);
+
+  return resolvedTarget;
+}

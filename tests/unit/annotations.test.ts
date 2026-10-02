@@ -17,6 +17,7 @@ import {
   MAX_COMMIT_JSON_SIZE_BYTES,
   getCachedAnnotationsFilePath,
   getAnnotationsMetadataFilePath,
+  copyAnnotations,
   type AnnotationsMetadata,
 } from "../../src/annotations.js";
 import { logger } from "../../src/logger.js";
@@ -1004,6 +1005,62 @@ describe("annotations management and date-based caching", () => {
       expect(result).toBeNull();
 
       globalThis.fetch = originalFetch;
+    });
+  });
+
+  describe("copyAnnotations", () => {
+    it("copies annotations to destination file and directory", async () => {
+      const source = path.join(tempBaseDir, "dummy-source.lua");
+      fs.writeFileSync(source, "-- valid annotations\nlocal a = 1\n");
+
+      const targetFile = path.join(tempBaseDir, "dest", "my-annotations.lua");
+      const resultFile = await copyAnnotations(targetFile, { annotationsPath: source });
+      expect(resultFile).toBe(path.resolve(targetFile));
+      expect(fs.existsSync(resultFile)).toBe(true);
+      expect(fs.readFileSync(resultFile, "utf-8")).toContain("local a = 1");
+
+      const targetDir = path.join(tempBaseDir, "dir-target");
+      const resultDir = await copyAnnotations(targetDir, { annotationsPath: source });
+      expect(resultDir).toBe(path.resolve(targetDir, "annotations.lua"));
+      expect(fs.existsSync(resultDir)).toBe(true);
+
+      const targetTrailingSlash = path.join(tempBaseDir, "trailing-slash") + "/";
+      const resultSlash = await copyAnnotations(targetTrailingSlash, { annotationsPath: source });
+      expect(resultSlash).toBe(path.resolve(tempBaseDir, "trailing-slash", "annotations.lua"));
+      expect(fs.existsSync(resultSlash)).toBe(true);
+    });
+
+    it("rejects when destination exists without force and overwrites with force", async () => {
+      const source = path.join(tempBaseDir, "source.lua");
+      fs.writeFileSync(source, "-- new content");
+      const dest = path.join(tempBaseDir, "existing.lua");
+      fs.writeFileSync(dest, "-- old content");
+
+      await expect(
+        copyAnnotations(dest, { annotationsPath: source, force: false }),
+      ).rejects.toThrow(/already exists/i);
+
+      const result = await copyAnnotations(dest, { annotationsPath: source, force: true });
+      expect(result).toBe(path.resolve(dest));
+      expect(fs.readFileSync(dest, "utf-8")).toBe("-- new content");
+    });
+
+    it("treats a target with an uppercase .LUA extension as a file (#56)", async () => {
+      const source = path.join(tempBaseDir, "uppercase-source.lua");
+      fs.writeFileSync(source, "-- uppercase target");
+      const target = path.join(tempBaseDir, "TYPES.LUA");
+
+      const result = await copyAnnotations(target, { annotationsPath: source });
+      expect(result).toBe(path.resolve(target));
+      expect(fs.statSync(result).isFile()).toBe(true);
+      expect(fs.readFileSync(result, "utf-8")).toBe("-- uppercase target");
+    });
+
+    it("throws when custom annotationsPath does not exist", async () => {
+      const dest = path.join(tempBaseDir, "will-fail.lua");
+      await expect(
+        copyAnnotations(dest, { annotationsPath: path.join(tempBaseDir, "nonexistent.lua") }),
+      ).rejects.toThrow(/not found/i);
     });
   });
 });
