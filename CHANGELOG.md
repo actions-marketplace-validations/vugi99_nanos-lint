@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `nanos-lint init --annotations` without `--vendor` now fails with `ERR_ANNOTATIONS_WITHOUT_VENDOR` instead of silently writing a configuration that ignores the custom definitions file (#56).
 
+### Security
+
+- Updated security supported versions policy in `SECURITY.md` to specify that only the latest release is supported and older releases are not supported. Updated agent guidance and release skills accordingly.
+
 ## [3.2.1] - 2026-09-30
 
 ### Changed
