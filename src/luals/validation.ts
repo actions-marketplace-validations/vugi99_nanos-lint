@@ -353,8 +353,8 @@ export function rethrowLuaLSPermissionError(
     `Cannot ${operation} LuaLS ${operation === "execute" ? "binary" : "cache path"} '${targetPath}': ${code}: ${err instanceof Error ? err.message : String(err)}`,
     operation === "execute" ? "ERR_LUALS_EXECUTION_DENIED" : "ERR_LUALS_CACHE_PERMISSION",
     operation === "execute"
-      ? "Run nanos-lint in an environment that permits LuaLS execution and check the binary's execute permissions and sandbox policy. The existing cache has been preserved."
-      : "Allow access to the LuaLS cache directory or use a writable cache directory.",
+      ? "Run nanos-lint in an environment that permits LuaLS execution and check the binary's execute permissions and sandbox policy. The existing cache has been preserved. This is a process-execution restriction, not a cache-write one: relocating the cache does not lift it."
+      : `Allow writing to the LuaLS cache directory, or relocate the cache to a writable directory (XDG_CACHE_HOME on Linux, LOCALAPPDATA on Windows, HOME on macOS). Read access alone is enough to reuse an existing cached binary.`,
     { cause: err },
   );
 }

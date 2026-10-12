@@ -90,6 +90,39 @@ downloading them. Missing assets fail with provisioning instructions.
 The flag controls nanos-lint; npm/npx may access the registry before it starts. Use
 a preinstalled executable or npm's own `--offline` with an already cached package.
 
+### 5. Restricted and Sandboxed Environments
+
+Sandboxes (container runtimes, agent harnesses, CI runners) often pre-warm the cache
+read-only or block executing files from it. nanos-lint separates the two capabilities so
+you can tell them apart:
+
+- **Cache writes are optional.** A valid cached `annotations.lua` and a valid cached LuaLS
+  binary are consumed as-is. When the annotations cache cannot be written, the run logs a
+  concise warning and continues; the cache is never deleted or replaced.
+- **Process execution is required.** If the sandbox denies executing the LuaLS binary, the
+  check fails with a nonzero exit status and a hint naming the binary path. The cache is
+  preserved for the next run.
+
+Relocate the cache to a writable directory with the platform convention `env-paths` uses:
+
+| Platform | Variable                                                  |
+| :------- | :-------------------------------------------------------- |
+| Linux    | `XDG_CACHE_HOME`                                          |
+| Windows  | `LOCALAPPDATA`                                            |
+| macOS    | `HOME` (the cache lives in `~/Library/Caches/nanos-lint`) |
+
+```sh
+# Linux: keep the cache inside an approved writable workspace
+XDG_CACHE_HOME=/workspace/.cache nanos-lint check Packages/events
+
+# Or bypass the cache entirely with a local definitions file
+nanos-lint check Packages/events --annotations ./annotations.lua
+```
+
+Relocating the cache only resolves cache-write denials. A sandbox that also blocks process
+execution must additionally allow running the LuaLS binary (or `LUALS_BIN`, when pointing at
+a pre-installed copy outside the sandbox).
+
 ---
 
 ## GitHub Actions Integration

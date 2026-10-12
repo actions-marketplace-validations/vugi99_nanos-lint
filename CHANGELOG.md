@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Restricted-environment diagnostics now separate a denied cache write from a denied LuaLS execution, and the README documents relocating the cache with `XDG_CACHE_HOME` (Linux), `LOCALAPPDATA` (Windows) or `HOME` (macOS), noting that relocation does not lift a process-execution restriction (#59).
+
+### Fixed
+
+- A read-only annotations cache no longer aborts the run while a valid cached `annotations.lua` exists: the optional `lastChecked` refresh and a denied cache update now fall back to the cached definitions with a concise warning instead of a bare `EROFS`/`EACCES` error (#59).
+- A denied annotations cache write with no usable cached copy now reports an actionable `ERR_ANNOTATIONS_FS` error with relocation guidance instead of a low-level filesystem error (#59).
+
 ## [3.4.1] - 2026-10-07
 
 ### Changed
