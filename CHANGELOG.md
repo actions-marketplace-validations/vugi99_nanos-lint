@@ -7,14 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added recognition of dependency package globals exported with `Package.Export("Name", value)`: each exporting script is mirrored into a generated library file, so consumer packages resolve the exported name with its inferred type, `---@class` shape and `---@param`/`---@return` signatures instead of reporting `undefined-global` or degrading to `any`. Mirrors inherit the realm of their source script and are removed after the run (#72).
+
 ### Changed
 
 - Restricted-environment diagnostics now separate a denied cache write from a denied LuaLS execution, and the README documents relocating the cache with `XDG_CACHE_HOME` (Linux), `LOCALAPPDATA` (Windows) or `HOME` (macOS), noting that relocation does not lift a process-execution restriction (#59).
+- The bundled configuration now sets `Lua.completion.requireSeparator` to `/` and adds extension-preserving `runtime.path` patterns. nanos world loads scripts by file path (`Package.Require` takes a `file_path`) and has no dot-style module syntax, so the documented `Package.Require("Utils/Math.lua")` form now resolves for type checking (#72).
 
 ### Fixed
 
 - A read-only annotations cache no longer aborts the run while a valid cached `annotations.lua` exists: the optional `lastChecked` refresh and a denied cache update now fall back to the cached definitions with a concise warning instead of a bare `EROFS`/`EACCES` error (#59).
 - A denied annotations cache write with no usable cached copy now reports an actionable `ERR_ANNOTATIONS_FS` error with relocation guidance instead of a low-level filesystem error (#59).
+- `Package.Require("File.lua")` no longer fails to resolve in LuaLS, which previously dropped type checking for every cross-file call inside a package (#72).
 
 ## [3.4.1] - 2026-10-07
 

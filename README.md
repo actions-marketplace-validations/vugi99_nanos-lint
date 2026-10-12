@@ -408,6 +408,35 @@ When packages depend on other packages (e.g. located in `Server/Packages/` or ex
 - **Realm Partitioning**: Dependency directories are inspected for realm conventions (`Server/`, `Client/`, `Shared/`). Server passes only include `Server/` and `Shared/` folders of dependencies; client passes only include `Client/` and `Shared/` folders. Single definition `.lua` files and non-partitioned dependency directories are included in all passes.
 - **Resilience**: If a declared dependency path does not exist, `nanos-lint` emits a warning and continues without failing the lint pass.
 
+### Exported Globals (`Package.Export`)
+
+Dependency packages publish cross-package APIs with `Package.Export("Name", value)`, which binds `value` to the global `Name` for every package on the same side. LuaLS cannot see that binding on its own, so consumers of the exported name would report `undefined-global`.
+
+`nanos-lint` mirrors each exporting dependency script into a generated library file where the exported names are real globals. The mirror keeps the original statements, so the exported value keeps its inferred type, its `---@class` shape and its `---@param` / `---@return` documentation:
+
+```lua
+-- dependency: Server/Index.lua
+local AuthorizationLifecycle = Package.Require("AuthorizationLifecycle.lua")
+local lifecycle = AuthorizationLifecycle.New()
+local VPerms = lifecycle.VPerms
+
+Package.Export("VPerms", VPerms)
+```
+
+```lua
+-- consumer: Server/Index.lua
+VPerms.LoadPlayer(player)      -- resolves, no undefined-global
+VPerms.ThisDoesNotExist()      -- undefined-field
+VPerms.LoadPlayer("nope")      -- param-type-mismatch
+```
+
+Notes:
+
+- The exported **name** must be a string literal in the `Package.Export("Name", value)` form; dynamically named exports cannot be mirrored and stay as they are today.
+- Mirrors inherit the realm of the script they come from: an export of a dependency `Server/` script is only visible to `--realm server` passes.
+- Generated files live in a temporary directory that is removed after the run; dependency sources are never modified.
+- nanos world loads scripts **by file path** (`Package.Require("Utils/Math.lua")`) and has no dot-style module syntax: `Package.Require` takes a `file_path` and searches relative to the current file, `Client/`/`Server/`, `Shared/`, the package root, then `Packages/`. The bundled configuration sets `Lua.completion.requireSeparator` to `/` and adds extension-preserving `runtime.path` entries so those file paths resolve — and keep their types — instead of being treated as dot-separated module names. A custom `runtime.path` in your `.luarc.json` replaces these defaults.
+
 ### File Counting and Glob Semantics
 
 The `N files checked` figure is produced by matching `workspace.ignoreDir` and `files.exclude` with the bundled `glob` engine. The v3.0.0 contract is:
