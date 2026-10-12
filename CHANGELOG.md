@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Documented sandboxed application setup instructions for running nanos-lint through `npx` with a concrete Codex workspace-write configuration, download/cache verification, and LuaLS process execution testing (#60).
 - Added recognition of dependency package globals exported with `Package.Export("Name", value)`: each exporting script is mirrored into a generated library file, so consumer packages resolve the exported name with its inferred type, `---@class` shape and `---@param`/`---@return` signatures instead of reporting `undefined-global` or degrading to `any`. Mirrors inherit the realm of their source script and are removed after the run (#72).
 
 ### Changed

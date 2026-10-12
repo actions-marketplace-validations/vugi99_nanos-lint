@@ -123,6 +123,53 @@ Relocating the cache only resolves cache-write denials. A sandbox that also bloc
 execution must additionally allow running the LuaLS binary (or `LUALS_BIN`, when pointing at
 a pre-installed copy outside the sandbox).
 
+#### Sandboxed Applications Setup (Codex Example)
+
+When running `nanos-lint` through `npx` inside sandboxed environments such as [Codex](https://developers.openai.com/codex/config-reference), the sandbox requires writable cache directories, outbound network access to fetch assets and registry packages, and permission to execute the cached LuaLS binary.
+
+Example configuration for `~/.codex/config.toml`:
+
+```toml
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+writable_roots = ["/home/<user>/.cache/nanos-lint", "/home/<user>/.npm"]
+```
+
+> [!NOTE]
+> Replace `/home/<user>` with your actual home directory (e.g. `/home/alexa`). If you use customized cache directories, configure those actual paths instead.
+
+- **`writable_roots`**:
+  - `/home/<user>/.cache/nanos-lint`: allows `nanos-lint` to download and extract the LuaLS binary, cache `annotations.lua`, and update metadata under the default Linux cache location (or `$XDG_CACHE_HOME/nanos-lint`).
+  - `/home/<user>/.npm`: allows `npm`/`npx` to write its package cache, downloaded packages, and execution logs under the default npm cache location.
+  - If you customize your cache locations (such as setting `XDG_CACHE_HOME` or npm's `cache` directory configuration), update `writable_roots` with those paths.
+- **`network_access = true`**: enables outbound network requests within the `workspace-write` sandbox. Fetching uncached LuaLS binaries and nanos world annotations requires network access. Invoking `nanos-lint` through `npx` also requires access to the npm registry when the package is not already cached locally. (For an air-gapped workflow, see [Pre-warm Cache for Offline / Docker Environments](#4-pre-warm-cache-for-offline--docker-environments), which has different network requirements).
+- **Process execution permission**: LuaLS must also be executable under the application sandbox policy. Granting cache write access alone is not sufficient if process execution from the cache directory is independently blocked.
+- Official configuration reference: [Codex Configuration Reference](https://developers.openai.com/codex/config-reference) (documents `sandbox_mode`, `sandbox_workspace_write.network_access`, and `sandbox_workspace_write.writable_roots`).
+
+##### Verifying Sandbox Setup
+
+Verify download/cache access and LuaLS execution separately to ensure sandbox permissions are correctly configured:
+
+1. **Verify download and cache access:**
+
+   ```sh
+   npx nanos-lint warmup --no-progress --log-level info
+   ```
+
+   This tests npm registry access, GitHub asset downloads, archive extraction, and cache writing without running lint checks on workspace files. It exits `0` on success with `Cache pre-warmed successfully. Ready for offline execution.`.
+
+2. **Verify LuaLS process execution:**
+   ```sh
+   npx nanos-lint check Packages/events --no-progress
+   ```
+   (Replace `Packages/events` with a known clean package or Lua script in your workspace.)
+   This confirms that the sandbox permits spawning and executing the downloaded LuaLS binary. When run on clean code without diagnostics, it completes with exit code `0` (`Diagnosis completed, no problems found...`).
+
+> [!TIP]
+> **Distinguishing lint diagnostics from sandbox failures**: If `npx nanos-lint check .` exits with code `1` and outputs Lua diagnostic errors, execution succeeded—the exit code is caused by lint issues in your Lua scripts, **not** a sandbox or network failure. Sandbox or permission failures instead surface as operating system errors (such as `EPERM` or `EACCES`), network fetch timeouts, or explicit `nanos-lint` diagnostic messages indicating blocked process execution or denied cache writes.
+
 ---
 
 ## GitHub Actions Integration
