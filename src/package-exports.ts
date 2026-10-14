@@ -414,7 +414,7 @@ export function buildExportBindingShadow(source: string, sourcePath: string): st
     "",
   ].join("\n");
 
-  return `${header}\n${transformed.replace(/\s+$/, "")}\n${footer}`;
+  return `${header}\n${transformed.trimEnd()}\n${footer}`;
 }
 
 /** Generated binding libraries for every dependency realm plus the single-pass mode. */

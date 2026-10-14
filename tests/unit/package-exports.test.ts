@@ -102,6 +102,16 @@ describe("Package.Export recognition (#72)", () => {
   });
 
   describe("buildExportBindingShadow", () => {
+    it("preserves long interior whitespace and trims trailing whitespace", () => {
+      const comment = `-- ${" ".repeat(100_000)}end of comment`;
+      const source = `Package.Export("Api", {})\n${comment}\n \t\r\n`;
+
+      const shadow = buildExportBindingShadow(source, "/deps/Exports.lua");
+
+      expect(shadow).toContain(`${comment}\nend\n`);
+      expect(shadow).toContain('Api = _nanos_lint_exports["Api"]');
+    });
+
     it("wraps the source and binds exported locals as globals", () => {
       const source = [
         "local VPerms = {}",

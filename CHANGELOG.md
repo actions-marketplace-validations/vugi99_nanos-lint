@@ -19,9 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pinned shared live-test LuaLS fixtures to the fallback version and mocked the release lookup in the injected-cache test, preventing upstream releases from causing CI assertion failures and extra archive downloads (PR #73).
 - A read-only annotations cache no longer aborts the run while a valid cached `annotations.lua` exists: the optional `lastChecked` refresh and a denied cache update now fall back to the cached definitions with a concise warning instead of a bare `EROFS`/`EACCES` error (#59).
 - A denied annotations cache write with no usable cached copy now reports an actionable `ERR_ANNOTATIONS_FS` error with relocation guidance instead of a low-level filesystem error (#59).
 - `Package.Require("File.lua")` no longer fails to resolve in LuaLS, which previously dropped type checking for every cross-file call inside a package (#72).
+
+### Security
+
+- Replaced the export generator's trailing-whitespace regular expression with linear-time trimming to prevent excessive processing time on dependency scripts with long whitespace runs (PR #73 CodeQL report).
 
 ## [3.4.1] - 2026-10-07
 
