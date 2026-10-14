@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-10-14
+
 ### Added
 
 - Documented sandboxed application setup instructions for running nanos-lint through `npx` with a concrete Codex workspace-write configuration, download/cache verification, and LuaLS process execution testing (#60).
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated development dependencies via Dependabot: `@types/node` from 26.6.4 to 26.6.5 (#75), `@typescript-eslint/eslint-plugin`, `@typescript-eslint/parser` and `typescript-eslint` from 8.71.0 to 8.71.1 (#74, #77), `prettier` from 3.9.9 to 3.9.10 (#78) and `tsdown` from 0.23.0 to 0.23.1 (#76). The `tsdown` bump moves its bundled native bindings from `@yuku-codegen/*` 0.10.2 to `@yuku-core/*` 0.18.1.
 - Extracted the Lua source scanner shared by the export mirroring into `src/lua-source.ts`: identifier, whitespace, comment, long-bracket and string-literal scanning now live in one linear-time module with its own unit tests (PR #73 review).
 - Restricted-environment diagnostics now separate a denied cache write from a denied LuaLS execution, and the README documents relocating the cache with `XDG_CACHE_HOME` (Linux), `LOCALAPPDATA` (Windows) or `HOME` (macOS), noting that relocation does not lift a process-execution restriction (#59).
 - The bundled configuration now sets `Lua.completion.requireSeparator` to `/` and adds extension-preserving `runtime.path` patterns. nanos world loads scripts by file path (`Package.Require` takes a `file_path`) and has no dot-style module syntax, so the documented `Package.Require("Utils/Math.lua")` form now resolves for type checking (#72).
