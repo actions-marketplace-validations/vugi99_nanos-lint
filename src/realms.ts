@@ -16,6 +16,7 @@ import {
   matchesTargetPaths,
 } from "./target-resolver.js";
 import { resolvePackageDependencies } from "./deps.js";
+import { generatePackageExportBindings, type ExportBindingLibraries } from "./package-exports.js";
 import {
   fileUriToPath,
   type CheckOptions,
@@ -194,6 +195,7 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
   const tempConfigs: string[] = [];
   const baseConfigPath = writeTempConfig(baseConfig);
   tempConfigs.push(baseConfigPath);
+  let exportBindings: ExportBindingLibraries | null = null;
   try {
     const checkedFiles = listCheckedFiles(resolvedTarget, baseConfigPath);
     const realmFiles = collectRealmFiles(resolvedTarget, mappings, checkedFiles);
@@ -245,6 +247,8 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
       ? deriveRealmAnnotationFiles(annotationsPath)
       : { client: annotationsPath, server: annotationsPath };
     const resolvedDeps = resolvePackageDependencies(resolvedTarget, userConfig, options.cliDeps);
+    // Generated Package.Export bindings must be released together with the pass configs.
+    exportBindings = generatePackageExportBindings(resolvedDeps);
     const passes: RealmPass[] = [];
     for (const realm of wanted) {
       const excluded = mappings
@@ -252,10 +256,10 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
         .map((mapping) => mapping.pattern);
       const depLibraries =
         realm === "server"
-          ? resolvedDeps.server
+          ? [...resolvedDeps.server, ...exportBindings.server]
           : realm === "client"
-            ? resolvedDeps.client
-            : resolvedDeps.shared;
+            ? [...resolvedDeps.client, ...exportBindings.client]
+            : [...resolvedDeps.shared, ...exportBindings.shared];
       const passConfig = buildPassConfig(
         baseConfig as unknown as Record<string, unknown>,
         realm,
@@ -273,12 +277,14 @@ export function planRealmCheck(options: PlanRealmCheckOptions): RealmCheckPlan |
       baseConfigPath,
       passes,
       cleanup: () => {
+        exportBindings?.cleanup();
         for (const tempConfig of tempConfigs) {
           removeTempConfig(tempConfig);
         }
       },
     };
   } catch (err) {
+    exportBindings?.cleanup();
     for (const tempConfig of tempConfigs) {
       removeTempConfig(tempConfig);
     }

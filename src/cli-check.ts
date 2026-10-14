@@ -3,6 +3,7 @@ import path from "node:path";
 import { resolveWorkspaceConfig, loadUserConfig } from "./config.js";
 import { planRealmCheck, runRealmAwareCheck, type RealmSelection } from "./realms.js";
 import { resolvePackageDependencies } from "./deps.js";
+import { generatePackageExportBindings } from "./package-exports.js";
 import { resolveAnnotations } from "./annotations.js";
 import { runLuaLSCheck } from "./luals.js";
 import { readBaseline, writeBaseline, compareBaseline, createBaseline } from "./baseline.js";
@@ -113,16 +114,18 @@ export async function executeCheckCommand(
     }
   } else {
     const resolvedDeps = resolvePackageDependencies(rootPath, userConfig, checkOptions.deps);
+    const exportBindings = generatePackageExportBindings(resolvedDeps);
     const unrequestedExclusions = computeUnrequestedExclusions(rootPath, canonicalTargets);
     const resolved = resolveWorkspaceConfig(rootPath, checkOptions.configpath, {
       ignore: checkOptions.ignore,
       annotationsPath,
-      dependencyLibraries: resolvedDeps.all,
+      dependencyLibraries: [...resolvedDeps.all, ...exportBindings.all],
       unrequestedExclusions,
     });
     try {
       result = await runLuaLSCheck(rootPath, resolved.configPath, checkOptions);
     } finally {
+      exportBindings.cleanup();
       if (resolved.isTemp && fs.existsSync(resolved.configPath)) {
         try {
           fs.unlinkSync(resolved.configPath);

@@ -55,20 +55,31 @@ describe.skipIf(!isLiveTestsEnabled())("resolveLuaLSBinary cache handling", () =
     }
   });
 
-  it("keeps metadata and downloads inside an injected cache directory", async () => {
+  it("keeps metadata and installation inside an injected cache directory", async () => {
     const baseCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "nanos-injected-cache-"));
+    let releaseLookup: ReturnType<typeof vi.spyOn> | undefined;
     try {
       const seeded = await seedCachedLuaLS(baseCacheDir, FALLBACK_LUALS_VERSION);
+      releaseLookup = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(
+          new Response(JSON.stringify({ tag_name: `v${FALLBACK_LUALS_VERSION}` })),
+        );
 
       const resolved = await resolveLuaLSBinary("latest", { cacheDir: baseCacheDir });
 
       expect(resolved).toBe(seeded);
+      expect(releaseLookup).toHaveBeenCalledExactlyOnceWith(
+        "https://api.github.com/repos/LuaLS/lua-language-server/releases/latest",
+        expect.any(Object),
+      );
       expect(fs.existsSync(path.join(baseCacheDir, "metadata.json"))).toBe(true);
       expect(readLuaLSMetadata(baseCacheDir)?.latestVersion).toBe(FALLBACK_LUALS_VERSION);
       expect(fs.existsSync(path.join(baseCacheDir, FALLBACK_LUALS_VERSION, ".complete"))).toBe(
         true,
       );
     } finally {
+      releaseLookup?.mockRestore();
       fs.rmSync(baseCacheDir, { recursive: true, force: true });
     }
   });
