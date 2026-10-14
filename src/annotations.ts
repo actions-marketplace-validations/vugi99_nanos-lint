@@ -22,6 +22,57 @@ export interface ResolveAnnotationsOptions {
   offline?: boolean;
 }
 
+/**
+ * Filesystem error codes that mean the cache is readable but not writable, which is normal
+ * in sandboxed environments where only reading and process execution are permitted (#59).
+ */
+const CACHE_WRITE_DENIED_CODES: ReadonlySet<string> = new Set(["EROFS", "EACCES", "EPERM"]);
+
+/** Relocation guidance shared by the read-only cache diagnostics. */
+export const CACHE_LOCATION_HINT =
+  "Set XDG_CACHE_HOME (Linux), LOCALAPPDATA (Windows) or HOME (macOS) to relocate the cache to a writable directory, or pass --annotations <path> with a local definitions file.";
+
+/** Detects a filesystem denial that only prevents writing to the cache directory. */
+export function isCacheWriteDenied(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  if (typeof code === "string" && CACHE_WRITE_DENIED_CODES.has(code)) {
+    return true;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return /read-only file system|permission denied|operation not permitted/i.test(message);
+}
+
+/** Formats the short reason of a failed cache write, without repeating the error code. */
+function describeError(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  const message = err instanceof Error ? err.message : String(err);
+  if (typeof code !== "string") {
+    return message;
+  }
+  return message.startsWith(`${code}:`) ? message : `${code}: ${message}`;
+}
+
+/**
+ * Refreshes the optional `lastChecked` bookkeeping date. A denied write leaves the cached
+ * definitions intact and usable, so it warns and lets lint continue instead of failing (#59).
+ */
+function refreshCachedAnnotationsDate(commitId: string, cacheDir: string): void {
+  try {
+    updateLastCheckedDate(commitId, cacheDir);
+  } catch (err) {
+    const reason = describeError(err);
+    if (isCacheWriteDenied(err)) {
+      logger.warn(
+        `[annotations] Annotations cache at ${cacheDir} is read-only (${reason}). Continuing with the existing valid cached annotations; only the optional refresh date could not be stored. ${CACHE_LOCATION_HINT}`,
+      );
+      return;
+    }
+    logger.warn(
+      `[annotations] Could not store the annotations refresh date at ${cacheDir} (${reason}). Continuing with the existing valid cached annotations.`,
+    );
+  }
+}
+
 /** Validates that a user-supplied or environment-specified annotations path exists and is a valid file. */
 function validateCustomAnnotationsPath(filePath: string, source: "custom" | "env"): string {
   const resolved = path.resolve(filePath);
@@ -155,21 +206,27 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
       fs.existsSync(cachedAnnotationsFile) &&
       isAnnotationsValid(cachedAnnotationsFile)
     ) {
-      updateLastCheckedDate(latestCommitId, cacheDir);
+      refreshCachedAnnotationsDate(latestCommitId, cacheDir);
       return cachedAnnotationsFile;
     }
 
-    return await downloadAndCacheAnnotations(latestCommitId, cacheDir);
+    try {
+      return await downloadAndCacheAnnotations(latestCommitId, cacheDir);
+    } catch (err) {
+      // A restricted environment can forbid cache writes while still allowing every read:
+      // the cached definitions stay valid, so keep linting instead of failing the run (#59).
+      if (isCacheWriteDenied(err) && isAnnotationsValid(cachedAnnotationsFile)) {
+        logger.warn(
+          `[annotations] Cannot refresh the annotations cache at ${cacheDir} (${describeError(err)}). Continuing with the existing valid cached annotations read-only. ${CACHE_LOCATION_HINT}`,
+        );
+        return cachedAnnotationsFile;
+      }
+      throw toAnnotationsFailure(err, cacheDir);
+    }
   }
 
   if (fs.existsSync(cachedAnnotationsFile) && isAnnotationsValid(cachedAnnotationsFile)) {
-    try {
-      updateLastCheckedDate(metadata?.commitId || "unknown", cacheDir);
-    } catch (err) {
-      logger.warn(
-        `Failed to update lastChecked date for cached annotations: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    refreshCachedAnnotationsDate(metadata?.commitId || "unknown", cacheDir);
     return cachedAnnotationsFile;
   }
 
@@ -183,33 +240,40 @@ export async function resolveAnnotations(options: ResolveAnnotationsOptions = {}
       return bundled;
     }
 
-    const isFsError =
-      Boolean(
-        err &&
-        typeof err === "object" &&
-        "code" in err &&
-        typeof (err as { code: unknown }).code === "string" &&
-        ["EACCES", "EPERM", "ENOSPC", "EROFS", "EEXIST", "ENOENT"].includes(
-          (err as { code: string }).code,
-        ),
-      ) ||
-      (err instanceof Error && /permission denied|read-only|no space left/i.test(err.message));
+    throw toAnnotationsFailure(err, cacheDir);
+  }
+}
 
-    if (isFsError) {
-      throw new AnnotationsError(
-        `Failed to resolve nanos world API annotations due to a filesystem error: ${err instanceof Error ? err.message : String(err)}. Please check directory permissions or pass a custom file with --annotations.`,
-        "ERR_ANNOTATIONS_FS",
-        "Check directory permissions for the cache directory or specify --annotations <path>.",
-        { cause: err },
-      );
-    }
-    throw new AnnotationsError(
-      `Failed to resolve nanos world API annotations. Please check your network connection or pass a custom file with --annotations. (${err instanceof Error ? err.message : String(err)})`,
-      "ERR_ANNOTATIONS_NETWORK",
-      "Check your network connection, run 'nanos-lint warmup' when online, or specify --annotations <path>.",
+/**
+ * Classifies a failed annotations download or cache write into an actionable error, so a
+ * denied cache write is never reported as a network problem (#59).
+ */
+function toAnnotationsFailure(err: unknown, cacheDir: string): Error {
+  const isFsError =
+    isCacheWriteDenied(err) ||
+    Boolean(
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      typeof (err as { code: unknown }).code === "string" &&
+      ["ENOSPC", "EEXIST", "ENOENT"].includes((err as { code: string }).code),
+    ) ||
+    (err instanceof Error && /no space left/i.test(err.message));
+
+  if (isFsError) {
+    return new AnnotationsError(
+      `Failed to resolve nanos world API annotations due to a filesystem error: ${describeError(err)}. The annotations cache at ${cacheDir} is not writable and holds no usable copy.`,
+      "ERR_ANNOTATIONS_FS",
+      `Allow writes to the cache directory, or ${CACHE_LOCATION_HINT} Relocating the cache only fixes cache-write denials: a sandbox that also blocks process execution must additionally permit running the LuaLS binary.`,
       { cause: err },
     );
   }
+  return new AnnotationsError(
+    `Failed to resolve nanos world API annotations. Please check your network connection or pass a custom file with --annotations. (${err instanceof Error ? err.message : String(err)})`,
+    "ERR_ANNOTATIONS_NETWORK",
+    "Check your network connection, run 'nanos-lint warmup' when online, or specify --annotations <path>.",
+    { cause: err },
+  );
 }
 
 export interface CopyAnnotationsOptions {

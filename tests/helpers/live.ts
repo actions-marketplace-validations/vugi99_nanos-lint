@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveLuaLSBinary, getPlatformInfo } from "../../src/luals.js";
+import { FALLBACK_LUALS_VERSION, resolveLuaLSBinary, getPlatformInfo } from "../../src/luals.js";
 import { resolveAnnotations } from "../../src/annotations.js";
 
 const DISABLED_VALUES = new Set(["0", "false", "no", "off"]);
@@ -18,7 +18,7 @@ let sharedBinaryPromise: Promise<string> | null = null;
  * worker so concurrent tests await the same resolution.
  */
 export function getSharedLuaLSBinary(): Promise<string> {
-  sharedBinaryPromise ??= resolveLuaLSBinary();
+  sharedBinaryPromise ??= resolveLuaLSBinary(FALLBACK_LUALS_VERSION);
   return sharedBinaryPromise;
 }
 

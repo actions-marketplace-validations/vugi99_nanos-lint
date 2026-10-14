@@ -90,6 +90,86 @@ downloading them. Missing assets fail with provisioning instructions.
 The flag controls nanos-lint; npm/npx may access the registry before it starts. Use
 a preinstalled executable or npm's own `--offline` with an already cached package.
 
+### 5. Restricted and Sandboxed Environments
+
+Sandboxes (container runtimes, agent harnesses, CI runners) often pre-warm the cache
+read-only or block executing files from it. nanos-lint separates the two capabilities so
+you can tell them apart:
+
+- **Cache writes are optional.** A valid cached `annotations.lua` and a valid cached LuaLS
+  binary are consumed as-is. When the annotations cache cannot be written, the run logs a
+  concise warning and continues; the cache is never deleted or replaced.
+- **Process execution is required.** If the sandbox denies executing the LuaLS binary, the
+  check fails with a nonzero exit status and a hint naming the binary path. The cache is
+  preserved for the next run.
+
+Relocate the cache to a writable directory with the platform convention `env-paths` uses:
+
+| Platform | Variable                                                  |
+| :------- | :-------------------------------------------------------- |
+| Linux    | `XDG_CACHE_HOME`                                          |
+| Windows  | `LOCALAPPDATA`                                            |
+| macOS    | `HOME` (the cache lives in `~/Library/Caches/nanos-lint`) |
+
+```sh
+# Linux: keep the cache inside an approved writable workspace
+XDG_CACHE_HOME=/workspace/.cache nanos-lint check Packages/events
+
+# Or bypass the cache entirely with a local definitions file
+nanos-lint check Packages/events --annotations ./annotations.lua
+```
+
+Relocating the cache only resolves cache-write denials. A sandbox that also blocks process
+execution must additionally allow running the LuaLS binary (or `LUALS_BIN`, when pointing at
+a pre-installed copy outside the sandbox).
+
+#### Sandboxed Applications Setup (Codex Example)
+
+When running `nanos-lint` through `npx` inside sandboxed environments such as [Codex](https://developers.openai.com/codex/config-reference), the sandbox requires writable cache directories, outbound network access to fetch assets and registry packages, and permission to execute the cached LuaLS binary.
+
+Example configuration for `~/.codex/config.toml`:
+
+```toml
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
+writable_roots = ["/home/<user>/.cache/nanos-lint", "/home/<user>/.npm"]
+```
+
+> [!NOTE]
+> Replace `/home/<user>` with your actual home directory (e.g. `/home/alexa`). If you use customized cache directories, configure those actual paths instead.
+
+- **`writable_roots`**:
+  - `/home/<user>/.cache/nanos-lint`: allows `nanos-lint` to download and extract the LuaLS binary, cache `annotations.lua`, and update metadata under the default Linux cache location (or `$XDG_CACHE_HOME/nanos-lint`).
+  - `/home/<user>/.npm`: allows `npm`/`npx` to write its package cache, downloaded packages, and execution logs under the default npm cache location.
+  - If you customize your cache locations (such as setting `XDG_CACHE_HOME` or npm's `cache` directory configuration), update `writable_roots` with those paths.
+- **`network_access = true`**: enables outbound network requests within the `workspace-write` sandbox. Fetching uncached LuaLS binaries and nanos world annotations requires network access. Invoking `nanos-lint` through `npx` also requires access to the npm registry when the package is not already cached locally. (For an air-gapped workflow, see [Pre-warm Cache for Offline / Docker Environments](#4-pre-warm-cache-for-offline--docker-environments), which has different network requirements).
+- **Process execution permission**: LuaLS must also be executable under the application sandbox policy. Granting cache write access alone is not sufficient if process execution from the cache directory is independently blocked.
+- Official configuration reference: [Codex Configuration Reference](https://developers.openai.com/codex/config-reference) (documents `sandbox_mode`, `sandbox_workspace_write.network_access`, and `sandbox_workspace_write.writable_roots`).
+
+##### Verifying Sandbox Setup
+
+Verify download/cache access and LuaLS execution separately to ensure sandbox permissions are correctly configured:
+
+1. **Verify download and cache access:**
+
+   ```sh
+   npx nanos-lint warmup --no-progress --log-level info
+   ```
+
+   This tests npm registry access, GitHub asset downloads, archive extraction, and cache writing without running lint checks on workspace files. It exits `0` on success with `Cache pre-warmed successfully. Ready for offline execution.`.
+
+2. **Verify LuaLS process execution:**
+   ```sh
+   npx nanos-lint check Packages/events --no-progress
+   ```
+   (Replace `Packages/events` with a known clean package or Lua script in your workspace.)
+   This confirms that the sandbox permits spawning and executing the downloaded LuaLS binary. When run on clean code without diagnostics, it completes with exit code `0` (`Diagnosis completed, no problems found...`).
+
+> [!TIP]
+> **Distinguishing lint diagnostics from sandbox failures**: If `npx nanos-lint check .` exits with code `1` and outputs Lua diagnostic errors, execution succeeded—the exit code is caused by lint issues in your Lua scripts, **not** a sandbox or network failure. Sandbox or permission failures instead surface as operating system errors (such as `EPERM` or `EACCES`), network fetch timeouts, or explicit `nanos-lint` diagnostic messages indicating blocked process execution or denied cache writes.
+
 ---
 
 ## GitHub Actions Integration
@@ -374,6 +454,36 @@ When packages depend on other packages (e.g. located in `Server/Packages/` or ex
 - **Transitive Dependencies & Cycle Detection**: Dependencies are traversed recursively. If a dependency defines its own `nanos.deps` in `.luarc.json`, those dependencies are loaded automatically. Circular dependencies are detected and visited only once.
 - **Realm Partitioning**: Dependency directories are inspected for realm conventions (`Server/`, `Client/`, `Shared/`). Server passes only include `Server/` and `Shared/` folders of dependencies; client passes only include `Client/` and `Shared/` folders. Single definition `.lua` files and non-partitioned dependency directories are included in all passes.
 - **Resilience**: If a declared dependency path does not exist, `nanos-lint` emits a warning and continues without failing the lint pass.
+
+### Exported Globals (`Package.Export`)
+
+Dependency packages publish cross-package APIs with `Package.Export("Name", value)`, which binds `value` to the global `Name` for every package on the same side. LuaLS cannot see that binding on its own, so consumers of the exported name would report `undefined-global`.
+
+`nanos-lint` mirrors each exporting dependency script into a generated library file where the exported names are real globals. The mirror keeps the original statements, so the exported value keeps its inferred type, its `---@class` shape and its `---@param` / `---@return` documentation:
+
+```lua
+-- dependency: Server/Index.lua
+local AuthorizationLifecycle = Package.Require("AuthorizationLifecycle.lua")
+local lifecycle = AuthorizationLifecycle.New()
+local VPerms = lifecycle.VPerms
+
+Package.Export("VPerms", VPerms)
+```
+
+```lua
+-- consumer: Server/Index.lua
+VPerms.LoadPlayer(player)      -- resolves, no undefined-global
+VPerms.ThisDoesNotExist()      -- undefined-field
+VPerms.LoadPlayer("nope")      -- param-type-mismatch
+```
+
+Notes:
+
+- The exported **name** must be a string literal; dynamically named exports cannot be mirrored and stay as they are today. The call itself may be spelled with any spacing (`Package . Export("Name", value)` or a line break between the tokens).
+- The exported **value** may be any expression, including an inline `function(...) ... end` whose body contains its own commas and nested blocks; it is mirrored as written.
+- Mirrors inherit the realm of the script they come from: an export of a dependency `Server/` script is only visible to `--realm server` passes.
+- Generated files live in a temporary directory that is removed after the run; dependency sources are never modified.
+- nanos world loads scripts **by file path** (`Package.Require("Utils/Math.lua")`) and has no dot-style module syntax: `Package.Require` takes a `file_path` and searches relative to the current file, `Client/`/`Server/`, `Shared/`, the package root, then `Packages/`. The bundled configuration sets `Lua.completion.requireSeparator` to `/` and adds extension-preserving `runtime.path` entries so those file paths resolve — and keep their types — instead of being treated as dot-separated module names. A custom `runtime.path` in your `.luarc.json` replaces these defaults.
 
 ### File Counting and Glob Semantics
 

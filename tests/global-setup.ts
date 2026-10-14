@@ -61,14 +61,20 @@ export default async function setup(project?: { config?: { watch?: boolean } }) 
     return teardown;
   }
 
-  const { resolveLuaLSBinary } = await import("../src/luals.js");
+  const { FALLBACK_LUALS_VERSION, getIsoWeek, resolveLuaLSBinary, writeLuaLSMetadata } =
+    await import("../src/luals.js");
   const { resolveAnnotations } = await import("../src/annotations.js");
   const { logger } = await import("../src/logger.js");
 
   try {
     // Downloaded here (once) if not already cached; workers then hit the cache.
     logger.setLevel("error");
-    const binary = await resolveLuaLSBinary();
+    const binary = await resolveLuaLSBinary(FALLBACK_LUALS_VERSION);
+    writeLuaLSMetadata({
+      lastCheckedWeek: getIsoWeek(),
+      latestVersion: FALLBACK_LUALS_VERSION,
+      lastCheckedDate: new Date().toISOString().slice(0, 10),
+    });
     const annotations = await resolveAnnotations();
     console.log(
       `[tests] Shared live-test fixtures ready (at most one LuaLS download for this run).\n` +

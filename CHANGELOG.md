@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-10-14
+
+### Added
+
+- Documented sandboxed application setup instructions for running nanos-lint through `npx` with a concrete Codex workspace-write configuration, download/cache verification, and LuaLS process execution testing (#60).
+- Added recognition of dependency package globals exported with `Package.Export("Name", value)`: each exporting script is mirrored into a generated library file, so consumer packages resolve the exported name with its inferred type, `---@class` shape and `---@param`/`---@return` signatures instead of reporting `undefined-global` or degrading to `any`. Mirrors inherit the realm of their source script and are removed after the run (#72).
+
+### Changed
+
+- Updated development dependencies via Dependabot: `@types/node` from 26.6.4 to 26.6.5 (#75), `@typescript-eslint/eslint-plugin`, `@typescript-eslint/parser` and `typescript-eslint` from 8.71.0 to 8.71.1 (#74, #77), `prettier` from 3.9.9 to 3.9.10 (#78) and `tsdown` from 0.23.0 to 0.23.1 (#76). The `tsdown` bump moves its bundled native bindings from `@yuku-codegen/*` 0.10.2 to `@yuku-core/*` 0.18.1.
+- Extracted the Lua source scanner shared by the export mirroring into `src/lua-source.ts`: identifier, whitespace, comment, long-bracket and string-literal scanning now live in one linear-time module with its own unit tests (PR #73 review).
+- Restricted-environment diagnostics now separate a denied cache write from a denied LuaLS execution, and the README documents relocating the cache with `XDG_CACHE_HOME` (Linux), `LOCALAPPDATA` (Windows) or `HOME` (macOS), noting that relocation does not lift a process-execution restriction (#59).
+- The bundled configuration now sets `Lua.completion.requireSeparator` to `/` and adds extension-preserving `runtime.path` patterns. nanos world loads scripts by file path (`Package.Require` takes a `file_path`) and has no dot-style module syntax, so the documented `Package.Require("Utils/Math.lua")` form now resolves for type checking (#72).
+
+### Fixed
+
+- Pinned shared live-test LuaLS fixtures to the fallback version and mocked the release lookup in the injected-cache test, preventing upstream releases from causing CI assertion failures and extra archive downloads (PR #73).
+- A read-only annotations cache no longer aborts the run while a valid cached `annotations.lua` exists: the optional `lastChecked` refresh and a denied cache update now fall back to the cached definitions with a concise warning instead of a bare `EROFS`/`EACCES` error (#59).
+- A denied annotations cache write with no usable cached copy now reports an actionable `ERR_ANNOTATIONS_FS` error with relocation guidance instead of a low-level filesystem error (#59).
+- `Package.Require("File.lua")` no longer fails to resolve in LuaLS, which previously dropped type checking for every cross-file call inside a package (#72).
+- `Package.Export` argument splitting now tracks Lua block nesting, so a closure exported inline keeps the commas of its own statements: `Package.Export("Pair", function() return 1, "two" end)` used to be mirrored as the truncated `function() return 1`, losing the body and its `end` (PR #73 review).
+- The export generator no longer prefilters dependency scripts with a literal `Package.Export` substring, so spaced spellings such as `Package . Export("Spaced", value)` or a newline between the tokens are mirrored instead of leaving consumers with `undefined-global` (PR #73 review).
+
+### Security
+
+- Replaced every whitespace and escape regular expression of the export generator with linear-time scanning, so dependency scripts with long whitespace runs cannot slow the run down (PR #73 CodeQL report).
+
 ## [3.4.1] - 2026-10-07
 
 ### Changed
