@@ -3,6 +3,19 @@ import path from "node:path";
 import { logger } from "./logger.js";
 import { systemPaths } from "./paths.js";
 import type { ResolvedDependencyRealms } from "./deps.js";
+import {
+  BLOCK_CLOSERS,
+  BLOCK_OPENERS,
+  isIdentifierStart,
+  isIdentifierPart,
+  isWhitespace,
+  readIdentifier,
+  readStringLiteral,
+  skipComment,
+  skipLongBracket,
+  skipShortString,
+  skipWhitespace,
+} from "./lua-source.js";
 
 /**
  * Dependency packages publish cross-package APIs with `Package.Export("Name", value)`,
@@ -60,157 +73,20 @@ const CAPTURE_SCOPE = "_nanos_lint_export_scope";
 /** File name prefix of the generated binding files; never collides with a package script. */
 const SHADOW_FILE_PREFIX = "nanos-lint-export-";
 
-/** Whether a code unit can start a Lua identifier. */
-function isIdentifierStart(code: number | undefined): boolean {
-  return (
-    code !== undefined && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95)
-  );
-}
-
-/** Whether a code unit can continue a Lua identifier. */
-function isIdentifierPart(code: number | undefined): boolean {
-  return isIdentifierStart(code) || (code !== undefined && code >= 48 && code <= 57);
-}
-
-/** Returns the number of `=` signs of the long bracket opening at `index`, or null. */
-function longBracketLevel(source: string, index: number): number | null {
-  if (source[index] !== "[") return null;
-  let cursor = index + 1;
-  let level = 0;
-  while (source[cursor] === "=") {
-    level += 1;
-    cursor += 1;
-  }
-  return source[cursor] === "[" ? level : null;
-}
-
-/** Returns the offset just past the long bracket opening at `index`, or null when none opens. */
-function skipLongBracket(source: string, index: number): number | null {
-  const level = longBracketLevel(source, index);
-  if (level === null) return null;
-  const closer = `]${"=".repeat(level)}]`;
-  const closeIndex = source.indexOf(closer, index + level + 2);
-  return closeIndex === -1 ? source.length : closeIndex + closer.length;
-}
-
-/** Returns the offset just past the short string literal starting at `index`. */
-function skipShortString(source: string, index: number): number {
-  const quote = source[index];
-  let cursor = index + 1;
-  while (cursor < source.length) {
-    const ch = source[cursor];
-    if (ch === "\\") {
-      cursor += 2;
-      continue;
-    }
-    if (ch === quote) return cursor + 1;
-    if (ch === "\n") return cursor;
-    cursor += 1;
-  }
-  return source.length;
-}
-
-/** Returns the offset just past the comment starting at `index` (a `--` sequence). */
-function skipComment(source: string, index: number): number {
-  const longEnd = skipLongBracket(source, index + 2);
-  if (longEnd !== null) return longEnd;
-  const lineEnd = source.indexOf("\n", index + 2);
-  return lineEnd === -1 ? source.length : lineEnd + 1;
-}
-
-/** Returns the offset of the first non-whitespace code unit at or after `index`. */
-function skipWhitespace(source: string, index: number): number {
-  let cursor = index;
-  while (cursor < source.length && /\s/.test(source[cursor] ?? "")) {
-    cursor += 1;
-  }
-  return cursor;
-}
-
-/** Reads a Lua identifier at `index`, or null when none starts there. */
-function readIdentifier(source: string, index: number): string | null {
-  if (!isIdentifierStart(source.charCodeAt(index))) return null;
-  let cursor = index + 1;
-  while (isIdentifierPart(source.charCodeAt(cursor))) {
-    cursor += 1;
-  }
-  return source.slice(index, cursor);
-}
-
-/** A parsed string literal plus the offset just past it. */
-interface StringLiteral {
-  value: string;
-  end: number;
-}
-
-/** Resolves the escape sequences of a short (quoted) Lua string body. */
-function decodeShortString(body: string): string {
-  const escapes: Record<string, string> = {
-    a: "\u0007",
-    b: "\b",
-    f: "\f",
-    n: "\n",
-    r: "\r",
-    t: "\t",
-    v: "\u000b",
-    "\\": "\\",
-    '"': '"',
-    "'": "'",
-    "\n": "\n",
-  };
-  let result = "";
-  for (let index = 0; index < body.length; index += 1) {
-    const ch = body[index] ?? "";
-    if (ch !== "\\") {
-      result += ch;
-      continue;
-    }
-    const next = body[index + 1] ?? "";
-    if (next === "x") {
-      const hex = body.slice(index + 2, index + 4);
-      result += /^[0-9a-fA-F]{2}$/.test(hex) ? String.fromCharCode(parseInt(hex, 16)) : "";
-      index += 3;
-      continue;
-    }
-    if (next === "z") {
-      index += 1;
-      while (index + 1 < body.length && /\s/.test(body[index + 1] ?? "")) {
-        index += 1;
-      }
-      continue;
-    }
-    if (next >= "0" && next <= "9") {
-      const digits = body.slice(index + 1).match(/^\d{1,3}/)?.[0] ?? "";
-      result += String.fromCharCode(parseInt(digits, 10) % 256);
-      index += digits.length;
-      continue;
-    }
-    result += escapes[next] ?? next;
-    index += 1;
-  }
-  return result;
-}
-
-/** Reads a Lua string literal (quoted or long bracket) at `index`, or null. */
-function readStringLiteral(source: string, index: number): StringLiteral | null {
-  const ch = source[index];
-  if (ch === '"' || ch === "'") {
-    const end = skipShortString(source, index);
-    if (end <= index + 1 || source[end - 1] !== ch) return null;
-    return { value: decodeShortString(source.slice(index + 1, end - 1)), end };
-  }
-  const level = longBracketLevel(source, index);
-  if (level === null) return null;
-  const end = skipLongBracket(source, index);
-  if (end === null) return null;
-  const body = source.slice(index + level + 2, end - level - 2);
-  return { value: body.startsWith("\n") ? body.slice(1) : body, end };
-}
-
 /** A whitespace-trimmed argument span inside a call. */
 interface ArgumentSpan {
   start: number;
   end: number;
+}
+
+/** Trims the whitespace surrounding `[start, end)`; null when nothing but whitespace remains. */
+function trimSourceSpan(source: string, start: number, end: number): ArgumentSpan | null {
+  const trimmedStart = skipWhitespace(source, start);
+  let trimmedEnd = end;
+  while (trimmedEnd > trimmedStart && isWhitespace(source.charCodeAt(trimmedEnd - 1))) {
+    trimmedEnd -= 1;
+  }
+  return trimmedEnd > trimmedStart ? { start: trimmedStart, end: trimmedEnd } : null;
 }
 
 /** Result of scanning one call's argument list. */
@@ -222,25 +98,24 @@ interface CallArguments {
 
 /**
  * Splits the argument list of the call whose `(` sits at `openIndex`, ignoring commas that
- * belong to nested calls, table constructors, strings or comments. Returns null when the
- * parenthesis is never closed.
+ * belong to nested calls, table constructors, strings, comments or Lua blocks. Returns null
+ * when the parenthesis is never closed.
+ *
+ * Block commas matter for inline values: `Package.Export("Pair", function() return 1, "two"
+ * end)` exports the whole function, not the truncated `function() return 1` that a
+ * parenthesis-only scan would report (#73).
  */
 function readCallArguments(source: string, openIndex: number): CallArguments | null {
   const args: ArgumentSpan[] = [];
   let start = openIndex + 1;
   let depth = 0;
+  let blocks = 0;
   // Scanning starts inside the call: the opening parenthesis itself is not a nesting level.
   let cursor = openIndex + 1;
 
   const pushArg = (end: number): void => {
-    const trimmedStart = skipWhitespace(source, start);
-    let trimmedEnd = end;
-    while (trimmedEnd > trimmedStart && /\s/.test(source[trimmedEnd - 1] ?? "")) {
-      trimmedEnd -= 1;
-    }
-    if (trimmedEnd > trimmedStart) {
-      args.push({ start: trimmedStart, end: trimmedEnd });
-    }
+    const span = trimSourceSpan(source, start, end);
+    if (span) args.push(span);
   };
 
   while (cursor < source.length) {
@@ -274,7 +149,14 @@ function readCallArguments(source: string, openIndex: number): CallArguments | n
       cursor += 1;
       continue;
     }
-    if (ch === "," && depth === 0) {
+    if (depth === 0 && isIdentifierStart(source.charCodeAt(cursor))) {
+      const identifier = readIdentifier(source, cursor) ?? "";
+      if (BLOCK_OPENERS.has(identifier)) blocks += 1;
+      else if (BLOCK_CLOSERS.has(identifier)) blocks = Math.max(0, blocks - 1);
+      cursor += identifier.length;
+      continue;
+    }
+    if (ch === "," && depth === 0 && blocks === 0) {
       pushArg(cursor);
       start = cursor + 1;
     }
@@ -366,6 +248,23 @@ export function isBindableGlobalName(name: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !LUA_KEYWORDS.has(name);
 }
 
+/** The first call of every bindable export name, in source order. */
+function pickBindableExports(calls: PackageExportCall[], sourcePath: string): PackageExportCall[] {
+  const bindable: PackageExportCall[] = [];
+  const seen = new Set<string>();
+  for (const call of calls) {
+    if (!isBindableGlobalName(call.name) || seen.has(call.name)) continue;
+    seen.add(call.name);
+    bindable.push(call);
+  }
+  if (bindable.length === 0 && calls.length > 0) {
+    logger.debug(
+      `[exports] ${sourcePath} declares no statically bindable Package.Export name; skipping.`,
+    );
+  }
+  return bindable;
+}
+
 /**
  * Mirrors one exporting script into a library file that declares the exported names as
  * globals. The original statements are wrapped in a function so that file-level locals
@@ -375,28 +274,31 @@ export function isBindableGlobalName(name: string): boolean {
  * Returns null when the script exports no statically bindable global name.
  */
 export function buildExportBindingShadow(source: string, sourcePath: string): string | null {
-  const calls = findPackageExports(source);
-  const bindable: PackageExportCall[] = [];
-  const seen = new Set<string>();
-  for (const call of calls) {
-    if (!isBindableGlobalName(call.name) || seen.has(call.name)) continue;
-    seen.add(call.name);
-    bindable.push(call);
-  }
-  if (bindable.length === 0) {
-    if (calls.length > 0) {
-      logger.debug(
-        `[exports] ${sourcePath} declares no statically bindable Package.Export name; skipping.`,
-      );
-    }
-    return null;
-  }
+  return renderExportBindingShadow(source, sourcePath, findPackageExports(source));
+}
 
-  let transformed = source;
-  for (const call of [...calls].sort((a, b) => b.start - a.start)) {
-    const replacement = `${CAPTURE_TABLE}[${call.nameLiteral}] = ${call.expression}`;
-    transformed = transformed.slice(0, call.start) + replacement + transformed.slice(call.end);
+/**
+ * Renders the binding file for an already scanned script. Shared by
+ * {@link buildExportBindingShadow} and the generator, which scans each dependency script once.
+ */
+function renderExportBindingShadow(
+  source: string,
+  sourcePath: string,
+  calls: PackageExportCall[],
+): string | null {
+  const bindable = pickBindableExports(calls, sourcePath);
+  if (bindable.length === 0) return null;
+
+  // Every call, including duplicates, becomes a capture assignment so that no
+  // `Package.Export(...)` survives into the generated library.
+  let transformed = "";
+  let copiedTo = 0;
+  for (const call of calls) {
+    transformed += source.slice(copiedTo, call.start);
+    transformed += `${CAPTURE_TABLE}[${call.nameLiteral}] = ${call.expression}`;
+    copiedTo = call.end;
   }
+  transformed += source.slice(copiedTo);
 
   const header = [
     `-- Generated by nanos-lint from ${sourcePath} (#72).`,
@@ -493,7 +395,11 @@ export function generatePackageExportBindings(
     cleanup: () => {},
   };
 
-  const candidates = new Map<string, { content: string; realms: Set<string> }>();
+  // Scanning is per file, not per realm: one scan serves every realm the file belongs to.
+  const candidates = new Map<
+    string,
+    { content: string; calls: PackageExportCall[]; realms: Set<string> }
+  >();
   for (const realm of [...REALM_KEYS, "all"] as const) {
     for (const entry of resolved[realm]) {
       for (const file of collectLuaFiles(entry)) {
@@ -511,9 +417,12 @@ export function generatePackageExportBindings(
           );
           continue;
         }
-        if (!content.includes("Package.Export")) continue;
+        // Any spelling the scanner accepts counts, including `Package . Export(...)` (#73).
+        const calls = findPackageExports(content);
+        if (calls.length === 0) continue;
         candidates.set(file, {
           content,
+          calls,
           realms: realm === "all" ? new Set<string>() : new Set([realm]),
         });
       }
@@ -540,7 +449,7 @@ export function generatePackageExportBindings(
 
   let index = 0;
   for (const [file, record] of candidates) {
-    const shadow = buildExportBindingShadow(record.content, file);
+    const shadow = renderExportBindingShadow(record.content, file, record.calls);
     if (!shadow) continue;
     const target = path.join(directory, `${SHADOW_FILE_PREFIX}${index}.lua`);
     index += 1;

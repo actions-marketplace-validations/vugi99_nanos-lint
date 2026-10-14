@@ -479,7 +479,8 @@ VPerms.LoadPlayer("nope")      -- param-type-mismatch
 
 Notes:
 
-- The exported **name** must be a string literal in the `Package.Export("Name", value)` form; dynamically named exports cannot be mirrored and stay as they are today.
+- The exported **name** must be a string literal; dynamically named exports cannot be mirrored and stay as they are today. The call itself may be spelled with any spacing (`Package . Export("Name", value)` or a line break between the tokens).
+- The exported **value** may be any expression, including an inline `function(...) ... end` whose body contains its own commas and nested blocks; it is mirrored as written.
 - Mirrors inherit the realm of the script they come from: an export of a dependency `Server/` script is only visible to `--realm server` passes.
 - Generated files live in a temporary directory that is removed after the run; dependency sources are never modified.
 - nanos world loads scripts **by file path** (`Package.Require("Utils/Math.lua")`) and has no dot-style module syntax: `Package.Require` takes a `file_path` and searches relative to the current file, `Client/`/`Server/`, `Shared/`, the package root, then `Packages/`. The bundled configuration sets `Lua.completion.requireSeparator` to `/` and adds extension-preserving `runtime.path` entries so those file paths resolve — and keep their types — instead of being treated as dot-separated module names. A custom `runtime.path` in your `.luarc.json` replaces these defaults.

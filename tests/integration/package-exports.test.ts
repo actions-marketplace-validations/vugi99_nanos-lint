@@ -17,8 +17,11 @@ interface ExportRun {
 
 let annotationsPath = "";
 
-/** Runs the full realm-aware check for the export fixture and flattens its report. */
-async function runConsumer(): Promise<ExportRun> {
+/**
+ * Runs the full realm-aware check for the export fixture and flattens the diagnostics of
+ * `only` (every consumer script by default).
+ */
+async function runConsumer(only?: string): Promise<ExportRun> {
   const plan: RealmCheckPlan | null = planRealmCheck({
     targetPath: consumerRoot,
     userConfig: loadUserConfig(consumerRoot),
@@ -40,6 +43,7 @@ async function runConsumer(): Promise<ExportRun> {
       const relative = path
         .relative(consumerRoot, path.resolve(fileUriToPath(uri)))
         .replace(/\\/g, "/");
+      if (only && relative !== only) continue;
       for (const diagnostic of diagnostics) {
         lines.push(`${relative}:${diagnostic.range.start.line + 1} ${diagnostic.message}`);
         codes.push(`${relative}:${diagnostic.code}`);
@@ -68,7 +72,7 @@ describe.skipIf(!isLiveTestsEnabled())("package exported globals (#72)", () => {
   });
 
   it("keeps the exported type shape and signatures for consumer packages", async () => {
-    const run = await runConsumer();
+    const run = await runConsumer("Server/Misuse.lua");
 
     expect(run.codes).toContain("Server/Misuse.lua:undefined-field");
     expect(run.codes).toContain("Server/Misuse.lua:param-type-mismatch");
@@ -77,6 +81,12 @@ describe.skipIf(!isLiveTestsEnabled())("package exported globals (#72)", () => {
     expect(run.lines.join("\n")).toContain("Cannot assign `string` to parameter `Player`");
     expect(run.lines.join("\n")).toContain("Cannot assign `string` to parameter `integer`");
     expect(run.passed).toBe(false);
+  });
+
+  it("resolves exports behind spaced spellings and multi-statement closures (#73)", async () => {
+    const valid = await runConsumer("Server/Index.lua");
+
+    expect(valid.codes).toEqual([]);
   });
 
   it("does not evaluate the exporting package scripts as consumer files", async () => {

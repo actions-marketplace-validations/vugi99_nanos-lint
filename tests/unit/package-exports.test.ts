@@ -17,6 +17,22 @@ const EMPTY_REALMS: ResolvedDependencyRealms = {
   all: [],
 };
 
+/**
+ * Block balance of a Lua snippet: every `function` keyword opens a body that exactly one `end`
+ * closes, and every `repeat` one that exactly one `until` closes. The generated wrapper adds a
+ * balanced pair of its own, so a balanced mirror is one in which no script lost keywords.
+ */
+function blockBalance(lua: string): number {
+  let depth = 0;
+  for (const match of lua.matchAll(/\b(function|repeat|end|until)\b/g)) {
+    depth += match[1] === "end" || match[1] === "until" ? -1 : 1;
+  }
+  return depth;
+}
+
+/** Dependency package of the live exports fixture, reused here for the generator tests. */
+const FIXTURE_LIBRARY = path.resolve(__dirname, "..", "fixtures", "exports", "library");
+
 describe("Package.Export recognition (#72)", () => {
   let tempDir: string;
 
@@ -52,6 +68,26 @@ describe("Package.Export recognition (#72)", () => {
       expect(calls[2]?.expression).toBe("{ x = 1 }");
     });
 
+    it("accepts a newline between the engine call tokens (#73)", () => {
+      const source = 'Package\n\t.Export("Newline", v)';
+      const calls = findPackageExports(source);
+
+      expect(calls.map((call) => call.name)).toEqual(["Newline"]);
+      expect(source.slice(calls[0]!.start, calls[0]!.end)).toBe(source);
+    });
+
+    it("still ignores the look-alike spellings of the call", () => {
+      const source = [
+        'MyPackage.Export("A", a)',
+        'PackageX.Export("B", b)',
+        'Package:Export("C", c)',
+        "local Package = {}",
+        'Package.Import("D")',
+      ].join("\n");
+
+      expect(findPackageExports(source)).toEqual([]);
+    });
+
     it("keeps nested parentheses and commas inside the exported expression", () => {
       const source = 'Package.Export("A", f(g(1, 2), { a = 3, b = 4 }))';
       const calls = findPackageExports(source);
@@ -59,6 +95,42 @@ describe("Package.Export recognition (#72)", () => {
       expect(calls).toHaveLength(1);
       expect(calls[0]?.expression).toBe("f(g(1, 2), { a = 3, b = 4 })");
       expect(calls[0]?.end).toBe(source.length);
+    });
+
+    it("keeps commas that belong to a block inside the exported expression (#73)", () => {
+      const inline = 'Package.Export("Pair", function() return 1, "two" end)';
+      expect(findPackageExports(inline)[0]?.expression).toBe('function() return 1, "two" end');
+
+      const source = [
+        'Package.Export("Closure", function()',
+        '    local first, second = 1, "two"',
+        "    if first > 0 then",
+        "        for _, value in ipairs({ 1, 2 }) do",
+        "            return first, value",
+        "        end",
+        "    end",
+        '    return 0, "none"',
+        "end)",
+      ].join("\n");
+      const calls = findPackageExports(source);
+
+      expect(calls).toHaveLength(1);
+      // The whole body survives, closing keywords included: truncating it at the first
+      // statement comma would drop the `end` and produce an unparsable binding file.
+      expect(calls[0]?.expression).toBe(source.slice(source.indexOf("function"), -1));
+      expect(calls[0]?.expression.endsWith("end")).toBe(true);
+    });
+
+    it("still splits arguments around a block-valued export", () => {
+      // The function body closes before the separator, so the separator must still split.
+      const source = 'Package.Export("Block", function() return 1, 2 end, extra)';
+      const calls = findPackageExports(source);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.expression).toBe("function() return 1, 2 end");
+      expect(source.slice(calls[0]!.start, calls[0]!.end)).toBe(
+        'Package.Export("Block", function() return 1, 2 end, extra)',
+      );
     });
 
     it("ignores calls hidden in comments and strings", () => {
@@ -150,6 +222,24 @@ describe("Package.Export recognition (#72)", () => {
       expect(buildExportBindingShadow("local a = 1\n", "/deps/pkg/a.lua")).toBeNull();
       expect(buildExportBindingShadow("Package.Export(name, value)", "/deps/pkg/b.lua")).toBeNull();
     });
+
+    it("keeps a multi-statement inline function body intact (#73)", () => {
+      const body = [
+        "function()",
+        '    local first, second = 1, "two"',
+        "    return first, second",
+        "end",
+      ].join("\n");
+      const shadow = buildExportBindingShadow(
+        `Package.Export("Closure", ${body})\n`,
+        "/deps/pkg/Closures.lua",
+      );
+
+      expect(shadow).toContain(`_nanos_lint_exports["Closure"] = ${body}`);
+      // A body truncated at its first statement comma would leave a dangling `local first`
+      // and drop the function's `end`, so the wrapper would no longer balance.
+      expect(shadow).toContain("    return first, second\nend\nend\n");
+    });
   });
 
   it("classifies bindable global names", () => {
@@ -170,6 +260,19 @@ describe("Package.Export recognition (#72)", () => {
         fs.writeFileSync(target, content);
       }
       return root;
+    };
+
+    /** Reads back what the generator wrote for every mirrored fixture script. */
+    const mirrorFixtureLibrary = (): string => {
+      const bindings = generatePackageExportBindings(
+        { ...EMPTY_REALMS, server: [FIXTURE_LIBRARY], all: [FIXTURE_LIBRARY] },
+        { tempRoot: tempDir },
+      );
+      try {
+        return bindings.all.map((file) => fs.readFileSync(file, "utf-8")).join("\n");
+      } finally {
+        bindings.cleanup();
+      }
     };
 
     it("mirrors realm scripts into generated libraries for the matching realms only", () => {
@@ -223,6 +326,43 @@ describe("Package.Export recognition (#72)", () => {
       expect(bindings.all).toEqual([]);
       expect(bindings.directory).toBeNull();
       bindings.cleanup();
+    });
+
+    it("mirrors the live fixture package without truncating any script (#73)", () => {
+      const mirrored = mirrorFixtureLibrary();
+      const scripts = fs
+        .readdirSync(path.join(FIXTURE_LIBRARY, "Server"))
+        .filter((name) => name.endsWith(".lua"));
+      expect(scripts.length).toBeGreaterThan(0);
+
+      // A scan that splits the Package.Export arguments on a comma inside a block truncates
+      // the value expression and takes the closing keywords of the script with it, so the
+      // mirrored Lua must still balance on its own.
+      expect(blockBalance(mirrored)).toBe(0);
+
+      const exported = ["ExportsLibraryClosures", "ExportsLibraryScalar", "ExportsLibrarySpaced"];
+      for (const name of exported) {
+        expect(mirrored).toContain(`${name} = _nanos_lint_exports["${name}"]`);
+      }
+    });
+
+    it("mirrors a spaced engine call into a generated library (#73)", () => {
+      const pkg = createPackage({
+        "Server/Spaced.lua": 'Package . Export ( "SpacedApi" , {}\n)\n',
+      });
+      const bindings = generatePackageExportBindings(
+        { ...EMPTY_REALMS, server: [pkg], all: [pkg] },
+        { tempRoot: tempDir },
+      );
+
+      try {
+        expect(bindings.all).toHaveLength(1);
+        expect(fs.readFileSync(bindings.all[0]!, "utf-8")).toContain(
+          'SpacedApi = _nanos_lint_exports["SpacedApi"]',
+        );
+      } finally {
+        bindings.cleanup();
+      }
     });
 
     it("accepts explicit dependency Lua files and missing paths", () => {

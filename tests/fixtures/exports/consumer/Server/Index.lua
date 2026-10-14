@@ -1,7 +1,12 @@
--- Valid consumer: both globals are exported by the dependency package.
+-- Valid consumer: every global below is exported by the dependency package.
 Package.Subscribe("Load", function()
     ExportsLibraryPerms.LoadPlayer(Player.GetAll()[1])
     Console.Log("loaded: " .. tostring(ExportsLibraryPerms.GetLoadedCount()))
     ExportsLibraryNoise.Play(1)
     Console.Log("noise: " .. tostring(ExportsLibraryNoise.Count()))
+    Console.Log("version: " .. tostring(ExportsLibraryAuthoring.Version))
+    Console.Log("pair: " .. tostring(ExportsLibraryPair()))
+    Console.Log("closure: " .. tostring(ExportsLibraryClosures()))
+    Console.Log("scalar: " .. tostring(ExportsLibraryScalar.Count()))
+    Console.Log("spaced: " .. tostring(ExportsLibrarySpaced.Count()))
 end)
